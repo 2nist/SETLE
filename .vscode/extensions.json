@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "ms-vscode.cmake-tools",
+    "ms-vscode.cpptools",
+    "xaver.clang-format",
+    "yzhang.markdown-all-in-one",
+    "davidanson.vscode-markdownlint",
+    "tomoki1207.pdf"
+  ]
+}

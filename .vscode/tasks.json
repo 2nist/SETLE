@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "SETLE: bootstrap dependencies",
+      "type": "shell",
+      "command": "$required = @('modules/JUCE','modules/tracktion_engine','modules/melatonin_inspector','modules/pitch_detector','modules/audio_fft','modules/audio_fft/AudioFFT/AudioFFT.h','modules/fontaudio/wrappers/juce/module/fontaudio','modules/cello'); $missing = $required | Where-Object { -not (Test-Path $_) }; if ($missing.Count -eq 0) { Write-Host 'All required module paths are present.'; exit 0 }; Write-Host ('Missing required module paths: ' + ($missing -join ', ')); if (Test-Path '.git') { git submodule update --init --recursive; if (Test-Path 'modules/audio_fft') { git -C modules/audio_fft submodule update --init --recursive }; exit $LASTEXITCODE }; Write-Error 'Missing required modules and .git was not found. Re-clone with --recurse-submodules or copy modules/ manually.'; exit 1",
+      "problemMatcher": []
+    },
+    {
+      "label": "SETLE: configure (Debug)",
+      "type": "shell",
+      "command": "cmake --preset windows-debug",
+      "dependsOn": "SETLE: bootstrap dependencies",
+      "problemMatcher": []
+    },
+    {
+      "label": "SETLE: build (Debug)",
+      "type": "shell",
+      "command": "cmake --build --preset windows-debug --target SETLE",
+      "dependsOn": "SETLE: configure (Debug)",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "SETLE: configure (Release)",
+      "type": "shell",
+      "command": "cmake --preset windows-release",
+      "dependsOn": "SETLE: bootstrap dependencies",
+      "problemMatcher": []
+    },
+    {
+      "label": "SETLE: build (Release)",
+      "type": "shell",
+      "command": "cmake --build --preset windows-release --target SETLE",
+      "dependsOn": "SETLE: configure (Release)",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "SETLE: run (Debug)",
+      "type": "shell",
+      "command": "$exe = Join-Path '${workspaceFolder}' 'build/windows-debug/SETLE_artefacts/Debug/SETLE.exe'; if (-not (Test-Path $exe)) { Write-Error ('Executable not found: ' + $exe + '. Run ''SETLE: build (Debug)'' first.'); exit 1 }; & $exe",
+      "dependsOn": "SETLE: build (Debug)",
+      "problemMatcher": []
+    },
+    {
+      "label": "SETLE: clean preset builds",
+      "type": "shell",
+      "command": "if (Test-Path build/windows-debug) { Remove-Item -Recurse -Force build/windows-debug }; if (Test-Path build/windows-release) { Remove-Item -Recurse -Force build/windows-release }; Write-Host 'Removed preset build directories.'",
+      "problemMatcher": []
+    }
+  ]
+}

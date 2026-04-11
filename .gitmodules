@@ -1,0 +1,21 @@
+[submodule "modules/JUCE"]
+	path = modules/JUCE
+	url = https://github.com/juce-framework/JUCE.git
+[submodule "modules/tracktion_engine"]
+	path = modules/tracktion_engine
+	url = https://github.com/Tracktion/tracktion_engine.git
+[submodule "modules/melatonin_inspector"]
+	path = modules/melatonin_inspector
+	url = https://github.com/sudara/melatonin_inspector.git
+[submodule "modules/audio_fft"]
+	path = modules/audio_fft
+	url = https://github.com/adamski/audio_fft.git
+[submodule "modules/pitch_detector"]
+	path = modules/pitch_detector
+	url = https://github.com/adamski/pitch_detector.git
+[submodule "modules/fontaudio"]
+	path = modules/fontaudio
+	url = https://github.com/fefanto/fontaudio.git
+[submodule "modules/cello"]
+	path = modules/cello
+	url = https://github.com/bgporter/cello.git

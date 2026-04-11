@@ -1,0 +1,22 @@
+{
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": true,
+  "cmake.defaultConfigurePreset": "windows-debug",
+  "cmake.defaultBuildPreset": "windows-debug",
+  "cmake.buildBeforeRun": true,
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+  "C_Cpp.formatting": "clangFormat",
+  "editor.formatOnSave": true,
+  "files.associations": {
+    "*.ipp": "cpp",
+    "*.tcc": "cpp"
+  },
+  "search.exclude": {
+    "**/build": true
+  },
+  "[markdown]": {
+    "editor.wordWrap": "on"
+  }
+}

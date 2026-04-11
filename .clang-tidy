@@ -1,0 +1,11 @@
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  readability-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using
+WarningsAsErrors: ''
+HeaderFilterRegex: 'source/.*'
+FormatStyle: file
