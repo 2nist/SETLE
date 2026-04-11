@@ -37,20 +37,36 @@ jobs:
         shell: pwsh
         run: |
           # tracktion_engine: userBounds -> totalArea (JUCE 8 Displays API rename)
+          # Arrow member access (->userBounds) so use bare word match, not \.
           $te = "modules/tracktion_engine/modules/tracktion_engine/plugins/tracktion_PluginWindowState.cpp"
-          (Get-Content $te -Raw) -replace '\.userBounds\b', '.totalArea' | Set-Content $te -NoNewline
+          $teContent = Get-Content $te -Raw
+          if ($teContent -match '\buserBounds\b') {
+              $teContent -replace '\buserBounds\b', 'totalArea' | Set-Content $te -NoNewline
+              Write-Host "Patched: userBounds -> totalArea in tracktion_PluginWindowState.cpp"
+          } else {
+              Write-Host "WARNING: userBounds not found in tracktion_PluginWindowState.cpp — already patched or path wrong"
+          }
 
           # fontaudio: remove Projucer-only AppConfig.h include
           $fa = "modules/fontaudio/wrappers/juce/module/fontaudio/fontaudio.cpp"
-          (Get-Content $fa -Raw) -replace '(?m)^#include\s+"AppConfig\.h"\r?\n', '' | Set-Content $fa -NoNewline
+          $faContent = Get-Content $fa -Raw
+          if ($faContent -match '#include\s+"AppConfig\.h"') {
+              $faContent -replace '(?m)^#include\s+"AppConfig\.h"\r?\n', '' | Set-Content $fa -NoNewline
+              Write-Host "Patched: removed AppConfig.h from fontaudio.cpp"
+          } else {
+              Write-Host "WARNING: AppConfig.h not found in fontaudio.cpp — already patched or path wrong"
+          }
 
           # cello: remove Projucer-only JuceHeader.h includes from all cello .cpp files
+          $celloPatchCount = 0
           Get-ChildItem "modules/cello/cello" -Filter "*.cpp" | ForEach-Object {
               $c = Get-Content $_.FullName -Raw
               if ($c -match '#include\s+"JuceHeader\.h"') {
                   $c -replace '(?m)^#include\s+"JuceHeader\.h"\r?\n', '' | Set-Content $_.FullName -NoNewline
+                  $celloPatchCount++
               }
           }
+          Write-Host "Patched: removed JuceHeader.h from $celloPatchCount cello .cpp file(s)"
 
           # cello_object.cpp needs explicit cello_path.h + cello_query.h after removing JuceHeader.h
           $co = "modules/cello/cello/cello_object.cpp"
