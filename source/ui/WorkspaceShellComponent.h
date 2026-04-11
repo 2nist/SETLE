@@ -108,6 +108,13 @@ private:
     juce::String selectedChordId;
     juce::String selectedNoteId;
 
+    // TRANSIENT UI STATE — never persist these to SetleSongModel.
+    // They reset on app launch. Keep them on the component, not the model.
+    int theoryCurrentRepeatIndex { 1 };
+    juce::String theorySelectedRepeatIndices;
+    juce::String theoryScope;
+    juce::String theorySnap { "1/16" };
+
     juce::Component theoryEditorPanel;
     juce::Label theoryEditorTitle;
     juce::Label theoryEditorHint;

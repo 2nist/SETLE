@@ -193,6 +193,9 @@ SectionProgressionRef SectionProgressionRef::create(const juce::String& progress
     tree.setProperty(Schema::progressionIdProp, progressionId, nullptr);
     tree.setProperty(Schema::orderIndexProp, orderIndex, nullptr);
     tree.setProperty(Schema::variantNameProp, variantName, nullptr);
+    tree.setProperty(Schema::repeatScopeProp, "all", nullptr);
+    tree.setProperty(Schema::repeatSelectionProp, "all", nullptr);
+    tree.setProperty(Schema::repeatIndicesProp, "", nullptr);
     return SectionProgressionRef(tree);
 }
 
@@ -202,10 +205,16 @@ juce::ValueTree SectionProgressionRef::valueTree() const { return state; }
 juce::String SectionProgressionRef::getProgressionId() const { return getString(state, Schema::progressionIdProp); }
 int SectionProgressionRef::getOrderIndex() const { return getInt(state, Schema::orderIndexProp, 0); }
 juce::String SectionProgressionRef::getVariantName() const { return getString(state, Schema::variantNameProp); }
+juce::String SectionProgressionRef::getRepeatScope() const { return getString(state, Schema::repeatScopeProp, "all"); }
+juce::String SectionProgressionRef::getRepeatSelection() const { return getString(state, Schema::repeatSelectionProp, "all"); }
+juce::String SectionProgressionRef::getRepeatIndices() const { return getString(state, Schema::repeatIndicesProp, ""); }
 
 void SectionProgressionRef::setProgressionId(const juce::String& progressionId) { state.setProperty(Schema::progressionIdProp, progressionId, nullptr); }
 void SectionProgressionRef::setOrderIndex(int orderIndex) { state.setProperty(Schema::orderIndexProp, orderIndex, nullptr); }
 void SectionProgressionRef::setVariantName(const juce::String& variantName) { state.setProperty(Schema::variantNameProp, variantName, nullptr); }
+void SectionProgressionRef::setRepeatScope(const juce::String& repeatScope) { state.setProperty(Schema::repeatScopeProp, repeatScope, nullptr); }
+void SectionProgressionRef::setRepeatSelection(const juce::String& repeatSelection) { state.setProperty(Schema::repeatSelectionProp, repeatSelection, nullptr); }
+void SectionProgressionRef::setRepeatIndices(const juce::String& repeatIndices) { state.setProperty(Schema::repeatIndicesProp, repeatIndices, nullptr); }
 
 Section::Section(juce::ValueTree tree)
     : state(std::move(tree))
@@ -316,6 +325,9 @@ std::optional<Song> Song::loadFromFile(const juce::File& file, StorageFormat for
     {
         juce::MemoryBlock data;
         if (!file.loadFileAsData(data))
+            return std::nullopt;
+
+        if (data.getSize() == 0)
             return std::nullopt;
 
         if (format == StorageFormat::binary)
@@ -438,7 +450,11 @@ juce::Result Song::saveToFile(const juce::File& file, StorageFormat format) cons
 
     auto parent = file.getParentDirectory();
     if (parent != juce::File() && !parent.exists())
-        parent.createDirectory();
+    {
+        const auto createResult = parent.createDirectory();
+        if (createResult.failed())
+            return juce::Result::fail("Failed creating song directory: " + createResult.getErrorMessage());
+    }
 
     if (format == StorageFormat::xml)
     {
@@ -455,11 +471,23 @@ juce::Result Song::saveToFile(const juce::File& file, StorageFormat format) cons
     if (format == StorageFormat::binary)
     {
         state.writeToStream(stream);
+        stream.flush();
+        if (stream.getStatus().failed())
+            return juce::Result::fail("Failed writing binary song file");
+
         return juce::Result::ok();
     }
 
-    juce::GZIPCompressorOutputStream gzip(stream);
-    state.writeToStream(gzip);
+    {
+        juce::GZIPCompressorOutputStream gzip(stream);
+        state.writeToStream(gzip);
+        gzip.flush();
+    }
+
+    stream.flush();
+    if (stream.getStatus().failed())
+        return juce::Result::fail("Failed writing GZIP song file");
+
     return juce::Result::ok();
 }
 
@@ -488,18 +516,62 @@ void Song::ensureSchema()
     if (!isValid())
         return;
 
-    if (!state.hasProperty(Schema::schemaVersionProp))
-        state.setProperty(Schema::schemaVersionProp, Schema::version, nullptr);
+    const int persistedVersion = static_cast<int>(state.getProperty(Schema::schemaVersionProp, 0));
 
-    if (!state.hasProperty(Schema::titleProp))
-        state.setProperty(Schema::titleProp, "Untitled", nullptr);
+    // v0 → v1: baseline fields, container scaffolding, and scope metadata on
+    // SectionProgressionRef nodes.  Applies to any file saved before
+    // schemaVersion was stamped (persistedVersion == 0).
+    //
+    // Scope semantics introduced in v1:
+    //   repeatScope      — "all" | "occurrence" | "repeat" | "selectedRepeats"
+    //   repeatSelection  — "all" | "single" | "current" | "selected"
+    //   repeatIndices    — comma-separated 1-based repeat numbers, empty == all
+    if (persistedVersion < 1)
+    {
+        if (!state.hasProperty(Schema::titleProp))
+            state.setProperty(Schema::titleProp, "Untitled", nullptr);
 
-    if (!state.hasProperty(Schema::bpmProp))
-        state.setProperty(Schema::bpmProp, 120.0, nullptr);
+        if (!state.hasProperty(Schema::bpmProp))
+            state.setProperty(Schema::bpmProp, 120.0, nullptr);
 
-    getOrCreateContainer(Schema::progressionsContainerType);
-    getOrCreateContainer(Schema::sectionsContainerType);
-    getOrCreateContainer(Schema::transitionsContainerType);
+        getOrCreateContainer(Schema::progressionsContainerType);
+        auto sectionsContainer = getOrCreateContainer(Schema::sectionsContainerType);
+        getOrCreateContainer(Schema::transitionsContainerType);
+
+        for (auto sectionNode : sectionsContainer)
+        {
+            if (!sectionNode.hasType(Schema::sectionType))
+                continue;
+
+            for (auto sectionRefNode : sectionNode)
+            {
+                if (!sectionRefNode.hasType(Schema::sectionProgressionRefType))
+                    continue;
+
+                if (!sectionRefNode.hasProperty(Schema::repeatScopeProp))
+                    sectionRefNode.setProperty(Schema::repeatScopeProp, "all", nullptr);
+
+                if (!sectionRefNode.hasProperty(Schema::repeatSelectionProp))
+                    sectionRefNode.setProperty(Schema::repeatSelectionProp, "all", nullptr);
+
+                if (!sectionRefNode.hasProperty(Schema::repeatIndicesProp))
+                    sectionRefNode.setProperty(Schema::repeatIndicesProp, "", nullptr);
+            }
+        }
+    }
+    else
+    {
+        // For files already at v1+, ensure the containers exist in case any
+        // were omitted by an older serialiser.
+        getOrCreateContainer(Schema::progressionsContainerType);
+        getOrCreateContainer(Schema::sectionsContainerType);
+        getOrCreateContainer(Schema::transitionsContainerType);
+    }
+
+    // Future migration blocks go here:
+    // if (persistedVersion < 2) { ... }
+
+    state.setProperty(Schema::schemaVersionProp, Schema::version, nullptr);
 }
 
 } // namespace setle::model

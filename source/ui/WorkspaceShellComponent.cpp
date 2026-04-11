@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cmath>
+#include <cstdlib>
 #include <functional>
+#include <set>
 
 namespace setle::ui
 {
@@ -109,7 +112,15 @@ int parseIntOr(const juce::String& value, int fallback)
     if (trimmed.isEmpty())
         return fallback;
 
-    return trimmed.getIntValue();
+    const auto utf8 = trimmed.toRawUTF8();
+    char* end = nullptr;
+    errno = 0;
+    const auto parsed = std::strtol(utf8, &end, 10);
+
+    if (utf8 == end || *end != '\0' || errno == ERANGE)
+        return fallback;
+
+    return static_cast<int>(parsed);
 }
 
 double parseDoubleOr(const juce::String& value, double fallback)
@@ -118,12 +129,121 @@ double parseDoubleOr(const juce::String& value, double fallback)
     if (trimmed.isEmpty())
         return fallback;
 
-    return trimmed.getDoubleValue();
+    const auto utf8 = trimmed.toRawUTF8();
+    char* end = nullptr;
+    errno = 0;
+    const auto parsed = std::strtod(utf8, &end);
+
+    if (utf8 == end || *end != '\0' || errno == ERANGE)
+        return fallback;
+
+    return parsed;
 }
 
 float parseFloatOr(const juce::String& value, float fallback)
 {
     return static_cast<float>(parseDoubleOr(value, static_cast<double>(fallback)));
+}
+
+bool isStrictInt(const juce::String& value)
+{
+    const auto trimmed = value.trim();
+    if (trimmed.isEmpty())
+        return false;
+
+    const auto utf8 = trimmed.toRawUTF8();
+    char* end = nullptr;
+    errno = 0;
+    std::strtol(utf8, &end, 10);
+    return (utf8 != end && *end == '\0' && errno != ERANGE);
+}
+
+bool isStrictDouble(const juce::String& value)
+{
+    const auto trimmed = value.trim();
+    if (trimmed.isEmpty())
+        return false;
+
+    const auto utf8 = trimmed.toRawUTF8();
+    char* end = nullptr;
+    errno = 0;
+    std::strtod(utf8, &end);
+    return (utf8 != end && *end == '\0' && errno != ERANGE);
+}
+
+std::set<int> parseRepeatIndexSet(const juce::String& serialized)
+{
+    std::set<int> result;
+    const auto tokens = juce::StringArray::fromTokens(serialized, ",", "");
+
+    for (auto token : tokens)
+    {
+        token = token.trim();
+        if (token.isEmpty())
+            continue;
+
+        const auto dashIndex = token.indexOfChar('-');
+        if (dashIndex <= 0 || dashIndex >= token.length() - 1)
+        {
+            const auto value = token.getIntValue();
+            if (value > 0)
+                result.insert(value);
+            continue;
+        }
+
+        const auto left = token.substring(0, dashIndex).trim().getIntValue();
+        const auto right = token.substring(dashIndex + 1).trim().getIntValue();
+        if (left <= 0 || right <= 0)
+            continue;
+
+        const auto start = juce::jmin(left, right);
+        const auto end = juce::jmax(left, right);
+        for (int value = start; value <= end; ++value)
+            result.insert(value);
+    }
+
+    return result;
+}
+
+juce::String serializeRepeatIndexSet(const std::set<int>& indices)
+{
+    if (indices.empty())
+        return {};
+
+    juce::StringArray parts;
+
+    auto it = indices.begin();
+    while (it != indices.end())
+    {
+        const auto rangeStart = *it;
+        auto rangeEnd = rangeStart;
+        ++it;
+
+        while (it != indices.end() && *it == rangeEnd + 1)
+        {
+            rangeEnd = *it;
+            ++it;
+        }
+
+        if (rangeStart == rangeEnd)
+            parts.add(juce::String(rangeStart));
+        else
+            parts.add(juce::String(rangeStart) + "-" + juce::String(rangeEnd));
+    }
+
+    return parts.joinIntoString(",");
+}
+
+juce::String normalizeRepeatIndices(const juce::String& serialized, const juce::String& fallback)
+{
+    auto parsed = parseRepeatIndexSet(serialized);
+    if (parsed.empty())
+        parsed = parseRepeatIndexSet(fallback);
+
+    if (parsed.empty())
+        parsed.insert(1);
+
+    return serializeRepeatIndexSet(parsed);
 }
 } // namespace
 
@@ -1047,6 +1167,10 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
         if (activeEditorActionId == sectionEditTheory)
         {
             const auto name = theoryFieldEditor1.getText().trim();
+            const auto repeatText = theoryFieldEditor2.getText().trim();
+            if (repeatText.isNotEmpty() && !isStrictInt(repeatText))
+                return "Section edit rejected: Repeat Count must be an integer";
+
             const auto repeats = juce::jlimit(1, 32, parseIntOr(theoryFieldEditor2.getText(), section->getRepeatCount()));
             section->setName(name.isNotEmpty() ? name : section->getName());
             section->setRepeatCount(repeats);
@@ -1055,6 +1179,10 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
 
         if (activeEditorActionId == sectionSetRepeatPattern)
         {
+            const auto repeatText = theoryFieldEditor1.getText().trim();
+            if (repeatText.isNotEmpty() && !isStrictInt(repeatText))
+                return "Repeat pattern rejected: Repeat Count must be an integer";
+
             const auto repeats = juce::jlimit(1, 32, parseIntOr(theoryFieldEditor1.getText(), section->getRepeatCount()));
             section->setRepeatCount(repeats);
             return "Section repeat pattern updated from center editor";
@@ -1112,6 +1240,13 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
 
         if (activeEditorActionId == chordEdit)
         {
+            const auto rootText = theoryFieldEditor4.getText().trim();
+            const auto durationText = theoryFieldEditor5.getText().trim();
+            if (rootText.isNotEmpty() && !isStrictInt(rootText))
+                return "Chord edit rejected: Root MIDI must be an integer";
+            if (durationText.isNotEmpty() && !isStrictDouble(durationText))
+                return "Chord edit rejected: Duration Beats must be numeric";
+
             chord->setSymbol(theoryFieldEditor1.getText().trim().isNotEmpty()
                                  ? theoryFieldEditor1.getText().trim()
                                  : chord->getSymbol());
@@ -1195,6 +1330,20 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
 
         if (activeEditorActionId == noteEditTheory)
         {
+            const auto pitchText = theoryFieldEditor1.getText().trim();
+            const auto velocityText = theoryFieldEditor2.getText().trim();
+            const auto startText = theoryFieldEditor3.getText().trim();
+            const auto durationText = theoryFieldEditor4.getText().trim();
+
+            if (pitchText.isNotEmpty() && !isStrictInt(pitchText))
+                return "Note edit rejected: Pitch must be an integer";
+            if (velocityText.isNotEmpty() && !isStrictDouble(velocityText))
+                return "Note edit rejected: Velocity must be numeric";
+            if (startText.isNotEmpty() && !isStrictDouble(startText))
+                return "Note edit rejected: Start Beats must be numeric";
+            if (durationText.isNotEmpty() && !isStrictDouble(durationText))
+                return "Note edit rejected: Duration Beats must be numeric";
+
             note->setPitch(juce::jlimit(0, 127, parseIntOr(theoryFieldEditor1.getText(), note->getPitch())));
             note->setVelocity(juce::jlimit(0.0f, 1.0f, parseFloatOr(theoryFieldEditor2.getText(), note->getVelocity())));
             note->setStartBeats(juce::jmax(0.0, parseDoubleOr(theoryFieldEditor3.getText(), note->getStartBeats())));
@@ -1628,18 +1777,68 @@ juce::String WorkspaceShellComponent::runChordAction(int actionId)
         if (refs.empty())
             return "Scope change skipped: progression mapping unavailable";
 
-        auto ref = refs.front();
+        const auto selectedProgressionIdLocal = progression->getId();
+        const auto selectedBaseProgressionId = progression->getVariantOf().isNotEmpty()
+                                                   ? progression->getVariantOf()
+                                                   : selectedProgressionIdLocal;
+        const auto currentRepeatIndex = juce::jmax(1, theoryCurrentRepeatIndex);
+        const auto currentRepeatIndices = juce::String(currentRepeatIndex);
+        const auto selectedRepeatIndices = normalizeRepeatIndices(
+            theorySelectedRepeatIndices.isNotEmpty() ? theorySelectedRepeatIndices : currentRepeatIndices,
+            currentRepeatIndices);
+
+        auto refMatchesSelection = [this, &selectedProgressionIdLocal, &selectedBaseProgressionId](const model::SectionProgressionRef& candidate)
+        {
+            const auto candidateProgressionId = candidate.getProgressionId();
+            if (candidateProgressionId == selectedProgressionIdLocal || candidateProgressionId == selectedBaseProgressionId)
+                return true;
+
+            if (auto candidateProgression = songState.findProgressionById(candidateProgressionId))
+                return candidateProgression->getVariantOf() == selectedBaseProgressionId;
+
+            return false;
+        };
+
+        int targetRefIndex = -1;
+        for (size_t i = 0; i < refs.size(); ++i)
+        {
+            if (refMatchesSelection(refs[i]))
+            {
+                targetRefIndex = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (targetRefIndex < 0)
+        {
+            // New ref created with default scope="all"; the actionId blocks below
+            // immediately override it with the requested scope.
+            const auto nextOrderIndex = static_cast<int>(refs.size());
+            section->addProgressionRef(model::SectionProgressionRef::create(selectedProgressionIdLocal, nextOrderIndex, ""));
+            refs = section->getProgressionRefs();
+            targetRefIndex = static_cast<int>(refs.size()) - 1;
+        }
 
         if (actionId == chordScopeAllRepeats)
         {
-            if (auto currentProgression = songState.findProgressionById(ref.getProgressionId()))
+            for (auto& sectionRef : refs)
             {
-                if (currentProgression->getVariantOf().isNotEmpty())
-                    ref.setProgressionId(currentProgression->getVariantOf());
+                if (!refMatchesSelection(sectionRef))
+                    continue;
+
+                if (auto currentProgression = songState.findProgressionById(sectionRef.getProgressionId()))
+                {
+                    if (currentProgression->getVariantOf().isNotEmpty())
+                        sectionRef.setProgressionId(currentProgression->getVariantOf());
+                }
+
+                sectionRef.setVariantName("");
+                sectionRef.setRepeatScope("all");
+                sectionRef.setRepeatSelection("all");
+                sectionRef.setRepeatIndices("");
             }
 
-            ref.setVariantName("");
-            songState.valueTree().setProperty("theoryScope", "allRepeats", nullptr);
+            theoryScope = "allRepeats";
             return "Theory scope set to all repeats (base progression)";
         }
 
@@ -1647,7 +1846,7 @@ juce::String WorkspaceShellComponent::runChordAction(int actionId)
             progression->getName() + " Variant " + juce::String(static_cast<int>(songState.getProgressions().size()) + 1),
             progression->getKey(),
             progression->getMode());
-        variant.setVariantOf(progression->getId());
+        variant.setVariantOf(selectedBaseProgressionId);
         variant.setLengthBeats(progression->getLengthBeats());
 
         for (const auto& sourceChord : progression->getChords())
@@ -1670,24 +1869,46 @@ juce::String WorkspaceShellComponent::runChordAction(int actionId)
         }
 
         songState.addProgression(variant);
-        ref.setProgressionId(variant.getId());
+        refs[static_cast<size_t>(targetRefIndex)].setProgressionId(variant.getId());
 
         if (actionId == chordScopeOccurrence)
         {
-            ref.setVariantName("occurrenceOnly");
-            songState.valueTree().setProperty("theoryScope", "thisOccurrence", nullptr);
+            refs[static_cast<size_t>(targetRefIndex)].setVariantName("occurrenceOnly");
+            refs[static_cast<size_t>(targetRefIndex)].setRepeatScope("occurrence");
+            refs[static_cast<size_t>(targetRefIndex)].setRepeatSelection("single");
+            refs[static_cast<size_t>(targetRefIndex)].setRepeatIndices(currentRepeatIndices);
+            theoryScope = "thisOccurrence";
             return "Theory scope set to this occurrence (variant generated)";
         }
 
+        // Guard: selectedRepeats requires an explicit selection — never fall silently through to repeat 1.
+        if (actionId == chordScopeSelectedRepeats && theorySelectedRepeatIndices.trim().isEmpty())
+            return "Scope change skipped: no repeat indices selected. Set repeat indices in the theory editor first.";
+
         if (actionId == chordScopeSelectedRepeats)
         {
-            ref.setVariantName("selectedRepeats");
-            songState.valueTree().setProperty("theoryScope", "selectedRepeats", nullptr);
+            for (auto& sectionRef : refs)
+            {
+                if (!refMatchesSelection(sectionRef))
+                    continue;
+
+                sectionRef.setProgressionId(variant.getId());
+                sectionRef.setVariantName("selectedRepeats");
+                sectionRef.setRepeatScope("selectedRepeats");
+                sectionRef.setRepeatSelection("selected");
+                sectionRef.setRepeatIndices(selectedRepeatIndices);
+            }
+
+            theorySelectedRepeatIndices = selectedRepeatIndices;
+            theoryScope = "selectedRepeats";
             return "Theory scope set to selected repeats (variant generated)";
         }
 
-        ref.setVariantName("thisRepeat");
-        songState.valueTree().setProperty("theoryScope", "thisRepeat", nullptr);
+        refs[static_cast<size_t>(targetRefIndex)].setVariantName("thisRepeat");
+        refs[static_cast<size_t>(targetRefIndex)].setRepeatScope("repeat");
+        refs[static_cast<size_t>(targetRefIndex)].setRepeatSelection("current");
+        refs[static_cast<size_t>(targetRefIndex)].setRepeatIndices(currentRepeatIndices);
+        theoryScope = "thisRepeat";
         return "Theory scope set to this repeat (variant generated)";
     }
 
@@ -1703,7 +1924,7 @@ juce::String WorkspaceShellComponent::runChordAction(int actionId)
         else if (actionId == chordSnapSixteenth) snapValue = "1/16";
         else if (actionId == chordSnapThirtySecond) snapValue = "1/32";
 
-        songState.valueTree().setProperty("theorySnap", snapValue, nullptr);
+        theorySnap = snapValue;
         return "Theory snap set to " + snapValue;
     }
 

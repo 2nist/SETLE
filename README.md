@@ -49,6 +49,7 @@ ideas as they happen. The theory engine annotates everything automatically.
 - [UI Layout](docs/UI_LAYOUT.md)
 - [UI Shell Implementation](docs/UI_SHELL_IMPLEMENTATION.md)
 - [Theory Interaction](docs/THEORY_INTERACTION.md)
+- [Development Plan](docs/DEVELOPMENT_PLAN.md)
 
 ## License
 
