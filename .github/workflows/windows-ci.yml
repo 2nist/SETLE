@@ -33,11 +33,33 @@ jobs:
       #     which was renamed to totalArea in JUCE 8. The upstream
       #     tracktion_engine repo is not yet updated; patch in CI.
       # -------------------------------------------------------
-      - name: Patch tracktion_engine for JUCE 8 Displays API
+      - name: Patch upstream submodules for standalone CMake builds
         shell: pwsh
         run: |
-          $file = "modules/tracktion_engine/modules/tracktion_engine/plugins/tracktion_PluginWindowState.cpp"
-          (Get-Content $file -Raw) -replace '\.userBounds\b', '.totalArea' | Set-Content $file -NoNewline
+          # tracktion_engine: userBounds -> totalArea (JUCE 8 Displays API rename)
+          $te = "modules/tracktion_engine/modules/tracktion_engine/plugins/tracktion_PluginWindowState.cpp"
+          (Get-Content $te -Raw) -replace '\.userBounds\b', '.totalArea' | Set-Content $te -NoNewline
+
+          # fontaudio: remove Projucer-only AppConfig.h include
+          $fa = "modules/fontaudio/wrappers/juce/module/fontaudio/fontaudio.cpp"
+          (Get-Content $fa -Raw) -replace '(?m)^#include\s+"AppConfig\.h"\r?\n', '' | Set-Content $fa -NoNewline
+
+          # cello: remove Projucer-only JuceHeader.h includes from all cello .cpp files
+          Get-ChildItem "modules/cello/cello" -Filter "*.cpp" | ForEach-Object {
+              $c = Get-Content $_.FullName -Raw
+              if ($c -match '#include\s+"JuceHeader\.h"') {
+                  $c -replace '(?m)^#include\s+"JuceHeader\.h"\r?\n', '' | Set-Content $_.FullName -NoNewline
+              }
+          }
+
+          # cello_object.cpp needs explicit cello_path.h + cello_query.h after removing JuceHeader.h
+          $co = "modules/cello/cello/cello_object.cpp"
+          if (Test-Path $co) {
+              $c = Get-Content $co -Raw
+              if ($c -notmatch '#include "cello_path\.h"') {
+                  $c -replace '(#include "cello_object\.h")', "`$1`n#include `"cello_path.h`"`n#include `"cello_query.h`"" | Set-Content $co -NoNewline
+              }
+          }
 
       # -------------------------------------------------------
       # 2. Cache the CMake build directory
