@@ -51,6 +51,30 @@ cmake --preset windows-debug
 cmake --build --preset windows-debug --target SETLE
 ```
 
+## Tests
+
+Model tests are enabled by default (`SETLE_BUILD_TESTS=ON`).
+
+Build test target:
+
+```bash
+cmake --preset windows-debug
+cmake --build --preset windows-debug --target setle_model_tests
+```
+
+Run tests via CTest from the preset build directory:
+
+```bash
+ctest --test-dir build/windows-debug --output-on-failure
+```
+
+If Tracktion example tests are present in your build tree and you only want
+the SETLE model suite, filter by name:
+
+```bash
+ctest --test-dir build/windows-debug -R setle_model_tests --output-on-failure
+```
+
 ## Troubleshooting
 
 - If configure fails with missing `modules/*`, run:

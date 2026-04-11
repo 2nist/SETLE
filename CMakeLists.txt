@@ -13,6 +13,7 @@ option(SETLE_ENABLE_MELATONIN_INSPECTOR "Enable melatonin_inspector module" ON)
 option(SETLE_ENABLE_PITCH_DETECTOR "Enable pitch_detector + audio_fft modules" ON)
 option(SETLE_ENABLE_FONTAUDIO "Enable fontaudio JUCE module" ON)
 option(SETLE_ENABLE_CELLO "Enable cello JUCE module" ON)
+option(SETLE_BUILD_TESTS "Build SETLE model tests" ON)
 
 # ---------------------------------------------------------------
 # Dependency preflight checks
@@ -174,3 +175,24 @@ target_link_libraries(SETLE PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
 )
+
+if(SETLE_BUILD_TESTS)
+    enable_testing()
+
+    add_executable(setle_model_tests
+        source/tests/SetleSongModelTests.cpp
+        source/model/SetleSongModel.cpp
+        source/model/SetleSongModel.h
+    )
+
+    target_link_libraries(setle_model_tests PRIVATE
+        juce::juce_core
+        juce::juce_data_structures
+    )
+
+    target_compile_definitions(setle_model_tests PRIVATE
+        JUCE_USE_CURL=0
+    )
+
+    add_test(NAME setle_model_tests COMMAND setle_model_tests)
+endif()

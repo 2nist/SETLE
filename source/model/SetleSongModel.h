@@ -58,6 +58,12 @@ struct Schema
     static inline const juce::Identifier progressionIdProp { "progressionId" };
     static inline const juce::Identifier orderIndexProp { "orderIndex" };
     static inline const juce::Identifier variantNameProp { "variantName" };
+    static inline const juce::Identifier repeatScopeProp { "repeatScope" };
+    // NOTE: repeatSelection is redundant with repeatScope + repeatIndices.
+    // Preserved for schema v1 compatibility. Do not add new reads of this
+    // field. Scheduled for removal in schema v2.
+    static inline const juce::Identifier repeatSelectionProp { "repeatSelection" };
+    static inline const juce::Identifier repeatIndicesProp { "repeatIndices" };
 
     static inline const juce::Identifier fromSectionIdProp { "fromSectionId" };
     static inline const juce::Identifier toSectionIdProp { "toSectionId" };
@@ -175,10 +181,16 @@ public:
     juce::String getProgressionId() const;
     int getOrderIndex() const;
     juce::String getVariantName() const;
+    juce::String getRepeatScope() const;
+    juce::String getRepeatSelection() const;
+    juce::String getRepeatIndices() const;
 
     void setProgressionId(const juce::String& progressionId);
     void setOrderIndex(int orderIndex);
     void setVariantName(const juce::String& variantName);
+    void setRepeatScope(const juce::String& repeatScope);
+    void setRepeatSelection(const juce::String& repeatSelection);
+    void setRepeatIndices(const juce::String& repeatIndices);
 
 private:
     juce::ValueTree state;

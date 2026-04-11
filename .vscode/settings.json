@@ -18,5 +18,9 @@
   },
   "[markdown]": {
     "editor.wordWrap": "on"
+  },
+  "claudeCodeChat.permissions.yoloMode": true,
+  "terminal.integrated.env.windows": {
+    "PATH": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin;${env:PATH}"
   }
 }

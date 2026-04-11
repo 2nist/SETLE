@@ -51,6 +51,9 @@ This schema defines the initial `ValueTree`-backed model used by SETLE.
 - `progressionId` (string)
 - `orderIndex` (int)
 - `variantName` (string)
+- `repeatScope` (string, default `all`; values such as `all`, `occurrence`, `repeat`, `selectedRepeats`)
+- `repeatSelection` (string, default `all`; selection descriptor for repeat targeting)
+- `repeatIndices` (string, serialized repeat index set/ranges, e.g. `1,3,5-7`)
 
 ### `section`
 - `id` (string UUID)

@@ -1,0 +1,86 @@
+name: Windows Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Windows Debug — build + model tests
+    runs-on: windows-latest
+
+    steps:
+      # -------------------------------------------------------
+      # 1. Checkout with submodules
+      #    fetch-depth:1 keeps it fast; submodules are the
+      #    slow part — recursive is required for JUCE + tracktion
+      # -------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      # -------------------------------------------------------
+      # 2. Cache the CMake build directory
+      #    Keyed on CMakeLists.txt + preset file so cache busts
+      #    when either changes. Module hashes omitted to avoid
+      #    invalidating on submodule pointer updates.
+      # -------------------------------------------------------
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: build/windows-debug
+          key: cmake-win-debug-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: |
+            cmake-win-debug-
+
+      # -------------------------------------------------------
+      # 3. Configure using the windows-debug CMake preset
+      #    Preset sets: VS 17 2022, x64, Debug, all modules ON
+      #    SETLE_BUILD_TESTS defaults to ON in CMakeLists.txt
+      # -------------------------------------------------------
+      - name: Configure (windows-debug preset)
+        run: cmake --preset windows-debug
+        shell: pwsh
+
+      # -------------------------------------------------------
+      # 4. Build app + test binary
+      #    Use the windows-debug build preset (matches configure)
+      #    --parallel keeps it moving on the 2-core GH runner
+      # -------------------------------------------------------
+      - name: Build SETLE and setle_model_tests
+        run: |
+          cmake --build --preset windows-debug `
+                --target SETLE setle_model_tests `
+                --parallel 2
+        shell: pwsh
+
+      # -------------------------------------------------------
+      # 5. Run model tests via CTest
+      #    Working dir must be the build output directory so
+      #    CTest finds the test registration from add_test()
+      # -------------------------------------------------------
+      - name: Run model tests
+        working-directory: build/windows-debug
+        run: ctest --build-config Debug -V --output-on-failure
+        shell: pwsh
+
+      # -------------------------------------------------------
+      # 6. Upload test logs on failure
+      # -------------------------------------------------------
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ github.run_number }}
+          path: |
+            build/windows-debug/Testing/Temporary/LastTest.log
+            build/windows-debug/Testing/Temporary/LastTestsFailed.log
+          retention-days: 7
