@@ -28,6 +28,18 @@ jobs:
           fetch-depth: 1
 
       # -------------------------------------------------------
+      # 1b. Patch upstream submodule incompatibilities
+      #     tracktion_engine uses juce::Displays::Display::userBounds
+      #     which was renamed to totalArea in JUCE 8. The upstream
+      #     tracktion_engine repo is not yet updated; patch in CI.
+      # -------------------------------------------------------
+      - name: Patch tracktion_engine for JUCE 8 Displays API
+        shell: pwsh
+        run: |
+          $file = "modules/tracktion_engine/modules/tracktion_engine/plugins/tracktion_PluginWindowState.cpp"
+          (Get-Content $file -Raw) -replace '\.userBounds\b', '.totalArea' | Set-Content $file -NoNewline
+
+      # -------------------------------------------------------
       # 2. Cache the CMake build directory
       #    Keyed on CMakeLists.txt + preset file so cache busts
       #    when either changes. Module hashes omitted to avoid
