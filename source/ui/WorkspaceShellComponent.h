@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+#include <map>
 #include <vector>
 
 #include "../model/SetleSongModel.h"
@@ -12,7 +13,8 @@ namespace te = tracktion::engine;
 namespace setle::ui
 {
 
-class WorkspaceShellComponent final : public juce::Component
+class WorkspaceShellComponent final : public juce::Component,
+                                      private juce::Timer
 {
 public:
     explicit WorkspaceShellComponent(te::Engine& engine);
@@ -71,6 +73,7 @@ private:
     void commitTheoryEditorAction();
     juce::String applyTheoryEditorAction();
     void updateSelectionFromSelector();
+    void runTheoryInferenceForSelectedChord();
 
     std::optional<model::Section> getSelectedSection();
     std::optional<model::Progression> getSelectedProgression();
@@ -79,11 +82,13 @@ private:
     void ensureSelectionDefaults();
 
     juce::String summarizeSongState() const;
+    double getProgressionLengthSeconds() const;
 
     void refreshTimelineData();
     void clampLayoutValues(int totalTopWidth, int totalBodyHeight);
     void loadLayoutState();
     void saveLayoutState();
+    void timerCallback() override;
 
     te::Engine& engineRef;
     std::unique_ptr<te::Edit> edit;
@@ -114,6 +119,7 @@ private:
     juce::Label interactionStatus;
 
     juce::ApplicationProperties appProperties;
+    std::map<std::pair<juce::String, juce::String>, juce::Colour> boundaryColors;
     model::Song songState;
     std::vector<juce::String> undoSnapshots;
     std::vector<juce::String> redoSnapshots;

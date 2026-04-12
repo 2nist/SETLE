@@ -8,6 +8,10 @@
 #include <functional>
 #include <set>
 
+#include "../theory/ChordIdentifier.h"
+#include "../theory/DiatonicHarmony.h"
+#include "../theory/TransitionAnalyzer.h"
+
 namespace te = tracktion::engine;
 
 namespace setle::ui
@@ -247,6 +251,56 @@ juce::String normalizeRepeatIndices(const juce::String& serialized, const juce::
 
     return serializeRepeatIndexSet(parsed);
 }
+
+juce::Colour functionTintFor(const juce::String& fn)
+{
+    const auto upper = fn.trim().toUpperCase();
+    if (upper == "T" || upper == "TONIC") return juce::Colour(0x22d4a057);
+    if (upper == "PD" || upper == "PREDOMINANT") return juce::Colour(0x224a7fa5);
+    if (upper == "D" || upper == "DOMINANT") return juce::Colour(0x22c44040);
+    return juce::Colours::transparentBlack;
+}
+
+std::vector<int> qualityIntervals(const juce::String& quality)
+{
+    const auto q = quality.toLowerCase();
+    if (q.contains("major7")) return { 0, 4, 7, 11 };
+    if (q.contains("minor7")) return { 0, 3, 7, 10 };
+    if (q.contains("dominant7")) return { 0, 4, 7, 10 };
+    if (q.contains("halfdiminished")) return { 0, 3, 6, 10 };
+    if (q.contains("diminished")) return { 0, 3, 6 };
+    if (q.contains("augmented")) return { 0, 4, 8 };
+    if (q.contains("sus2")) return { 0, 2, 7 };
+    if (q.contains("sus4")) return { 0, 5, 7 };
+    if (q.contains("minor")) return { 0, 3, 7 };
+    return { 0, 4, 7 };
+}
+
+juce::String romanForChord(const model::Chord& chord,
+                           const juce::String& key,
+                           const juce::String& mode)
+{
+    if (key.isEmpty() || mode.isEmpty())
+        return chord.getSymbol();
+
+    const auto keyPc = DiatonicHarmony::pitchClassForRoot(key);
+    const auto chordPc = ((chord.getRootMidi() % 12) + 12) % 12;
+    const auto delta = (chordPc - keyPc + 12) % 12;
+    const auto intervals = DiatonicHarmony::modeIntervals(mode);
+    const auto romans = DiatonicHarmony::modeRomanNumerals(mode);
+    for (int i = 0; i < 7; ++i)
+    {
+        if (intervals[static_cast<size_t>(i)] != delta)
+            continue;
+
+        auto r = romans[static_cast<size_t>(i)];
+        if (chord.getQuality().containsIgnoreCase("7"))
+            r += "7";
+        return r;
+    }
+
+    return chord.getSymbol();
+}
 } // namespace
 
 //==============================================================================
@@ -457,6 +511,13 @@ class WorkspaceShellComponent::TimelineShell final : public juce::Component
 public:
     using ActionCallback = std::function<void(TheoryMenuTarget, int, const juce::String&)>;
 
+    struct ChordView
+    {
+        model::Chord chord;
+        juce::String key;
+        juce::String mode;
+    };
+
     class ContextLane final : public LabelPanel
     {
     public:
@@ -464,6 +525,11 @@ public:
         {
             juce::String id;
             juce::String label;
+            juce::String secondaryLabel;
+            juce::String functionHint;
+            juce::String sourceHint;
+            float confidence { 1.0f };
+            juce::Colour boundaryColour { juce::Colours::transparentBlack };
             float widthFraction { 1.0f };
         };
 
@@ -490,6 +556,18 @@ public:
             repaint();
         }
 
+        void setActiveId(const juce::String& id)
+        {
+            activeId = id;
+            repaint();
+        }
+
+        void setPlayheadFraction(double fraction)
+        {
+            playheadFraction = juce::jlimit(0.0, 1.0, fraction);
+            repaint();
+        }
+
         void paint(juce::Graphics& g) override
         {
             if (blocks.empty())
@@ -510,15 +588,74 @@ public:
                 const float w = totalWidth * block.widthFraction;
                 const juce::Rectangle<float> blockRect(x + 1.0f, 2.0f, w - 2.0f, h - 4.0f);
                 const bool isSelected = (block.id == selectedId);
+                const bool isActive = (block.id == activeId);
 
-                g.setColour(isSelected ? juce::Colour(0xff4a7fa5) : juce::Colour(0xff2c3e50));
+                juce::Colour base = juce::Colour(0xff2c3e50);
+                if (isSelected)
+                    base = juce::Colour(0xff4a7fa5);
+                if (isActive)
+                    base = juce::Colour(0xff5a9fd4);
+
+                g.setColour(base);
                 g.fillRoundedRectangle(blockRect, 3.0f);
 
+                const auto tint = functionTintFor(block.functionHint);
+                if (!tint.isTransparent())
+                {
+                    g.setColour(tint);
+                    g.fillRoundedRectangle(blockRect, 3.0f);
+                }
+
+                if (block.boundaryColour.isOpaque())
+                {
+                    g.setColour(block.boundaryColour);
+                    g.drawRoundedRectangle(blockRect.reduced(0.5f), 3.0f, 1.2f);
+                }
+
+                if (isActive)
+                {
+                    const auto pulse = 0.55f + 0.45f * std::sin(juce::Time::getMillisecondCounterHiRes() * 0.012);
+                    g.setColour(juce::Colours::white.withAlpha(static_cast<float>(pulse)));
+                    g.drawRoundedRectangle(blockRect.reduced(0.8f), 3.0f, 1.5f);
+                }
+
                 g.setColour(isSelected ? juce::Colours::white : juce::Colours::white.withAlpha(0.70f));
-                g.setFont(juce::FontOptions(12.0f));
-                g.drawText(block.label, blockRect.reduced(4.0f, 0.0f), juce::Justification::centredLeft, true);
+                if (block.secondaryLabel.isNotEmpty())
+                {
+                    auto textArea = blockRect.reduced(4.0f, 2.0f).toNearestInt();
+                    auto top = textArea.removeFromTop(textArea.getHeight() / 2 + 1);
+                    g.setFont(juce::FontOptions(12.0f));
+                    g.drawText(block.label, top, juce::Justification::centredLeft, true);
+                    g.setFont(juce::FontOptions(10.0f));
+                    g.setColour(juce::Colours::white.withAlpha(0.72f));
+                    g.drawText(block.secondaryLabel, textArea, juce::Justification::centredLeft, true);
+                }
+                else
+                {
+                    g.setFont(juce::FontOptions(12.0f));
+                    g.drawText(block.label, blockRect.reduced(4.0f, 0.0f), juce::Justification::centredLeft, true);
+                }
+
+                if (block.sourceHint.equalsIgnoreCase("midi"))
+                {
+                    juce::Colour dot = juce::Colour(0xffd9b84f);
+                    if (block.confidence >= 0.9f)
+                        dot = juce::Colour(0xff58b368);
+                    else if (block.confidence < 0.75f)
+                        dot = juce::Colour(0xffc44040);
+
+                    g.setColour(dot);
+                    g.fillEllipse(blockRect.getRight() - 9.0f, blockRect.getY() + 3.5f, 5.0f, 5.0f);
+                }
 
                 x += w;
+            }
+
+            if (playheadFraction > 0.0)
+            {
+                const float phX = totalWidth * static_cast<float>(playheadFraction);
+                g.setColour(juce::Colours::white.withAlpha(0.82f));
+                g.drawVerticalLine(static_cast<int>(phX), 0.0f, h);
             }
         }
 
@@ -678,6 +815,8 @@ public:
         ActionCallback onAction;
         std::vector<BlockData> blocks;
         juce::String selectedId;
+        juce::String activeId;
+        double playheadFraction { 0.0 };
         SelectionCallback onSelect;
     };
 
@@ -720,13 +859,31 @@ public:
         }
 
         std::vector<ContextLane::BlockData> blockData;
-        for (const auto& e : entries)
-            blockData.push_back({ e.id, e.name, static_cast<float>(e.beats / totalBeats) });
+        for (size_t i = 0; i < entries.size(); ++i)
+        {
+            juce::Colour boundary = juce::Colours::transparentBlack;
+            if (i + 1 < entries.size())
+            {
+                const auto key = std::make_pair(entries[i].id, entries[i + 1].id);
+                auto found = sectionBoundaryColours.find(key);
+                if (found != sectionBoundaryColours.end())
+                    boundary = found->second;
+            }
+
+            blockData.push_back({ entries[i].id,
+                                  entries[i].name,
+                                  {},
+                                  {},
+                                  {},
+                                  1.0f,
+                                  boundary,
+                                  static_cast<float>(entries[i].beats / totalBeats) });
+        }
 
         sectionLane.setBlocks(std::move(blockData), currentSectionId, std::move(cb));
     }
 
-    void updateChords(const std::vector<model::Chord>& chords,
+    void updateChords(const std::vector<ChordView>& chords,
                       const juce::String& currentChordId,
                       ContextLane::SelectionCallback cb)
     {
@@ -737,24 +894,53 @@ public:
         }
 
         double totalDuration = 0.0;
-        for (const auto& chord : chords)
+        for (const auto& view : chords)
         {
+            const auto& chord = view.chord;
             double d = chord.getDurationBeats();
             totalDuration += (d > 0.0 ? d : 1.0);
         }
 
         std::vector<ContextLane::BlockData> blockData;
-        for (const auto& chord : chords)
+        for (const auto& view : chords)
         {
+            const auto& chord = view.chord;
             double d = chord.getDurationBeats();
             if (d <= 0.0) d = 1.0;
-            juce::String label = chord.getSymbol();
+
+            juce::String label = romanForChord(chord, view.key, view.mode);
             if (chord.getFunction().isNotEmpty())
                 label += " [" + chord.getFunction() + "]";
-            blockData.push_back({ chord.getId(), label, static_cast<float>(d / totalDuration) });
+
+            blockData.push_back({ chord.getId(),
+                                  label,
+                                  chord.getSymbol(),
+                                  chord.getFunction(),
+                                  chord.getSource(),
+                                  chord.getConfidence(),
+                                  juce::Colours::transparentBlack,
+                                  static_cast<float>(d / totalDuration) });
         }
 
         theoryLane.setBlocks(std::move(blockData), currentChordId, std::move(cb));
+    }
+
+    void setActiveChordId(const juce::String& chordId)
+    {
+        activeChordId = chordId;
+        theoryLane.setActiveId(activeChordId);
+    }
+
+    void setPlayheadFraction(double fraction)
+    {
+        const auto f = juce::jlimit(0.0, 1.0, fraction);
+        sectionLane.setPlayheadFraction(f);
+        theoryLane.setPlayheadFraction(f);
+    }
+
+    void setSectionBoundaryColours(const std::map<std::pair<juce::String, juce::String>, juce::Colour>& colours)
+    {
+        sectionBoundaryColours = colours;
     }
 
     explicit TimelineShell(ActionCallback callback)
@@ -803,6 +989,9 @@ private:
     static constexpr int sectionHeight = 38;
     static constexpr int theoryHeight = 38;
     static constexpr int historyHeight = 60;
+
+    std::map<std::pair<juce::String, juce::String>, juce::Colour> sectionBoundaryColours;
+    juce::String activeChordId;
 
     ContextLane sectionLane;
     ContextLane theoryLane;
@@ -1016,12 +1205,25 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     {
         if (auto* tempo = edit->tempoSequence.getTempo(0))
             tempo->setBpm(songState.getBpm());
+
+        edit->getTransport().ensureContextAllocated();
+
+        auto& dm = engineRef.getDeviceManager();
+        for (int i = 0; i < dm.getNumMidiOutDevices(); ++i)
+        {
+            if (auto* midiOut = dm.getMidiOutDevice(i))
+            {
+                midiOut->setEnabled(true);
+                break;
+            }
+        }
     }
     bpmEditor.setText(juce::String(songState.getBpm(), 1), juce::dontSendNotification);
 
     openTheoryEditor(TheoryMenuTarget::section, sectionEditTheory, "Edit Section Theory");
     updateFocusButtonState();
     updateUndoRedoButtonState();
+    startTimerHz(30);
 }
 
 WorkspaceShellComponent::~WorkspaceShellComponent()
@@ -1526,6 +1728,7 @@ void WorkspaceShellComponent::commitTheoryEditorAction()
 
     const auto beforeSnapshot = createSongSnapshot();
     const auto actionResult = applyTheoryEditorAction();
+    runTheoryInferenceForSelectedChord();
 
     captureUndoStateIfChanged(beforeSnapshot);
     saveSongState();
@@ -1644,6 +1847,8 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
             chord->setFunction(theoryFieldEditor5.getText().trim().isNotEmpty()
                                    ? theoryFieldEditor5.getText().trim()
                                    : chord->getFunction());
+            chord->setSource("user");
+            chord->setConfidence(1.0f);
             const auto afterSymbol = chord->getSymbol();
             return "Applied chord edit: " + beforeSymbol + " → " + afterSymbol;
         }
@@ -1698,6 +1903,8 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
             chord->setSymbol(substitutionSymbol);
             chord->setName(substitutionSymbol);
             chord->setQuality(quality);
+            chord->setSource("user");
+            chord->setConfidence(1.0f);
             return "Chord substitution applied from center editor";
         }
 
@@ -1705,6 +1912,8 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
         {
             const auto chordFunction = theoryFieldEditor1.getText().trim();
             chord->setFunction(chordFunction.isNotEmpty() ? chordFunction : nextFunction(chord->getFunction()));
+            chord->setSource("user");
+            chord->setConfidence(1.0f);
             return "Chord function updated from center editor";
         }
     }
@@ -1783,6 +1992,8 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
                 auto cloned = model::Chord::create(sourceChord.getSymbol(), sourceChord.getQuality(), sourceChord.getRootMidi());
                 cloned.setName(sourceChord.getName());
                 cloned.setFunction(sourceChord.getFunction());
+                cloned.setSource(sourceChord.getSource());
+                cloned.setConfidence(sourceChord.getConfidence());
                 cloned.setStartBeats(sourceChord.getStartBeats());
                 cloned.setDurationBeats(sourceChord.getDurationBeats());
                 cloned.setTension(sourceChord.getTension());
@@ -1811,6 +2022,16 @@ void WorkspaceShellComponent::refreshTimelineData()
     const auto sections = songState.getSections();
     const auto progressions = songState.getProgressions();
 
+    boundaryColors.clear();
+    setle::theory::TransitionAnalyzer analyzer(songState);
+    for (size_t i = 0; i + 1 < sections.size(); ++i)
+    {
+        const auto score = analyzer.getBoundaryScore(sections[i].getId(), sections[i + 1].getId());
+        boundaryColors[{ sections[i].getId(), sections[i + 1].getId() }] = juce::Colour(score.colourArgb);
+    }
+
+    timelineShell->setSectionBoundaryColours(boundaryColors);
+
     timelineShell->updateSections(
         sections,
         progressions,
@@ -1826,7 +2047,7 @@ void WorkspaceShellComponent::refreshTimelineData()
         });
 
     // Collect chords from active progressions referenced by the selected section
-    std::vector<model::Chord> visibleChords;
+    std::vector<TimelineShell::ChordView> visibleChords;
     for (const auto& section : sections)
     {
         if (section.getId() != selectedSectionId)
@@ -1838,7 +2059,7 @@ void WorkspaceShellComponent::refreshTimelineData()
                 if (prog.getId() == ref.getProgressionId())
                 {
                     for (const auto& chord : prog.getChords())
-                        visibleChords.push_back(chord);
+                        visibleChords.push_back({ chord, prog.getKey(), prog.getMode() });
                     break;
                 }
             }
@@ -1899,6 +2120,7 @@ void WorkspaceShellComponent::seedSongStateIfNeeded()
 
         auto cmaj7 = model::Chord::create("Cmaj7", "major7", 60);
         cmaj7.setFunction("T");
+        cmaj7.setSource("midi");
         cmaj7.addNote(model::Note::create(60, 0.85f, 0.0, 1.0, 1));
         cmaj7.addNote(model::Note::create(64, 0.78f, 0.0, 1.0, 1));
         cmaj7.addNote(model::Note::create(67, 0.74f, 0.0, 1.0, 1));
@@ -1906,6 +2128,7 @@ void WorkspaceShellComponent::seedSongStateIfNeeded()
 
         auto dm7 = model::Chord::create("Dm7", "minor7", 62);
         dm7.setFunction("PD");
+        dm7.setSource("midi");
         dm7.setStartBeats(4.0);
         dm7.addNote(model::Note::create(62, 0.80f, 4.0, 1.0, 1));
         dm7.addNote(model::Note::create(65, 0.75f, 4.0, 1.0, 1));
@@ -1914,6 +2137,7 @@ void WorkspaceShellComponent::seedSongStateIfNeeded()
 
         auto g7 = model::Chord::create("G7", "dominant7", 67);
         g7.setFunction("D");
+        g7.setSource("midi");
         g7.setStartBeats(8.0);
         g7.addNote(model::Note::create(67, 0.82f, 8.0, 1.0, 1));
         g7.addNote(model::Note::create(71, 0.76f, 8.0, 1.0, 1));
@@ -1922,6 +2146,7 @@ void WorkspaceShellComponent::seedSongStateIfNeeded()
 
         auto cResolve = model::Chord::create("Cmaj7", "major7", 60);
         cResolve.setFunction("T");
+        cResolve.setSource("midi");
         cResolve.setStartBeats(12.0);
         cResolve.addNote(model::Note::create(60, 0.85f, 12.0, 1.0, 1));
         cResolve.addNote(model::Note::create(64, 0.78f, 12.0, 1.0, 1));
@@ -2195,6 +2420,7 @@ juce::String WorkspaceShellComponent::runChordAction(int actionId)
     {
         auto bootstrapChord = model::Chord::create("Cmaj7", "major7", 60);
         bootstrapChord.setFunction("T");
+        bootstrapChord.setSource("midi");
         bootstrapChord.addNote(model::Note::create(60, 0.8f, 0.0, 1.0, 1));
         bootstrapChord.addNote(model::Note::create(64, 0.75f, 0.0, 1.0, 1));
         bootstrapChord.addNote(model::Note::create(67, 0.72f, 0.0, 1.0, 1));
@@ -2307,6 +2533,8 @@ juce::String WorkspaceShellComponent::runChordAction(int actionId)
             auto copiedChord = model::Chord::create(sourceChord.getSymbol(), sourceChord.getQuality(), sourceChord.getRootMidi());
             copiedChord.setName(sourceChord.getName());
             copiedChord.setFunction(sourceChord.getFunction());
+            copiedChord.setSource(sourceChord.getSource());
+            copiedChord.setConfidence(sourceChord.getConfidence());
             copiedChord.setStartBeats(sourceChord.getStartBeats());
             copiedChord.setDurationBeats(sourceChord.getDurationBeats());
             copiedChord.setTension(sourceChord.getTension());
@@ -2454,6 +2682,8 @@ juce::String WorkspaceShellComponent::runNoteAction(int actionId)
         chord->setSymbol(symbol);
         chord->setName(symbol);
         chord->setQuality(minorTriad ? "minorTriad" : "majorTriad");
+        chord->setSource("user");
+        chord->setConfidence(1.0f);
 
         return "Notes converted to chord symbol " + symbol;
     }
@@ -2469,6 +2699,8 @@ juce::String WorkspaceShellComponent::runNoteAction(int actionId)
         auto derivedChord = model::Chord::create(chord->getSymbol(), chord->getQuality(), chord->getRootMidi());
         derivedChord.setName(chord->getName());
         derivedChord.setFunction(chord->getFunction());
+        derivedChord.setSource(chord->getSource());
+        derivedChord.setConfidence(chord->getConfidence());
         derivedChord.setDurationBeats(4.0);
         for (const auto& sourceNote : chord->getNotes())
             derivedChord.addNote(model::Note::create(sourceNote.getPitch(),
@@ -2571,6 +2803,101 @@ void WorkspaceShellComponent::saveLayoutState()
         settings->setValue("ui.focusMode", static_cast<int>(focusMode));
         settings->saveIfNeeded();
     }
+}
+
+void WorkspaceShellComponent::runTheoryInferenceForSelectedChord()
+{
+    auto chord = getSelectedChord();
+    auto progression = getSelectedProgression();
+    if (!chord.has_value() || !progression.has_value())
+        return;
+
+    std::vector<int> pitchClasses;
+    for (const auto& note : chord->getNotes())
+        pitchClasses.push_back(((note.getPitch() % 12) + 12) % 12);
+
+    if (pitchClasses.size() >= 2 && !chord->getSource().equalsIgnoreCase("user"))
+    {
+        const auto id = setle::theory::identify(pitchClasses);
+        if (id.confidence >= 0.75f)
+        {
+            const int octave = chord->getRootMidi() / 12;
+            const int rootPc = DiatonicHarmony::pitchClassForRoot(id.root);
+            chord->setRootMidi(juce::jlimit(0, 127, octave * 12 + rootPc));
+            chord->setQuality(id.quality);
+            chord->setSymbol(id.symbol);
+            chord->setName(id.symbol);
+            chord->setConfidence(id.confidence);
+            chord->setSource("midi");
+        }
+    }
+
+    const auto keyPc = DiatonicHarmony::pitchClassForRoot(progression->getKey());
+    const auto chordPc = ((chord->getRootMidi() % 12) + 12) % 12;
+    const auto delta = (chordPc - keyPc + 12) % 12;
+    const auto intervals = DiatonicHarmony::modeIntervals(progression->getMode());
+    const auto functions = DiatonicHarmony::modeFunctions(progression->getMode());
+
+    for (int i = 0; i < 7; ++i)
+    {
+        if (intervals[static_cast<size_t>(i)] != delta)
+            continue;
+
+        if (!chord->getSource().equalsIgnoreCase("user"))
+            chord->setFunction(functions[static_cast<size_t>(i)]);
+        break;
+    }
+}
+
+double WorkspaceShellComponent::getProgressionLengthSeconds() const
+{
+    auto progression = songState.findProgressionById(selectedProgressionId);
+    if (!progression.has_value())
+        return 0.0;
+
+    double totalBeats = 0.0;
+    for (const auto& chord : progression->getChords())
+        totalBeats += juce::jmax(0.125, chord.getDurationBeats());
+
+    const double bpm = (edit != nullptr && edit->tempoSequence.getTempo(0) != nullptr)
+                           ? edit->tempoSequence.getTempo(0)->getBpm()
+                           : songState.getBpm();
+    return totalBeats * (60.0 / juce::jmax(1.0, bpm));
+}
+
+void WorkspaceShellComponent::timerCallback()
+{
+    if (edit == nullptr || timelineShell == nullptr)
+        return;
+
+    const auto& transport = edit->getTransport();
+    const double seconds = transport.getPosition().inSeconds();
+    const double totalSecs = getProgressionLengthSeconds();
+    if (totalSecs > 0.0)
+        timelineShell->setPlayheadFraction(seconds / totalSecs);
+
+    const double bpm = (edit->tempoSequence.getTempo(0) != nullptr)
+                           ? edit->tempoSequence.getTempo(0)->getBpm()
+                           : songState.getBpm();
+    const double beatPos = seconds * juce::jmax(1.0, bpm) / 60.0;
+
+    juce::String activeChord;
+    if (auto progression = songState.findProgressionById(selectedProgressionId))
+    {
+        double beatCursor = 0.0;
+        for (const auto& chord : progression->getChords())
+        {
+            const double d = juce::jmax(0.125, chord.getDurationBeats());
+            if (beatPos >= beatCursor && beatPos < beatCursor + d)
+            {
+                activeChord = chord.getId();
+                break;
+            }
+            beatCursor += d;
+        }
+    }
+
+    timelineShell->setActiveChordId(activeChord);
 }
 
 void WorkspaceShellComponent::loadProgressionToEdit()
