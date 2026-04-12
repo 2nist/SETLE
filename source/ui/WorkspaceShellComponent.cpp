@@ -45,7 +45,15 @@ enum TheoryActionId
     progressionGrabSampler = 401,
     progressionCreateCandidate = 402,
     progressionAnnotateKeyMode = 403,
-    progressionTagTransition = 404
+    progressionTagTransition = 404,
+
+    historyGrab4 = 501,
+    historyGrab8 = 502,
+    historyGrab16 = 503,
+    historyGrabCustom = 504,
+    historySetLength = 505,
+    historyChangeSource = 506,
+    historyClear = 507
 };
 
 juce::String chordRootNameForMidi(int midiNote)
@@ -617,6 +625,19 @@ public:
                     menu.addItem(progressionTagTransition, "Tag as Transition Material");
                     break;
                 }
+
+                case TheoryMenuTarget::historyBuffer:
+                {
+                    menu.addItem(historyGrab4, "Grab Last 4 Beats");
+                    menu.addItem(historyGrab8, "Grab Last 8 Beats");
+                    menu.addItem(historyGrab16, "Grab Last 16 Beats");
+                    menu.addItem(historyGrabCustom, "Grab Custom...");
+                    menu.addSeparator();
+                    menu.addItem(historySetLength, "Set Buffer Length...");
+                    menu.addItem(historyChangeSource, "Change Source");
+                    menu.addItem(historyClear, "Clear Buffer");
+                    break;
+                }
             }
         }
 
@@ -667,6 +688,18 @@ public:
                     if (id == progressionCreateCandidate) return "Create Progression Candidate";
                     if (id == progressionAnnotateKeyMode) return "Annotate Key / Mode";
                     if (id == progressionTagTransition) return "Tag as Transition Material";
+                    break;
+                }
+
+                case TheoryMenuTarget::historyBuffer:
+                {
+                    if (id == historyGrab4) return "Grab Last 4 Beats";
+                    if (id == historyGrab8) return "Grab Last 8 Beats";
+                    if (id == historyGrab16) return "Grab Last 16 Beats";
+                    if (id == historyGrabCustom) return "Grab Custom";
+                    if (id == historySetLength) return "Set Buffer Length";
+                    if (id == historyChangeSource) return "Change Source";
+                    if (id == historyClear) return "Clear Buffer";
                     break;
                 }
             }
@@ -779,8 +812,8 @@ public:
           historyLane(
               "History Buffer Lane",
               juce::Colour(0xff232338),
-              "Always-on capture lane (right-click for progression capture actions)",
-              TheoryMenuTarget::progression,
+              "Always-on capture lane (right-click for capture/grab controls)",
+              TheoryMenuTarget::historyBuffer,
               callback)
     {
         addAndMakeVisible(sectionLane);
@@ -893,6 +926,8 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     topStrip.addAndMakeVisible(recordButton);
     topStrip.addAndMakeVisible(bpmLabel);
     topStrip.addAndMakeVisible(bpmEditor);
+    topStrip.addAndMakeVisible(captureSourceLabel);
+    topStrip.addAndMakeVisible(captureSourceSelector);
     topStrip.addAndMakeVisible(focusInButton);
     topStrip.addAndMakeVisible(focusBalancedButton);
     topStrip.addAndMakeVisible(focusOutButton);
@@ -988,6 +1023,15 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     bpmLabel.setText("BPM", juce::dontSendNotification);
     bpmLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.72f));
     bpmLabel.setFont(juce::FontOptions(13.0f));
+    captureSourceLabel.setText("Capture", juce::dontSendNotification);
+    captureSourceLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.72f));
+    captureSourceLabel.setFont(juce::FontOptions(13.0f));
+
+    captureSourceSelector.onChange = [this]
+    {
+        applyCaptureSourceSelection();
+    };
+
     bpmEditor.setInputRestrictions(6, "0123456789.");
     bpmEditor.setJustification(juce::Justification::centred);
     bpmEditor.onReturnKey = [this]
@@ -1006,12 +1050,17 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     options.folderName = "SETLE";
     options.storageFormat = juce::PropertiesFile::storeAsXML;
     appProperties.setStorageParameters(options);
+    refreshCaptureSourceSelector();
+    midiDeviceSignature = buildMidiDeviceSignature();
 
     loadLayoutState();
     initialiseSongState();
 
     // --- Phase 4: create a single-track Tracktion Edit and sync BPM ---
     edit = te::Edit::createSingleTrackEdit(engineRef);
+    historyBuffer = std::make_unique<setle::capture::HistoryBuffer>(64);
+    if (auto* settings = appProperties.getUserSettings())
+        refreshCaptureSourceSelector(settings->getValue("capture.source", ""));
     if (edit != nullptr)
     {
         if (auto* tempo = edit->tempoSequence.getTempo(0))
@@ -1022,10 +1071,12 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     openTheoryEditor(TheoryMenuTarget::section, sectionEditTheory, "Edit Section Theory");
     updateFocusButtonState();
     updateUndoRedoButtonState();
+    startTimerHz(2);
 }
 
 WorkspaceShellComponent::~WorkspaceShellComponent()
 {
+    stopTimer();
     saveLayoutState();
     saveSongState();
 }
@@ -1864,6 +1915,12 @@ void WorkspaceShellComponent::initialiseSongState()
     loadSongState();
     seedSongStateIfNeeded();
     ensureSelectionDefaults();
+
+    juce::String savedCaptureSource;
+    if (auto* settings = appProperties.getUserSettings())
+        savedCaptureSource = settings->getValue("capture.source", "");
+
+    refreshCaptureSourceSelector(savedCaptureSource);
     saveSongState();
     refreshTimelineData();
 
@@ -2135,6 +2192,8 @@ juce::String WorkspaceShellComponent::runTheoryAction(TheoryMenuTarget target, i
             return runNoteAction(actionId);
         case TheoryMenuTarget::progression:
             return runProgressionAction(actionId);
+        case TheoryMenuTarget::historyBuffer:
+            return runHistoryBufferAction(actionId);
     }
 
     return "Unknown action: " + actionName;
@@ -2524,6 +2583,296 @@ juce::String WorkspaceShellComponent::runProgressionAction(int actionId)
     return "Progression action not implemented";
 }
 
+juce::String WorkspaceShellComponent::runHistoryBufferAction(int actionId)
+{
+    if (historyBuffer == nullptr)
+        return "History buffer unavailable";
+
+    if (actionId == historyGrab4)
+    {
+        grabFromBuffer(4);
+        return "Grab requested: last 4 beats";
+    }
+
+    if (actionId == historyGrab8)
+    {
+        grabFromBuffer(8);
+        return "Grab requested: last 8 beats";
+    }
+
+    if (actionId == historyGrab16)
+    {
+        grabFromBuffer(16);
+        return "Grab requested: last 16 beats";
+    }
+
+    if (actionId == historyGrabCustom)
+    {
+        juce::AlertWindow window("Grab Custom Beats", "Enter beat count to grab", juce::AlertWindow::NoIcon);
+        window.addTextEditor("beats", "8", "Beats");
+        window.addButton("Grab", 1);
+        window.addButton("Cancel", 0);
+
+        if (window.runModalLoop() == 1)
+        {
+            const auto beats = juce::jlimit(1, 128, parseIntOr(window.getTextEditorContents("beats"), 8));
+            grabFromBuffer(beats);
+            return "Grab requested: custom " + juce::String(beats) + " beats";
+        }
+
+        return "Grab custom cancelled";
+    }
+
+    if (actionId == historySetLength)
+    {
+        juce::AlertWindow window("Set Buffer Length", "Enter max buffer length in beats", juce::AlertWindow::NoIcon);
+        window.addTextEditor("length", juce::String(historyBuffer->getMaxBeats()), "Beats (1-128)");
+        window.addButton("Set", 1);
+        window.addButton("Cancel", 0);
+
+        if (window.runModalLoop() == 1)
+        {
+            const auto beats = juce::jlimit(1, 128, parseIntOr(window.getTextEditorContents("length"), historyBuffer->getMaxBeats()));
+            historyBuffer->setMaxBeats(beats);
+            return "History buffer length set to " + juce::String(beats) + " beats";
+        }
+
+        return "Set buffer length cancelled";
+    }
+
+    if (actionId == historyChangeSource)
+    {
+        captureSourceSelector.showPopup();
+        return "Capture source selector opened";
+    }
+
+    if (actionId == historyClear)
+    {
+        historyBuffer->clear();
+        interactionStatus.setText("History buffer cleared", juce::dontSendNotification);
+        return "History buffer cleared";
+    }
+
+    return "History buffer action not implemented";
+}
+
+void WorkspaceShellComponent::handleProgressionAction(const juce::String& progressionId, int actionId)
+{
+    selectedProgressionId = progressionId;
+
+    const auto result = runProgressionAction(actionId);
+    saveSongState();
+    refreshTimelineData();
+    populateTheoryObjectSelector();
+    populateTheoryFieldsForCurrentSelection();
+
+    interactionStatus.setText(result + " | " + summarizeSongState(), juce::dontSendNotification);
+}
+
+void WorkspaceShellComponent::grabFromBuffer(int beats)
+{
+    if (historyBuffer == nullptr || !historyBuffer->isCapturing())
+    {
+        interactionStatus.setText("Capture source is Off - select a source first", juce::dontSendNotification);
+        return;
+    }
+
+    const auto bpm = songState.getBpm();
+    const auto captured = historyBuffer->getLastNBeats(bpm, beats);
+
+    if (captured.empty())
+    {
+        interactionStatus.setText("Buffer is empty - play something first", juce::dontSendNotification);
+        return;
+    }
+
+    struct TimedPitch
+    {
+        double timeSeconds {};
+        int pitch {};
+    };
+
+    std::vector<TimedPitch> notes;
+    notes.reserve(captured.size());
+
+    for (const auto& event : captured)
+    {
+        if (!event.message.isNoteOn())
+            continue;
+
+        notes.push_back({ event.wallClockSeconds, event.message.getNoteNumber() });
+    }
+
+    if (notes.empty())
+    {
+        interactionStatus.setText("Buffer has no note-on events in that range", juce::dontSendNotification);
+        return;
+    }
+
+    std::sort(notes.begin(), notes.end(), [](const auto& a, const auto& b)
+    {
+        return a.timeSeconds < b.timeSeconds;
+    });
+
+    const auto toleranceSeconds = (60.0 / juce::jmax(1.0, bpm)) * 0.15;
+    std::vector<std::vector<TimedPitch>> clusters;
+
+    for (const auto& note : notes)
+    {
+        if (clusters.empty())
+        {
+            clusters.push_back({ note });
+            continue;
+        }
+
+        const auto& lastCluster = clusters.back();
+        const auto anchor = lastCluster.front().timeSeconds;
+        if (std::abs(note.timeSeconds - anchor) <= toleranceSeconds)
+            clusters.back().push_back(note);
+        else
+            clusters.push_back({ note });
+    }
+
+    auto progression = model::Progression::create(
+        "Grab " + juce::Time::getCurrentTime().toString(false, true, false, true),
+        songState.getSessionKey(),
+        songState.getSessionMode());
+
+    double startBeat = 0.0;
+    for (const auto& cluster : clusters)
+    {
+        if (cluster.empty())
+            continue;
+
+        std::set<int> pitchClasses;
+        int minPitch = 127;
+        int maxPitch = 0;
+        for (const auto& note : cluster)
+        {
+            pitchClasses.insert(((note.pitch % 12) + 12) % 12);
+            minPitch = juce::jmin(minPitch, note.pitch);
+            maxPitch = juce::jmax(maxPitch, note.pitch);
+        }
+
+        const auto rootMidi = minPitch;
+        const auto rootName = chordRootNameForMidi(rootMidi);
+        const auto hasMinorThird = pitchClasses.count((rootMidi + 3) % 12) > 0;
+        const auto hasMajorThird = pitchClasses.count((rootMidi + 4) % 12) > 0;
+
+        juce::String quality = "cluster";
+        juce::String symbol = rootName;
+        if (hasMinorThird)
+        {
+            quality = "minor";
+            symbol += "m";
+        }
+        else if (hasMajorThird)
+        {
+            quality = "major";
+        }
+
+        auto chord = model::Chord::create(symbol, quality, rootMidi);
+        chord.setName(symbol);
+        chord.setStartBeats(startBeat);
+        chord.setDurationBeats(4.0);
+        chord.setSource("midi");
+
+        for (const auto& note : cluster)
+            chord.addNote(model::Note::create(note.pitch, 0.8f, startBeat, 1.0, 1));
+
+        progression.addChord(chord);
+        startBeat += 4.0;
+    }
+
+    if (progression.getChords().empty())
+    {
+        interactionStatus.setText("No chord groups could be derived from buffer", juce::dontSendNotification);
+        return;
+    }
+
+    songState.addProgression(progression);
+    handleProgressionAction(progression.getId(), progressionGrabSampler);
+
+    interactionStatus.setText("Grabbed " + juce::String(beats)
+                                  + " beats -> " + juce::String(static_cast<int>(progression.getChords().size()))
+                                  + " chords | " + summarizeSongState(),
+                              juce::dontSendNotification);
+}
+
+void WorkspaceShellComponent::refreshCaptureSourceSelector(const juce::String& preferredSourceIdentifier)
+{
+    juce::String desiredIdentifier = preferredSourceIdentifier;
+    if (desiredIdentifier.isEmpty())
+    {
+        const auto selectedIndex = captureSourceSelector.getSelectedItemIndex();
+        if (selectedIndex >= 0 && selectedIndex < static_cast<int>(captureSourceIdentifiers.size()))
+            desiredIdentifier = captureSourceIdentifiers[static_cast<size_t>(selectedIndex)];
+        else if (historyBuffer != nullptr)
+            desiredIdentifier = historyBuffer->getCurrentSourceIdentifier();
+    }
+
+    captureSourceSelector.clear(juce::dontSendNotification);
+    captureSourceIdentifiers.clear();
+
+    int itemId = 1;
+    captureSourceSelector.addItem("Off", itemId++);
+    captureSourceIdentifiers.push_back("");
+
+    const auto devices = juce::MidiInput::getAvailableDevices();
+    for (const auto& device : devices)
+    {
+        captureSourceSelector.addItem(device.name, itemId++);
+        captureSourceIdentifiers.push_back(device.identifier);
+    }
+
+    captureSourceSelector.addItem("All Inputs", itemId);
+    captureSourceIdentifiers.push_back("__all__");
+
+    int selectionIndex = 0;
+    for (int i = 0; i < static_cast<int>(captureSourceIdentifiers.size()); ++i)
+    {
+        if (captureSourceIdentifiers[static_cast<size_t>(i)] == desiredIdentifier)
+        {
+            selectionIndex = i;
+            break;
+        }
+    }
+
+    captureSourceSelector.setSelectedItemIndex(selectionIndex, juce::dontSendNotification);
+    applyCaptureSourceSelection();
+}
+
+void WorkspaceShellComponent::applyCaptureSourceSelection()
+{
+    if (historyBuffer == nullptr)
+        return;
+
+    const auto idx = captureSourceSelector.getSelectedItemIndex();
+    if (idx < 0 || idx >= static_cast<int>(captureSourceIdentifiers.size()))
+        return;
+
+    const auto identifier = captureSourceIdentifiers[static_cast<size_t>(idx)];
+    if (identifier.isEmpty())
+        historyBuffer->clearSource();
+    else if (identifier == "__all__")
+        historyBuffer->setAllSources(true);
+    else
+        historyBuffer->setSource(identifier);
+
+    if (auto* settings = appProperties.getUserSettings())
+        settings->setValue("capture.source", identifier);
+}
+
+juce::String WorkspaceShellComponent::buildMidiDeviceSignature() const
+{
+    juce::StringArray ids;
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+        ids.add(device.identifier + ":" + device.name);
+
+    ids.sort(true);
+    return ids.joinIntoString("|");
+}
+
 void WorkspaceShellComponent::clampLayoutValues(int totalTopWidth, int totalBodyHeight)
 {
     timelineHeight = juce::jlimit(minTimelineHeight, juce::jmax(minTimelineHeight, totalBodyHeight - minTopWorkHeight), timelineHeight);
@@ -2571,6 +2920,21 @@ void WorkspaceShellComponent::saveLayoutState()
         settings->setValue("ui.focusMode", static_cast<int>(focusMode));
         settings->saveIfNeeded();
     }
+}
+
+void WorkspaceShellComponent::timerCallback()
+{
+    const auto signature = buildMidiDeviceSignature();
+    if (signature == midiDeviceSignature)
+        return;
+
+    midiDeviceSignature = signature;
+
+    juce::String preferredSource;
+    if (auto* settings = appProperties.getUserSettings())
+        preferredSource = settings->getValue("capture.source", "");
+
+    refreshCaptureSourceSelector(preferredSource);
 }
 
 void WorkspaceShellComponent::loadProgressionToEdit()
@@ -2665,20 +3029,25 @@ void WorkspaceShellComponent::resized()
     auto topBounds = bounds.removeFromTop(topStripHeight);
     topStrip.setBounds(topBounds);
 
-    auto buttonArea = topBounds.removeFromRight(890);
+    auto buttonArea = topBounds.removeFromRight(1170);
     redoTheoryButton.setBounds(buttonArea.removeFromRight(112).reduced(4, 6));
     undoTheoryButton.setBounds(buttonArea.removeFromRight(122).reduced(4, 6));
     focusOutButton.setBounds(buttonArea.removeFromRight(118).reduced(4, 6));
     focusBalancedButton.setBounds(buttonArea.removeFromRight(148).reduced(4, 6));
     focusInButton.setBounds(buttonArea.removeFromRight(104).reduced(4, 6));
 
-    // Transport controls (left of focus buttons): BPM, Play, Stop, Rec
-    auto bpmArea = buttonArea.removeFromRight(100).reduced(4, 6);
-    bpmLabel.setBounds(bpmArea.removeFromLeft(32));
-    bpmEditor.setBounds(bpmArea);
+    // Transport controls: BPM + Capture + Play/Stop/Rec
     recordButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
     stopButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
     playButton.setBounds(buttonArea.removeFromRight(52).reduced(4, 6));
+
+    auto captureArea = buttonArea.removeFromRight(188).reduced(4, 6);
+    captureSourceLabel.setBounds(captureArea.removeFromLeft(48));
+    captureSourceSelector.setBounds(captureArea.removeFromLeft(140));
+
+    auto bpmArea = buttonArea.removeFromRight(100).reduced(4, 6);
+    bpmLabel.setBounds(bpmArea.removeFromLeft(32));
+    bpmEditor.setBounds(bpmArea);
 
     topTitle.setBounds(topBounds.removeFromLeft(250).reduced(8, 6));
     interactionStatus.setBounds(topBounds.reduced(8, 8));

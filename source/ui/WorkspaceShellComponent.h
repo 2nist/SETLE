@@ -3,8 +3,10 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+#include <memory>
 #include <vector>
 
+#include "../capture/HistoryBuffer.h"
 #include "../model/SetleSongModel.h"
 
 namespace te = tracktion::engine;
@@ -12,7 +14,8 @@ namespace te = tracktion::engine;
 namespace setle::ui
 {
 
-class WorkspaceShellComponent final : public juce::Component
+class WorkspaceShellComponent final : public juce::Component,
+                                      private juce::Timer
 {
 public:
     explicit WorkspaceShellComponent(te::Engine& engine);
@@ -32,7 +35,8 @@ private:
         section,
         chord,
         note,
-        progression
+        progression,
+        historyBuffer
     };
 
     enum class FocusMode
@@ -51,6 +55,12 @@ private:
     juce::String runChordAction(int actionId);
     juce::String runNoteAction(int actionId);
     juce::String runProgressionAction(int actionId);
+    juce::String runHistoryBufferAction(int actionId);
+    void handleProgressionAction(const juce::String& progressionId, int actionId);
+    void grabFromBuffer(int beats);
+    void refreshCaptureSourceSelector(const juce::String& preferredSourceIdentifier = {});
+    void applyCaptureSourceSelection();
+    juce::String buildMidiDeviceSignature() const;
 
     void initialiseSongState();
     void loadProgressionToEdit();
@@ -84,6 +94,7 @@ private:
     void clampLayoutValues(int totalTopWidth, int totalBodyHeight);
     void loadLayoutState();
     void saveLayoutState();
+    void timerCallback() override;
 
     te::Engine& engineRef;
     std::unique_ptr<te::Edit> edit;
@@ -103,6 +114,10 @@ private:
     juce::TextButton recordButton { juce::CharPointer_UTF8("\xe2\x97\x8f") };  // ●
     juce::Label     bpmLabel;
     juce::TextEditor bpmEditor;
+    juce::Label captureSourceLabel;
+    juce::ComboBox captureSourceSelector;
+    std::vector<juce::String> captureSourceIdentifiers;
+    juce::String midiDeviceSignature;
 
     juce::TextButton focusInButton { "Focus IN" };
     juce::TextButton focusBalancedButton { "Focus Balanced" };
@@ -114,6 +129,7 @@ private:
     juce::Label interactionStatus;
 
     juce::ApplicationProperties appProperties;
+    std::unique_ptr<setle::capture::HistoryBuffer> historyBuffer;
     model::Song songState;
     std::vector<juce::String> undoSnapshots;
     std::vector<juce::String> redoSnapshots;
