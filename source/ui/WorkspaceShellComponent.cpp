@@ -465,9 +465,11 @@ public:
             juce::String id;
             juce::String label;
             float widthFraction { 1.0f };
+            double startTimeSeconds { 0.0 };  // 7C: absolute start time for seek
         };
 
         using SelectionCallback = std::function<void(const juce::String&)>;
+        using SeekCallback = std::function<void(double)>;
 
         ContextLane(juce::String panelName,
                     juce::Colour panelColour,
@@ -489,6 +491,14 @@ public:
             onSelect = std::move(cb);
             repaint();
         }
+
+        void setPlayheadFraction(double fraction)
+        {
+            playheadFraction = juce::jlimit(0.0, 1.0, fraction);
+            repaint();
+        }
+
+        void setSeekCallback(SeekCallback cb) { onSeekBlock = std::move(cb); }
 
         void paint(juce::Graphics& g) override
         {
@@ -520,6 +530,14 @@ public:
 
                 x += w;
             }
+
+            // Draw playhead if fraction is set
+            if (playheadFraction > 0.0)
+            {
+                const float phX = totalWidth * static_cast<float>(playheadFraction);
+                g.setColour(juce::Colours::white.withAlpha(0.85f));
+                g.drawVerticalLine(static_cast<int>(phX), 0.0f, h);
+            }
         }
 
         void mouseUp(const juce::MouseEvent& event) override
@@ -539,6 +557,9 @@ public:
                             selectedId = block.id;
                             repaint();
                             onSelect(block.id);
+                            // Call seek callback if available (for sections-specific seek)
+                            if (onSeekBlock != nullptr)
+                                onSeekBlock(block.startTimeSeconds);
                             return;
                         }
                         x += w;
@@ -679,6 +700,8 @@ public:
         std::vector<BlockData> blocks;
         juce::String selectedId;
         SelectionCallback onSelect;
+        SeekCallback onSeekBlock;
+        double playheadFraction { 0.0 };
     };
 
     void updateSections(const std::vector<model::Section>& sections,
@@ -720,8 +743,20 @@ public:
         }
 
         std::vector<ContextLane::BlockData> blockData;
+        double cumulativeTime = 0.0;
+        double bpm = 120.0;  // Default BPM - will be overridden by callback context
+        double secPerBeat = 60.0 / bpm;
+
         for (const auto& e : entries)
-            blockData.push_back({ e.id, e.name, static_cast<float>(e.beats / totalBeats) });
+        {
+            blockData.push_back({
+                e.id,
+                e.name,
+                static_cast<float>(e.beats / totalBeats),
+                cumulativeTime  // 7C: absolute start time for seek
+            });
+            cumulativeTime += e.beats * secPerBeat;
+        }
 
         sectionLane.setBlocks(std::move(blockData), currentSectionId, std::move(cb));
     }
@@ -756,6 +791,20 @@ public:
 
         theoryLane.setBlocks(std::move(blockData), currentChordId, std::move(cb));
     }
+
+    void setPlayheadFraction(double fraction)
+    {
+        playheadFraction = juce::jlimit(0.0, 1.0, fraction);
+        sectionLane.setPlayheadFraction(playheadFraction);
+        theoryLane.setPlayheadFraction(playheadFraction);
+    }
+
+    void setSectionSeekCallback(ContextLane::SeekCallback cb)
+    {
+        sectionLane.setSeekCallback(std::move(cb));
+    }
+
+    std::function<void(double)> onSeek;
 
     explicit TimelineShell(ActionCallback callback)
         : sectionLane(
@@ -803,6 +852,8 @@ private:
     static constexpr int sectionHeight = 38;
     static constexpr int theoryHeight = 38;
     static constexpr int historyHeight = 60;
+
+    double playheadFraction { 0.0 };
 
     ContextLane sectionLane;
     ContextLane theoryLane;
@@ -923,6 +974,13 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         });
     addAndMakeVisible(timelineShell);
 
+    // 7C: Wire seek callback for section clicks
+    timelineShell->onSeek = [this](double seekSeconds)
+    {
+        if (edit != nullptr)
+            edit->getTransport().setPosition(tracktion::TimePosition::fromSeconds(seekSeconds));
+    };
+
     leftResizeBar = new DragBar(
         DragBar::Orientation::vertical,
         [this](int delta)
@@ -995,9 +1053,25 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         const double bpm = juce::jlimit(20.0, 300.0, bpmEditor.getText().getDoubleValue());
         songState.setBpm(bpm);
         if (edit != nullptr)
+        {
+            const bool wasPlaying = edit->getTransport().isPlaying();
+            if (wasPlaying)
+                edit->getTransport().stop(false, false);
+
             if (auto* tempo = edit->tempoSequence.getTempo(0))
                 tempo->setBpm(bpm);
+
+            // Force audio graph rebuild so new tempo takes effect immediately
+            edit->getTransport().ensureContextAllocated(true);
+
+            // Reload MIDI clip so beat-to-time mapping reflects the new BPM
+            loadProgressionToEdit();
+
+            if (wasPlaying)
+                edit->getTransport().play(false);
+        }
         bpmEditor.setText(juce::String(bpm, 1), juce::dontSendNotification);
+        saveSongState();
     };
 
     juce::PropertiesFile::Options options;
@@ -1010,14 +1084,63 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     loadLayoutState();
     initialiseSongState();
 
-    // --- Phase 4: create a single-track Tracktion Edit and sync BPM ---
+    // --- Phase 4/5/6/7: create Edit, init audio graph, enable MIDI out, setup transport UI ---
     edit = te::Edit::createSingleTrackEdit(engineRef);
     if (edit != nullptr)
     {
         if (auto* tempo = edit->tempoSequence.getTempo(0))
             tempo->setBpm(songState.getBpm());
+
+        // Build the audio graph so transport commands produce sound
+        edit->getTransport().ensureContextAllocated();
+
+        // Enable the first available MIDI output device
+        auto& dm = engineRef.getDeviceManager();
+        for (int i = 0; i < dm.getNumMidiOutDevices(); ++i)
+        {
+            if (auto* midiOut = dm.getMidiOutDevice(i))
+            {
+                midiOut->setEnabled(true);
+                break;
+            }
+        }
     }
     bpmEditor.setText(juce::String(songState.getBpm(), 1), juce::dontSendNotification);
+
+    // Position display — updated at 30 Hz by timerCallback()
+    positionLabel.setText("0:00.000", juce::dontSendNotification);
+    positionLabel.setFont(juce::FontOptions(13.0f));
+    positionLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.80f));
+    positionLabel.setJustificationType(juce::Justification::centred);
+    topStrip.addAndMakeVisible(positionLabel);
+
+    // Loop button
+    loopButton.setClickingTogglesState(true);
+    loopButton.setToggleState(appProperties.getUserSettings()->getBoolValue("transport.loop", false), juce::dontSendNotification);
+    topStrip.addAndMakeVisible(loopButton);
+
+    loopButton.onClick = [this]
+    {
+        if (edit != nullptr)
+        {
+            edit->getTransport().looping = loopButton.getToggleState();
+            if (loopButton.getToggleState())
+            {
+                const double progLen = getProgressionLengthSeconds();
+                edit->getTransport().setLoopRange(
+                    tracktion::TimeRange(
+                        tracktion::TimePosition::fromSeconds(0.0),
+                        tracktion::TimePosition::fromSeconds(progLen)));
+            }
+        }
+        if (auto* settings = appProperties.getUserSettings())
+        {
+            settings->setValue("transport.loop", loopButton.getToggleState());
+            settings->saveIfNeeded();
+        }
+    };
+
+    startTimerHz(30);
 
     openTheoryEditor(TheoryMenuTarget::section, sectionEditTheory, "Edit Section Theory");
     updateFocusButtonState();
@@ -1825,6 +1948,13 @@ void WorkspaceShellComponent::refreshTimelineData()
             interactionStatus.setText("Selected section: " + sectionId.substring(0, 8), juce::dontSendNotification);
         });
 
+    // 7C: Wire section seek callback to main transport seek
+    timelineShell->setSectionSeekCallback([this](double seekSeconds)
+    {
+        if (timelineShell != nullptr && timelineShell->onSeek != nullptr)
+            timelineShell->onSeek(seekSeconds);
+    });
+
     // Collect chords from active progressions referenced by the selected section
     std::vector<model::Chord> visibleChords;
     for (const auto& section : sections)
@@ -2573,6 +2703,62 @@ void WorkspaceShellComponent::saveLayoutState()
     }
 }
 
+void WorkspaceShellComponent::timerCallback()
+{
+    if (edit == nullptr)
+        return;
+
+    const auto& transport = edit->getTransport();
+    const double totalSecs = transport.getPosition().inSeconds();
+    const int mins = static_cast<int>(totalSecs) / 60;
+    const double secs = std::fmod(totalSecs, 60.0);
+
+    positionLabel.setText(
+        juce::String(mins) + ":" + juce::String(secs, 3).paddedLeft('0', 6),
+        juce::dontSendNotification);
+
+    // 7A: Update playhead fraction on timeline
+    const double progLen = getProgressionLengthSeconds();
+    if (progLen > 0.0 && timelineShell != nullptr)
+    {
+        const double playheadFrac = totalSecs / progLen;
+        timelineShell->setPlayheadFraction(playheadFrac);
+    }
+
+    // 6B: Color position label based on transport state
+    if (transport.isRecording())
+        positionLabel.setColour(juce::Label::textColourId, juce::Colour(0xffdd4444));
+    else if (transport.isPlaying())
+        positionLabel.setColour(juce::Label::textColourId, juce::Colour(0xff6ac87b));
+    else
+        positionLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.80f));
+}
+
+double WorkspaceShellComponent::getProgressionLengthSeconds()
+{
+    auto progressionOpt = getSelectedProgression();
+    if (!progressionOpt.has_value())
+        return 0.0;
+
+    const auto chords = progressionOpt->getChords();
+    if (chords.empty())
+        return 0.0;
+
+    const double bpm = (edit != nullptr && edit->tempoSequence.getTempo(0) != nullptr)
+                           ? edit->tempoSequence.getTempo(0)->getBpm()
+                           : songState.getBpm();
+    const double secPerBeat = 60.0 / bpm;
+
+    double totalBeats = 0.0;
+    for (const auto& chord : chords)
+    {
+        double d = chord.getDurationBeats();
+        totalBeats += (d > 0.0 ? d : 1.0);
+    }
+
+    return totalBeats * secPerBeat;
+}
+
 void WorkspaceShellComponent::loadProgressionToEdit()
 {
     if (edit == nullptr)
@@ -2665,20 +2851,22 @@ void WorkspaceShellComponent::resized()
     auto topBounds = bounds.removeFromTop(topStripHeight);
     topStrip.setBounds(topBounds);
 
-    auto buttonArea = topBounds.removeFromRight(890);
+    auto buttonArea = topBounds.removeFromRight(970);
     redoTheoryButton.setBounds(buttonArea.removeFromRight(112).reduced(4, 6));
     undoTheoryButton.setBounds(buttonArea.removeFromRight(122).reduced(4, 6));
     focusOutButton.setBounds(buttonArea.removeFromRight(118).reduced(4, 6));
     focusBalancedButton.setBounds(buttonArea.removeFromRight(148).reduced(4, 6));
     focusInButton.setBounds(buttonArea.removeFromRight(104).reduced(4, 6));
 
-    // Transport controls (left of focus buttons): BPM, Play, Stop, Rec
+    // Transport controls (left of focus buttons): BPM, Play, Stop, Rec, Loop, Position
     auto bpmArea = buttonArea.removeFromRight(100).reduced(4, 6);
     bpmLabel.setBounds(bpmArea.removeFromLeft(32));
     bpmEditor.setBounds(bpmArea);
     recordButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
     stopButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
     playButton.setBounds(buttonArea.removeFromRight(52).reduced(4, 6));
+    loopButton.setBounds(buttonArea.removeFromRight(44).reduced(4, 6));
+    positionLabel.setBounds(buttonArea.removeFromRight(80).reduced(4, 6));
 
     topTitle.setBounds(topBounds.removeFromLeft(250).reduced(8, 6));
     interactionStatus.setBounds(topBounds.reduced(8, 8));
