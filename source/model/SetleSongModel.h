@@ -46,6 +46,7 @@ struct Schema
     static inline const juce::Identifier symbolProp { "symbol" };
     static inline const juce::Identifier qualityProp { "quality" };
     static inline const juce::Identifier functionProp { "function" };
+    static inline const juce::Identifier sourceProp { "source" };
     static inline const juce::Identifier rootMidiProp { "rootMidi" };
     static inline const juce::Identifier tensionProp { "tension" };
 
@@ -115,6 +116,7 @@ public:
     juce::String getSymbol() const;
     juce::String getQuality() const;
     juce::String getFunction() const;
+    juce::String getSource() const;
     int getRootMidi() const;
     double getStartBeats() const;
     double getDurationBeats() const;
@@ -124,6 +126,7 @@ public:
     void setSymbol(const juce::String& symbol);
     void setQuality(const juce::String& quality);
     void setFunction(const juce::String& chordFunction);
+    void setSource(const juce::String& source);
     void setRootMidi(int rootMidi);
     void setStartBeats(double beats);
     void setDurationBeats(double beats);

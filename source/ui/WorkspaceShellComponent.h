@@ -71,6 +71,7 @@ private:
     void populateTheoryFieldsForCurrentSelection();
     void commitTheoryEditorAction();
     juce::String applyTheoryEditorAction();
+    void runChordTheoryEngineForSelection();
     void updateSelectionFromSelector();
 
     std::optional<model::Section> getSelectedSection();
@@ -141,6 +142,8 @@ private:
     juce::Label theoryEditorHint;
     juce::Label theoryObjectLabel;
     juce::ComboBox theoryObjectSelector;
+    juce::Label progressionTemplateLabel;
+    juce::ComboBox progressionTemplateSelector;
     juce::Label theoryFieldLabel1;
     juce::Label theoryFieldLabel2;
     juce::Label theoryFieldLabel3;
@@ -155,6 +158,7 @@ private:
     juce::TextButton reloadTheoryEditorButton { "Reload" };
     TheoryMenuTarget activeEditorTarget { TheoryMenuTarget::section };
     int activeEditorActionId = 0;
+    int selectedProgressionTemplateIndex = -1;
 
     FocusMode focusMode { FocusMode::balanced };
 

@@ -124,6 +124,10 @@ target_sources(SETLE PRIVATE
     source/Main.cpp
     source/model/SetleSongModel.cpp
     source/model/SetleSongModel.h
+    source/theory/ChordIdentifier.cpp
+    source/theory/ChordIdentifier.h
+    source/theory/DiatonicHarmony.cpp
+    source/theory/DiatonicHarmony.h
     source/ui/WorkspaceShellComponent.cpp
     source/ui/WorkspaceShellComponent.h
 )

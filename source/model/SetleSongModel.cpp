@@ -76,6 +76,7 @@ Chord Chord::create(const juce::String& symbol, const juce::String& quality, int
     tree.setProperty(Schema::symbolProp, symbol, nullptr);
     tree.setProperty(Schema::qualityProp, quality, nullptr);
     tree.setProperty(Schema::functionProp, "", nullptr);
+    tree.setProperty(Schema::sourceProp, "", nullptr);
     tree.setProperty(Schema::rootMidiProp, rootMidi, nullptr);
     tree.setProperty(Schema::startBeatsProp, 0.0, nullptr);
     tree.setProperty(Schema::durationBeatsProp, 4.0, nullptr);
@@ -91,6 +92,7 @@ juce::String Chord::getName() const { return getString(state, Schema::nameProp);
 juce::String Chord::getSymbol() const { return getString(state, Schema::symbolProp); }
 juce::String Chord::getQuality() const { return getString(state, Schema::qualityProp); }
 juce::String Chord::getFunction() const { return getString(state, Schema::functionProp); }
+juce::String Chord::getSource() const { return getString(state, Schema::sourceProp); }
 int Chord::getRootMidi() const { return getInt(state, Schema::rootMidiProp, 60); }
 double Chord::getStartBeats() const { return getDouble(state, Schema::startBeatsProp, 0.0); }
 double Chord::getDurationBeats() const { return getDouble(state, Schema::durationBeatsProp, 4.0); }
@@ -100,6 +102,7 @@ void Chord::setName(const juce::String& name) { state.setProperty(Schema::namePr
 void Chord::setSymbol(const juce::String& symbol) { state.setProperty(Schema::symbolProp, symbol, nullptr); }
 void Chord::setQuality(const juce::String& quality) { state.setProperty(Schema::qualityProp, quality, nullptr); }
 void Chord::setFunction(const juce::String& chordFunction) { state.setProperty(Schema::functionProp, chordFunction, nullptr); }
+void Chord::setSource(const juce::String& source) { state.setProperty(Schema::sourceProp, source, nullptr); }
 void Chord::setRootMidi(int rootMidi) { state.setProperty(Schema::rootMidiProp, rootMidi, nullptr); }
 void Chord::setStartBeats(double beats) { state.setProperty(Schema::startBeatsProp, beats, nullptr); }
 void Chord::setDurationBeats(double beats) { state.setProperty(Schema::durationBeatsProp, beats, nullptr); }

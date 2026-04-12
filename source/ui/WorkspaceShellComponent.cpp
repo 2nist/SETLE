@@ -8,6 +8,9 @@
 #include <functional>
 #include <set>
 
+#include "../theory/ChordIdentifier.h"
+#include "../theory/DiatonicHarmony.h"
+
 namespace te = tracktion::engine;
 
 namespace setle::ui
@@ -247,6 +250,42 @@ juce::String normalizeRepeatIndices(const juce::String& serialized, const juce::
 
     return serializeRepeatIndexSet(parsed);
 }
+
+std::vector<int> intervalsForQuality(const juce::String& quality)
+{
+    const auto q = quality.trim().toLowerCase();
+    if (q == "major") return { 0, 4, 7 };
+    if (q == "minor") return { 0, 3, 7 };
+    if (q == "diminished") return { 0, 3, 6 };
+    if (q == "augmented") return { 0, 4, 8 };
+    if (q == "major7") return { 0, 4, 7, 11 };
+    if (q == "minor7") return { 0, 3, 7, 10 };
+    if (q == "dominant7") return { 0, 4, 7, 10 };
+    if (q == "halfdiminished") return { 0, 3, 6, 10 };
+    if (q == "sus2") return { 0, 2, 7 };
+    if (q == "sus4") return { 0, 5, 7 };
+    return { 0, 4, 7 };
+}
+
+void populateChordNotesFromQuality(model::Chord& chord, double startBeats, double durationBeats)
+{
+    auto chordTree = chord.valueTree();
+    for (int i = chordTree.getNumChildren() - 1; i >= 0; --i)
+        if (chordTree.getChild(i).hasType(model::Schema::noteType))
+            chordTree.removeChild(i, nullptr);
+
+    const auto intervals = intervalsForQuality(chord.getQuality());
+    const auto root = chord.getRootMidi();
+    for (const auto interval : intervals)
+    {
+        chord.addNote(model::Note::create(
+            juce::jlimit(0, 127, root + interval),
+            0.78f,
+            startBeats,
+            durationBeats,
+            1));
+    }
+}
 } // namespace
 
 //==============================================================================
@@ -457,6 +496,13 @@ class WorkspaceShellComponent::TimelineShell final : public juce::Component
 public:
     using ActionCallback = std::function<void(TheoryMenuTarget, int, const juce::String&)>;
 
+    struct ChordView
+    {
+        model::Chord chord;
+        juce::String key;
+        juce::String mode;
+    };
+
     class ContextLane final : public LabelPanel
     {
     public:
@@ -464,6 +510,7 @@ public:
         {
             juce::String id;
             juce::String label;
+            juce::String secondaryLabel;
             float widthFraction { 1.0f };
             double startTimeSeconds { 0.0 };  // 7C: absolute start time for seek
         };
@@ -525,8 +572,23 @@ public:
                 g.fillRoundedRectangle(blockRect, 3.0f);
 
                 g.setColour(isSelected ? juce::Colours::white : juce::Colours::white.withAlpha(0.70f));
-                g.setFont(juce::FontOptions(12.0f));
-                g.drawText(block.label, blockRect.reduced(4.0f, 0.0f), juce::Justification::centredLeft, true);
+                if (block.secondaryLabel.isNotEmpty())
+                {
+                    auto textArea = blockRect.reduced(4.0f, 2.0f).toNearestInt();
+                    auto primary = textArea.removeFromTop(textArea.getHeight() / 2 + 1);
+                    g.setFont(juce::FontOptions(12.0f));
+                    g.drawText(block.label, primary, juce::Justification::centredLeft, true);
+
+                    g.setColour(isSelected ? juce::Colours::white.withAlpha(0.82f)
+                                           : juce::Colours::white.withAlpha(0.58f));
+                    g.setFont(juce::FontOptions(10.0f));
+                    g.drawText(block.secondaryLabel, textArea, juce::Justification::centredLeft, true);
+                }
+                else
+                {
+                    g.setFont(juce::FontOptions(12.0f));
+                    g.drawText(block.label, blockRect.reduced(4.0f, 0.0f), juce::Justification::centredLeft, true);
+                }
 
                 x += w;
             }
@@ -752,6 +814,7 @@ public:
             blockData.push_back({
                 e.id,
                 e.name,
+                {},
                 static_cast<float>(e.beats / totalBeats),
                 cumulativeTime  // 7C: absolute start time for seek
             });
@@ -761,7 +824,7 @@ public:
         sectionLane.setBlocks(std::move(blockData), currentSectionId, std::move(cb));
     }
 
-    void updateChords(const std::vector<model::Chord>& chords,
+    void updateChords(const std::vector<ChordView>& chords,
                       const juce::String& currentChordId,
                       ContextLane::SelectionCallback cb)
     {
@@ -772,21 +835,49 @@ public:
         }
 
         double totalDuration = 0.0;
-        for (const auto& chord : chords)
+        for (const auto& chordView : chords)
         {
+            const auto& chord = chordView.chord;
             double d = chord.getDurationBeats();
             totalDuration += (d > 0.0 ? d : 1.0);
         }
 
         std::vector<ContextLane::BlockData> blockData;
-        for (const auto& chord : chords)
+        for (const auto& chordView : chords)
         {
+            const auto& chord = chordView.chord;
             double d = chord.getDurationBeats();
             if (d <= 0.0) d = 1.0;
-            juce::String label = chord.getSymbol();
+
+            juce::String roman = chord.getSymbol();
+            const auto progressionKey = chordView.key;
+            const auto progressionMode = chordView.mode;
+
+            if (progressionKey.isNotEmpty() && progressionMode.isNotEmpty())
+            {
+                const int keyPc = DiatonicHarmony::pitchClassForRoot(progressionKey);
+                const int chordPc = ((chord.getRootMidi() % 12) + 12) % 12;
+                const int interval = (chordPc - keyPc + 12) % 12;
+
+                const auto intervals = DiatonicHarmony::modeIntervals(progressionMode);
+                const auto romans = DiatonicHarmony::modeRomanNumerals(progressionMode);
+                for (int i = 0; i < 7; ++i)
+                {
+                    if (intervals[static_cast<size_t>(i)] != interval)
+                        continue;
+
+                    roman = romans[static_cast<size_t>(i)];
+                    if (chord.getQuality().containsIgnoreCase("7"))
+                        roman += "7";
+                    break;
+                }
+            }
+
+            juce::String primary = roman;
             if (chord.getFunction().isNotEmpty())
-                label += " [" + chord.getFunction() + "]";
-            blockData.push_back({ chord.getId(), label, static_cast<float>(d / totalDuration) });
+                primary += " [" + chord.getFunction() + "]";
+
+            blockData.push_back({ chord.getId(), primary, chord.getSymbol(), static_cast<float>(d / totalDuration) });
         }
 
         theoryLane.setBlocks(std::move(blockData), currentChordId, std::move(cb));
@@ -1234,6 +1325,8 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
     theoryEditorPanel.addAndMakeVisible(theoryEditorHint);
     theoryEditorPanel.addAndMakeVisible(theoryObjectLabel);
     theoryEditorPanel.addAndMakeVisible(theoryObjectSelector);
+    theoryEditorPanel.addAndMakeVisible(progressionTemplateLabel);
+    theoryEditorPanel.addAndMakeVisible(progressionTemplateSelector);
     theoryEditorPanel.addAndMakeVisible(theoryFieldLabel1);
     theoryEditorPanel.addAndMakeVisible(theoryFieldLabel2);
     theoryEditorPanel.addAndMakeVisible(theoryFieldLabel3);
@@ -1263,6 +1356,7 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
     };
 
     configureFieldLabel(theoryObjectLabel);
+    configureFieldLabel(progressionTemplateLabel);
     configureFieldLabel(theoryFieldLabel1);
     configureFieldLabel(theoryFieldLabel2);
     configureFieldLabel(theoryFieldLabel3);
@@ -1293,6 +1387,56 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
     {
         updateSelectionFromSelector();
         populateTheoryFieldsForCurrentSelection();
+    };
+
+    progressionTemplateLabel.setVisible(false);
+    progressionTemplateSelector.setVisible(false);
+    progressionTemplateSelector.onChange = [this]
+    {
+        selectedProgressionTemplateIndex = progressionTemplateSelector.getSelectedId() - 1;
+
+        if (activeEditorTarget != TheoryMenuTarget::progression || activeEditorActionId != progressionCreateCandidate)
+            return;
+
+        if (selectedProgressionTemplateIndex < 0
+            || selectedProgressionTemplateIndex >= static_cast<int>(DiatonicHarmony::progressionPresets().size()))
+            return;
+
+        const auto& preset = DiatonicHarmony::progressionPresets()[static_cast<size_t>(selectedProgressionTemplateIndex)];
+        auto progression = getSelectedProgression();
+        if (!progression.has_value())
+            return;
+
+        auto progressionTree = progression->valueTree();
+        for (int i = progressionTree.getNumChildren() - 1; i >= 0; --i)
+            if (progressionTree.getChild(i).hasType(model::Schema::chordType))
+                progressionTree.removeChild(i, nullptr);
+
+        double beatCursor = 0.0;
+        const auto generated = DiatonicHarmony::buildProgressionFromTemplate(progression->getKey(), progression->getMode(), preset);
+        for (auto generatedChord : generated)
+        {
+            if (generatedChord.getDurationBeats() <= 0.0)
+                generatedChord.setDurationBeats(4.0);
+
+            generatedChord.setStartBeats(beatCursor);
+            generatedChord.setSource("midi");
+            populateChordNotesFromQuality(generatedChord, beatCursor, generatedChord.getDurationBeats());
+            progression->addChord(generatedChord);
+
+            if (selectedChordId.isEmpty())
+                selectedChordId = generatedChord.getId();
+
+            beatCursor += generatedChord.getDurationBeats();
+        }
+
+        if (beatCursor > 0.0)
+            progression->setLengthBeats(beatCursor);
+
+        saveSongState();
+        refreshTimelineData();
+        populateTheoryObjectSelector();
+        interactionStatus.setText("Template applied: " + preset.name, juce::dontSendNotification);
     };
 
     applyTheoryEditorButton.onClick = [this] { commitTheoryEditorAction(); };
@@ -1540,6 +1684,10 @@ void WorkspaceShellComponent::populateTheoryFieldsForCurrentSelection()
     hideField(theoryFieldLabel3, theoryFieldEditor3);
     hideField(theoryFieldLabel4, theoryFieldEditor4);
     hideField(theoryFieldLabel5, theoryFieldEditor5);
+    progressionTemplateLabel.setVisible(false);
+    progressionTemplateSelector.setVisible(false);
+    progressionTemplateSelector.clear(juce::dontSendNotification);
+    selectedProgressionTemplateIndex = -1;
 
     applyTheoryEditorButton.setButtonText("Apply Edit");
 
@@ -1626,6 +1774,23 @@ void WorkspaceShellComponent::populateTheoryFieldsForCurrentSelection()
                              + juce::String(static_cast<int>(songState.getProgressions().size()) + 1));
                 setField(theoryFieldLabel2, theoryFieldEditor2, "Key", progression->getKey());
                 setField(theoryFieldLabel3, theoryFieldEditor3, "Mode", progression->getMode());
+
+                if (activeEditorActionId == progressionCreateCandidate)
+                {
+                    progressionTemplateLabel.setVisible(true);
+                    progressionTemplateSelector.setVisible(true);
+                    progressionTemplateLabel.setText("Template", juce::dontSendNotification);
+
+                    int itemId = 1;
+                    for (const auto& preset : DiatonicHarmony::progressionPresets())
+                        progressionTemplateSelector.addItem(preset.name + " - " + preset.summary, itemId++);
+
+                    if (progressionTemplateSelector.getNumItems() > 0)
+                        progressionTemplateSelector.setSelectedId(1, juce::dontSendNotification);
+
+                    selectedProgressionTemplateIndex = progressionTemplateSelector.getSelectedId() - 1;
+                }
+
                 applyTheoryEditorButton.setButtonText(activeEditorActionId == progressionGrabSampler
                                                           ? "Create Queue Candidate"
                                                           : "Create Candidate");
@@ -1649,6 +1814,7 @@ void WorkspaceShellComponent::commitTheoryEditorAction()
 
     const auto beforeSnapshot = createSongSnapshot();
     const auto actionResult = applyTheoryEditorAction();
+    runChordTheoryEngineForSelection();
 
     captureUndoStateIfChanged(beforeSnapshot);
     saveSongState();
@@ -1661,6 +1827,55 @@ void WorkspaceShellComponent::commitTheoryEditorAction()
     const auto message = actionResult + " | " + summarizeSongState();
     interactionStatus.setText(message, juce::dontSendNotification);
     DBG(message);
+}
+
+void WorkspaceShellComponent::runChordTheoryEngineForSelection()
+{
+    auto chord = getSelectedChord();
+    auto progression = getSelectedProgression();
+    if (!chord.has_value() || !progression.has_value())
+        return;
+
+    const bool isUserOwned = chord->getSource().equalsIgnoreCase("user");
+
+    std::vector<int> pcs;
+    for (const auto& note : chord->getNotes())
+        pcs.push_back(((note.getPitch() % 12) + 12) % 12);
+
+    if (pcs.size() >= 2 && !isUserOwned)
+    {
+        const auto id = setle::theory::identify(pcs);
+        if (id.confidence >= 0.75f)
+        {
+            const auto currentOctave = chord->getRootMidi() / 12;
+            const int identifiedRoot = DiatonicHarmony::pitchClassForRoot(id.root);
+
+            chord->setRootMidi(juce::jlimit(0, 127, currentOctave * 12 + identifiedRoot));
+            chord->setQuality(id.quality);
+            chord->setSymbol(id.symbol);
+            chord->setName(id.symbol);
+            chord->setSource("midi");
+        }
+    }
+
+    const int keyPc = DiatonicHarmony::pitchClassForRoot(progression->getKey());
+    const int chordPc = ((chord->getRootMidi() % 12) + 12) % 12;
+    const int interval = (chordPc - keyPc + 12) % 12;
+
+    const auto intervals = DiatonicHarmony::modeIntervals(progression->getMode());
+    for (int i = 0; i < 7; ++i)
+    {
+        if (intervals[static_cast<size_t>(i)] != interval)
+            continue;
+
+        const auto diatonic = DiatonicHarmony::buildDiatonicChord(progression->getKey(), progression->getMode(), i);
+        if (!isUserOwned)
+        {
+            chord->setFunction(diatonic.function);
+            chord->setSource("midi");
+        }
+        break;
+    }
 }
 
 juce::String WorkspaceShellComponent::applyTheoryEditorAction()
@@ -1767,6 +1982,7 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
             chord->setFunction(theoryFieldEditor5.getText().trim().isNotEmpty()
                                    ? theoryFieldEditor5.getText().trim()
                                    : chord->getFunction());
+            chord->setSource("user");
             const auto afterSymbol = chord->getSymbol();
             return "Applied chord edit: " + beforeSymbol + " → " + afterSymbol;
         }
@@ -1821,6 +2037,7 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
             chord->setSymbol(substitutionSymbol);
             chord->setName(substitutionSymbol);
             chord->setQuality(quality);
+            chord->setSource("user");
             return "Chord substitution applied from center editor";
         }
 
@@ -1828,6 +2045,7 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
         {
             const auto chordFunction = theoryFieldEditor1.getText().trim();
             chord->setFunction(chordFunction.isNotEmpty() ? chordFunction : nextFunction(chord->getFunction()));
+            chord->setSource("user");
             return "Chord function updated from center editor";
         }
     }
@@ -1901,28 +2119,61 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
             candidate.setVariantOf(progression->getId());
             candidate.setLengthBeats(progression->getLengthBeats());
 
-            for (const auto& sourceChord : progression->getChords())
+            bool usedTemplate = false;
+            if (activeEditorActionId == progressionCreateCandidate
+                && selectedProgressionTemplateIndex >= 0
+                && selectedProgressionTemplateIndex < static_cast<int>(DiatonicHarmony::progressionPresets().size()))
             {
-                auto cloned = model::Chord::create(sourceChord.getSymbol(), sourceChord.getQuality(), sourceChord.getRootMidi());
-                cloned.setName(sourceChord.getName());
-                cloned.setFunction(sourceChord.getFunction());
-                cloned.setStartBeats(sourceChord.getStartBeats());
-                cloned.setDurationBeats(sourceChord.getDurationBeats());
-                cloned.setTension(sourceChord.getTension());
-                for (const auto& sourceNote : sourceChord.getNotes())
-                    cloned.addNote(model::Note::create(sourceNote.getPitch(),
-                                                       sourceNote.getVelocity(),
-                                                       sourceNote.getStartBeats(),
-                                                       sourceNote.getDurationBeats(),
-                                                       sourceNote.getChannel()));
-                candidate.addChord(cloned);
+                const auto& preset = DiatonicHarmony::progressionPresets()[static_cast<size_t>(selectedProgressionTemplateIndex)];
+                const auto generated = DiatonicHarmony::buildProgressionFromTemplate(candidate.getKey(), candidate.getMode(), preset);
+
+                double beatCursor = 0.0;
+                for (auto generatedChord : generated)
+                {
+                    if (generatedChord.getDurationBeats() <= 0.0)
+                        generatedChord.setDurationBeats(4.0);
+
+                    generatedChord.setStartBeats(beatCursor);
+                    generatedChord.setSource("midi");
+                    populateChordNotesFromQuality(generatedChord, beatCursor, generatedChord.getDurationBeats());
+                    candidate.addChord(generatedChord);
+                    beatCursor += generatedChord.getDurationBeats();
+                }
+
+                if (beatCursor > 0.0)
+                    candidate.setLengthBeats(beatCursor);
+
+                usedTemplate = true;
+            }
+
+            if (!usedTemplate)
+            {
+                for (const auto& sourceChord : progression->getChords())
+                {
+                    auto cloned = model::Chord::create(sourceChord.getSymbol(), sourceChord.getQuality(), sourceChord.getRootMidi());
+                    cloned.setName(sourceChord.getName());
+                    cloned.setFunction(sourceChord.getFunction());
+                    cloned.setSource(sourceChord.getSource());
+                    cloned.setStartBeats(sourceChord.getStartBeats());
+                    cloned.setDurationBeats(sourceChord.getDurationBeats());
+                    cloned.setTension(sourceChord.getTension());
+                    for (const auto& sourceNote : sourceChord.getNotes())
+                        cloned.addNote(model::Note::create(sourceNote.getPitch(),
+                                                           sourceNote.getVelocity(),
+                                                           sourceNote.getStartBeats(),
+                                                           sourceNote.getDurationBeats(),
+                                                           sourceNote.getChannel()));
+                    candidate.addChord(cloned);
+                }
             }
 
             songState.addProgression(candidate);
             selectedProgressionId = candidate.getId();
             return activeEditorActionId == progressionGrabSampler
                        ? "Queue candidate created from center editor"
-                       : "Progression candidate created from center editor";
+                       : (usedTemplate
+                              ? "Progression candidate created from selected template"
+                              : "Progression candidate created from center editor");
         }
     }
 
@@ -1956,7 +2207,7 @@ void WorkspaceShellComponent::refreshTimelineData()
     });
 
     // Collect chords from active progressions referenced by the selected section
-    std::vector<model::Chord> visibleChords;
+    std::vector<TimelineShell::ChordView> visibleChords;
     for (const auto& section : sections)
     {
         if (section.getId() != selectedSectionId)
@@ -1968,7 +2219,7 @@ void WorkspaceShellComponent::refreshTimelineData()
                 if (prog.getId() == ref.getProgressionId())
                 {
                     for (const auto& chord : prog.getChords())
-                        visibleChords.push_back(chord);
+                        visibleChords.push_back({ chord, prog.getKey(), prog.getMode() });
                     break;
                 }
             }
@@ -2437,6 +2688,7 @@ juce::String WorkspaceShellComponent::runChordAction(int actionId)
             auto copiedChord = model::Chord::create(sourceChord.getSymbol(), sourceChord.getQuality(), sourceChord.getRootMidi());
             copiedChord.setName(sourceChord.getName());
             copiedChord.setFunction(sourceChord.getFunction());
+            copiedChord.setSource(sourceChord.getSource());
             copiedChord.setStartBeats(sourceChord.getStartBeats());
             copiedChord.setDurationBeats(sourceChord.getDurationBeats());
             copiedChord.setTension(sourceChord.getTension());
@@ -2584,6 +2836,7 @@ juce::String WorkspaceShellComponent::runNoteAction(int actionId)
         chord->setSymbol(symbol);
         chord->setName(symbol);
         chord->setQuality(minorTriad ? "minorTriad" : "majorTriad");
+        chord->setSource("user");
 
         return "Notes converted to chord symbol " + symbol;
     }
@@ -2599,6 +2852,7 @@ juce::String WorkspaceShellComponent::runNoteAction(int actionId)
         auto derivedChord = model::Chord::create(chord->getSymbol(), chord->getQuality(), chord->getRootMidi());
         derivedChord.setName(chord->getName());
         derivedChord.setFunction(chord->getFunction());
+        derivedChord.setSource(chord->getSource());
         derivedChord.setDurationBeats(4.0);
         for (const auto& sourceNote : chord->getNotes())
             derivedChord.addNote(model::Note::create(sourceNote.getPitch(),
@@ -2905,6 +3159,10 @@ void WorkspaceShellComponent::resized()
     auto objectRow = panelBounds.removeFromTop(28);
     theoryObjectLabel.setBounds(objectRow.removeFromLeft(120));
     theoryObjectSelector.setBounds(objectRow);
+
+    auto templateRow = panelBounds.removeFromTop(28);
+    progressionTemplateLabel.setBounds(templateRow.removeFromLeft(120));
+    progressionTemplateSelector.setBounds(templateRow);
 
     auto placeFieldRow = [&panelBounds](juce::Label& label, juce::TextEditor& editor)
     {
