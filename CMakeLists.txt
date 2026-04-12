@@ -122,6 +122,8 @@ juce_add_gui_app(SETLE
 # Sources — just Main.cpp to start
 target_sources(SETLE PRIVATE
     source/Main.cpp
+    source/capture/HistoryBuffer.cpp
+    source/capture/HistoryBuffer.h
     source/model/SetleSongModel.cpp
     source/model/SetleSongModel.h
     source/ui/WorkspaceShellComponent.cpp

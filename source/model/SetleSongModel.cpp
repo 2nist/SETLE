@@ -76,6 +76,7 @@ Chord Chord::create(const juce::String& symbol, const juce::String& quality, int
     tree.setProperty(Schema::symbolProp, symbol, nullptr);
     tree.setProperty(Schema::qualityProp, quality, nullptr);
     tree.setProperty(Schema::functionProp, "", nullptr);
+    tree.setProperty(Schema::sourceProp, "manual", nullptr);
     tree.setProperty(Schema::rootMidiProp, rootMidi, nullptr);
     tree.setProperty(Schema::startBeatsProp, 0.0, nullptr);
     tree.setProperty(Schema::durationBeatsProp, 4.0, nullptr);
@@ -91,6 +92,7 @@ juce::String Chord::getName() const { return getString(state, Schema::nameProp);
 juce::String Chord::getSymbol() const { return getString(state, Schema::symbolProp); }
 juce::String Chord::getQuality() const { return getString(state, Schema::qualityProp); }
 juce::String Chord::getFunction() const { return getString(state, Schema::functionProp); }
+juce::String Chord::getSource() const { return getString(state, Schema::sourceProp, "manual"); }
 int Chord::getRootMidi() const { return getInt(state, Schema::rootMidiProp, 60); }
 double Chord::getStartBeats() const { return getDouble(state, Schema::startBeatsProp, 0.0); }
 double Chord::getDurationBeats() const { return getDouble(state, Schema::durationBeatsProp, 4.0); }
@@ -100,6 +102,7 @@ void Chord::setName(const juce::String& name) { state.setProperty(Schema::namePr
 void Chord::setSymbol(const juce::String& symbol) { state.setProperty(Schema::symbolProp, symbol, nullptr); }
 void Chord::setQuality(const juce::String& quality) { state.setProperty(Schema::qualityProp, quality, nullptr); }
 void Chord::setFunction(const juce::String& chordFunction) { state.setProperty(Schema::functionProp, chordFunction, nullptr); }
+void Chord::setSource(const juce::String& source) { state.setProperty(Schema::sourceProp, source, nullptr); }
 void Chord::setRootMidi(int rootMidi) { state.setProperty(Schema::rootMidiProp, rootMidi, nullptr); }
 void Chord::setStartBeats(double beats) { state.setProperty(Schema::startBeatsProp, beats, nullptr); }
 void Chord::setDurationBeats(double beats) { state.setProperty(Schema::durationBeatsProp, beats, nullptr); }
@@ -307,6 +310,8 @@ Song Song::create(const juce::String& title, double bpm)
     tree.setProperty(Schema::schemaVersionProp, Schema::version, nullptr);
     tree.setProperty(Schema::titleProp, title, nullptr);
     tree.setProperty(Schema::bpmProp, bpm, nullptr);
+    tree.setProperty(Schema::sessionKeyProp, "C", nullptr);
+    tree.setProperty(Schema::sessionModeProp, "ionian", nullptr);
     return Song(tree);
 }
 
@@ -352,9 +357,13 @@ juce::ValueTree Song::valueTree() const { return state; }
 int Song::getSchemaVersion() const { return getInt(state, Schema::schemaVersionProp, 0); }
 juce::String Song::getTitle() const { return getString(state, Schema::titleProp); }
 double Song::getBpm() const { return getDouble(state, Schema::bpmProp, 120.0); }
+juce::String Song::getSessionKey() const { return getString(state, Schema::sessionKeyProp, "C"); }
+juce::String Song::getSessionMode() const { return getString(state, Schema::sessionModeProp, "ionian"); }
 
 void Song::setTitle(const juce::String& title) { state.setProperty(Schema::titleProp, title, nullptr); }
 void Song::setBpm(double bpm) { state.setProperty(Schema::bpmProp, bpm, nullptr); }
+void Song::setSessionKey(const juce::String& sessionKey) { state.setProperty(Schema::sessionKeyProp, sessionKey, nullptr); }
+void Song::setSessionMode(const juce::String& sessionMode) { state.setProperty(Schema::sessionModeProp, sessionMode, nullptr); }
 
 void Song::addProgression(const Progression& progression)
 {
@@ -534,6 +543,12 @@ void Song::ensureSchema()
         if (!state.hasProperty(Schema::bpmProp))
             state.setProperty(Schema::bpmProp, 120.0, nullptr);
 
+        if (!state.hasProperty(Schema::sessionKeyProp))
+            state.setProperty(Schema::sessionKeyProp, "C", nullptr);
+
+        if (!state.hasProperty(Schema::sessionModeProp))
+            state.setProperty(Schema::sessionModeProp, "ionian", nullptr);
+
         getOrCreateContainer(Schema::progressionsContainerType);
         auto sectionsContainer = getOrCreateContainer(Schema::sectionsContainerType);
         getOrCreateContainer(Schema::transitionsContainerType);
@@ -566,6 +581,12 @@ void Song::ensureSchema()
         getOrCreateContainer(Schema::progressionsContainerType);
         getOrCreateContainer(Schema::sectionsContainerType);
         getOrCreateContainer(Schema::transitionsContainerType);
+
+        if (!state.hasProperty(Schema::sessionKeyProp))
+            state.setProperty(Schema::sessionKeyProp, "C", nullptr);
+
+        if (!state.hasProperty(Schema::sessionModeProp))
+            state.setProperty(Schema::sessionModeProp, "ionian", nullptr);
     }
 
     // Future migration blocks go here:
