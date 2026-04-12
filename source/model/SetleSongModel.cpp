@@ -543,6 +543,7 @@ void Song::ensureSchema()
         if (!state.hasProperty(Schema::bpmProp))
             state.setProperty(Schema::bpmProp, 120.0, nullptr);
 
+        // Add session key/mode defaults during v0→1 migration
         if (!state.hasProperty(Schema::sessionKeyProp))
             state.setProperty(Schema::sessionKeyProp, "C", nullptr);
 
@@ -582,6 +583,7 @@ void Song::ensureSchema()
         getOrCreateContainer(Schema::sectionsContainerType);
         getOrCreateContainer(Schema::transitionsContainerType);
 
+        // Also ensure session key/mode exist for v1 songs
         if (!state.hasProperty(Schema::sessionKeyProp))
             state.setProperty(Schema::sessionKeyProp, "C", nullptr);
 

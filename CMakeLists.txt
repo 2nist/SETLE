@@ -131,6 +131,10 @@ target_sources(SETLE PRIVATE
     source/model/SetleSongModel.h
     source/ui/WorkspaceShellComponent.cpp
     source/ui/WorkspaceShellComponent.h
+    source/ui/ProgressionLibraryBrowser.cpp
+    source/ui/ProgressionLibraryBrowser.h
+    source/ui/ProgressionChordPalette.cpp
+    source/ui/ProgressionChordPalette.h
 )
 
 # Compile definitions
