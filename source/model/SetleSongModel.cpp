@@ -352,9 +352,13 @@ juce::ValueTree Song::valueTree() const { return state; }
 int Song::getSchemaVersion() const { return getInt(state, Schema::schemaVersionProp, 0); }
 juce::String Song::getTitle() const { return getString(state, Schema::titleProp); }
 double Song::getBpm() const { return getDouble(state, Schema::bpmProp, 120.0); }
+juce::String Song::getSessionKey() const { return getString(state, Schema::sessionKeyProp, "C"); }
+juce::String Song::getSessionMode() const { return getString(state, Schema::sessionModeProp, "ionian"); }
 
 void Song::setTitle(const juce::String& title) { state.setProperty(Schema::titleProp, title, nullptr); }
 void Song::setBpm(double bpm) { state.setProperty(Schema::bpmProp, bpm, nullptr); }
+void Song::setSessionKey(const juce::String& key) { state.setProperty(Schema::sessionKeyProp, key, nullptr); }
+void Song::setSessionMode(const juce::String& mode) { state.setProperty(Schema::sessionModeProp, mode, nullptr); }
 
 void Song::addProgression(const Progression& progression)
 {
@@ -534,6 +538,13 @@ void Song::ensureSchema()
         if (!state.hasProperty(Schema::bpmProp))
             state.setProperty(Schema::bpmProp, 120.0, nullptr);
 
+        // Add session key/mode defaults during v0→v1 migration
+        if (!state.hasProperty(Schema::sessionKeyProp))
+            state.setProperty(Schema::sessionKeyProp, "C", nullptr);
+
+        if (!state.hasProperty(Schema::sessionModeProp))
+            state.setProperty(Schema::sessionModeProp, "ionian", nullptr);
+
         getOrCreateContainer(Schema::progressionsContainerType);
         auto sectionsContainer = getOrCreateContainer(Schema::sectionsContainerType);
         getOrCreateContainer(Schema::transitionsContainerType);
@@ -566,6 +577,13 @@ void Song::ensureSchema()
         getOrCreateContainer(Schema::progressionsContainerType);
         getOrCreateContainer(Schema::sectionsContainerType);
         getOrCreateContainer(Schema::transitionsContainerType);
+
+        // Also ensure session key/mode exist for v1 songs
+        if (!state.hasProperty(Schema::sessionKeyProp))
+            state.setProperty(Schema::sessionKeyProp, "C", nullptr);
+
+        if (!state.hasProperty(Schema::sessionModeProp))
+            state.setProperty(Schema::sessionModeProp, "ionian", nullptr);
     }
 
     // Future migration blocks go here:

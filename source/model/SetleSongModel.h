@@ -264,9 +264,13 @@ public:
     int getSchemaVersion() const;
     juce::String getTitle() const;
     double getBpm() const;
+    juce::String getSessionKey() const;
+    juce::String getSessionMode() const;
 
     void setTitle(const juce::String& title);
     void setBpm(double bpm);
+    void setSessionKey(const juce::String& key);
+    void setSessionMode(const juce::String& mode);
 
     void addProgression(const Progression& progression);
     void addSection(const Section& section);

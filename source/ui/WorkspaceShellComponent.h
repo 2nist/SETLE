@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "../model/SetleSongModel.h"
+#include "ProgressionLibraryBrowser.h"
+#include "ProgressionChordPalette.h"
 
 namespace te = tracktion::engine;
 
@@ -50,7 +52,9 @@ private:
     juce::String runSectionAction(int actionId);
     juce::String runChordAction(int actionId);
     juce::String runNoteAction(int actionId);
-    juce::String runProgressionAction(int actionId);
+    juce::String runProgressionAction(int actionId, const juce::String& targetProgressionId);
+    void handleProgressionAction(const juce::String& progressionId, int actionId);
+    juce::PopupMenu buildProgressionContextMenu(const juce::String& progressionId);
 
     void initialiseSongState();
     void loadProgressionToEdit();
@@ -110,6 +114,11 @@ private:
     juce::TextButton undoTheoryButton { "Undo Theory" };
     juce::TextButton redoTheoryButton { "Redo Theory" };
 
+    juce::Label sessionKeyLabel;
+    juce::ComboBox sessionKeySelector;
+    juce::Label sessionModeLabel;
+    juce::ComboBox sessionModeSelector;
+
     juce::Label topTitle;
     juce::Label interactionStatus;
 
@@ -147,6 +156,8 @@ private:
     juce::TextEditor theoryFieldEditor5;
     juce::TextButton applyTheoryEditorButton { "Apply Edit" };
     juce::TextButton reloadTheoryEditorButton { "Reload" };
+    std::unique_ptr<ProgressionLibraryBrowser> libraryBrowser;
+    std::unique_ptr<ProgressionChordPalette> chordPalette;
     TheoryMenuTarget activeEditorTarget { TheoryMenuTarget::section };
     int activeEditorActionId = 0;
 

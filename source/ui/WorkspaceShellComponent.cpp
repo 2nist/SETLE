@@ -45,7 +45,16 @@ enum TheoryActionId
     progressionGrabSampler = 401,
     progressionCreateCandidate = 402,
     progressionAnnotateKeyMode = 403,
-    progressionTagTransition = 404
+    progressionTagTransition = 404,
+    progressionEditIdentity = 405,
+    progressionForkVariant = 406,
+    progressionAddChord = 407,
+    progressionClearChords = 408,
+    progressionAssignToSection = 409,
+    progressionSubAllDominants = 410,
+    progressionTransposeToKey = 411,
+    progressionSaveAsTemplate = 412,
+    progressionBrowseLibrary = 420
 };
 
 juce::String chordRootNameForMidi(int midiNote)
@@ -898,6 +907,65 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     topStrip.addAndMakeVisible(focusOutButton);
     topStrip.addAndMakeVisible(undoTheoryButton);
     topStrip.addAndMakeVisible(redoTheoryButton);
+
+    // Session Key/Mode Selectors
+    sessionKeyLabel.setText("Key:", juce::dontSendNotification);
+    sessionKeyLabel.setFont(juce::FontOptions(13.0f));
+    sessionKeyLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.88f));
+    topStrip.addAndMakeVisible(sessionKeyLabel);
+
+    sessionKeySelector.addItem("C", 1);
+    sessionKeySelector.addItem("C#", 2);
+    sessionKeySelector.addItem("D", 3);
+    sessionKeySelector.addItem("Eb", 4);
+    sessionKeySelector.addItem("E", 5);
+    sessionKeySelector.addItem("F", 6);
+    sessionKeySelector.addItem("F#", 7);
+    sessionKeySelector.addItem("G", 8);
+    sessionKeySelector.addItem("Ab", 9);
+    sessionKeySelector.addItem("A", 10);
+    sessionKeySelector.addItem("Bb", 11);
+    sessionKeySelector.addItem("B", 12);
+    sessionKeySelector.setSelectedId(1, juce::dontSendNotification);
+    sessionKeySelector.onChange = [this]()
+    {
+        auto items = juce::StringArray { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+        int selectedId = sessionKeySelector.getSelectedId();
+        if (selectedId >= 1 && selectedId <= 12)
+        {
+            songState.setSessionKey(items[selectedId - 1]);
+            saveSongState();
+            refreshTimelineData();
+        }
+    };
+    topStrip.addAndMakeVisible(sessionKeySelector);
+
+    sessionModeLabel.setText("Mode:", juce::dontSendNotification);
+    sessionModeLabel.setFont(juce::FontOptions(13.0f));
+    sessionModeLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.88f));
+    topStrip.addAndMakeVisible(sessionModeLabel);
+
+    sessionModeSelector.addItem("ionian", 1);
+    sessionModeSelector.addItem("dorian", 2);
+    sessionModeSelector.addItem("phrygian", 3);
+    sessionModeSelector.addItem("lydian", 4);
+    sessionModeSelector.addItem("mixolydian", 5);
+    sessionModeSelector.addItem("aeolian", 6);
+    sessionModeSelector.addItem("locrian", 7);
+    sessionModeSelector.setSelectedId(1, juce::dontSendNotification);
+    sessionModeSelector.onChange = [this]()
+    {
+        auto modes = juce::StringArray { "ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian" };
+        int selectedId = sessionModeSelector.getSelectedId();
+        if (selectedId >= 1 && selectedId <= 7)
+        {
+            songState.setSessionMode(modes[selectedId - 1]);
+            saveSongState();
+            refreshTimelineData();
+        }
+    };
+    topStrip.addAndMakeVisible(sessionModeSelector);
+
     addAndMakeVisible(topStrip);
 
     inPanel = new InDevicePanel(engineRef);
@@ -1123,6 +1191,25 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
     theoryEditorPanel.addAndMakeVisible(theoryFieldEditor5);
     theoryEditorPanel.addAndMakeVisible(applyTheoryEditorButton);
     theoryEditorPanel.addAndMakeVisible(reloadTheoryEditorButton);
+
+    // Create progression library browser and chord palette
+    libraryBrowser = std::make_unique<ProgressionLibraryBrowser>(songState.getSessionKey(), songState.getSessionMode());
+    libraryBrowser->setOnRowClicked([this](const juce::String& templateId)
+    {
+        selectedProgressionId = templateId;
+        handleProgressionAction(templateId, progressionCreateCandidate);
+    });
+    theoryEditorPanel.addAndMakeVisible(*libraryBrowser);
+
+    chordPalette = std::make_unique<ProgressionChordPalette>(songState.getSessionKey(), songState.getSessionMode());
+    chordPalette->setOnCellClicked([this](int degreeIndex)
+    {
+        if (!selectedProgressionId.isEmpty())
+        {
+            handleProgressionAction(selectedProgressionId, progressionAddChord);
+        }
+    });
+    theoryEditorPanel.addAndMakeVisible(*chordPalette);
 
     theoryEditorTitle.setFont(juce::FontOptions(16.0f));
     theoryEditorTitle.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.95f));
@@ -1864,6 +1951,32 @@ void WorkspaceShellComponent::initialiseSongState()
     loadSongState();
     seedSongStateIfNeeded();
     ensureSelectionDefaults();
+    
+    // Restore session key/mode selectors from songState
+    auto sessionKey = songState.getSessionKey();
+    auto sessionMode = songState.getSessionMode();
+    
+    auto keys = juce::StringArray { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    auto modes = juce::StringArray { "ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian" };
+    
+    for (int i = 0; i < keys.size(); ++i)
+    {
+        if (keys[i] == sessionKey)
+        {
+            sessionKeySelector.setSelectedId(i + 1, juce::dontSendNotification);
+            break;
+        }
+    }
+    
+    for (int i = 0; i < modes.size(); ++i)
+    {
+        if (modes[i] == sessionMode)
+        {
+            sessionModeSelector.setSelectedId(i + 1, juce::dontSendNotification);
+            break;
+        }
+    }
+    
     saveSongState();
     refreshTimelineData();
 
@@ -2134,7 +2247,7 @@ juce::String WorkspaceShellComponent::runTheoryAction(TheoryMenuTarget target, i
         case TheoryMenuTarget::note:
             return runNoteAction(actionId);
         case TheoryMenuTarget::progression:
-            return runProgressionAction(actionId);
+            return runProgressionAction(actionId, selectedProgressionId);
     }
 
     return "Unknown action: " + actionName;
@@ -2496,7 +2609,7 @@ juce::String WorkspaceShellComponent::runNoteAction(int actionId)
     return "Note action not implemented";
 }
 
-juce::String WorkspaceShellComponent::runProgressionAction(int actionId)
+juce::String WorkspaceShellComponent::runProgressionAction(int actionId, const juce::String& targetProgressionId)
 {
     if (actionId == progressionGrabSampler || actionId == progressionCreateCandidate || actionId == progressionAnnotateKeyMode)
     {
@@ -2504,9 +2617,9 @@ juce::String WorkspaceShellComponent::runProgressionAction(int actionId)
         return "Progression editor opened in WORK panel";
     }
 
-    auto progression = getSelectedProgression();
+    auto progression = songState.findProgressionById(targetProgressionId);
     if (!progression.has_value())
-        return "Progression action skipped: no selected progression available";
+        return "Progression action skipped: progression not found";
 
     if (actionId == progressionTagTransition)
     {
@@ -2521,7 +2634,97 @@ juce::String WorkspaceShellComponent::runProgressionAction(int actionId)
         return "Progression tagged as transition material";
     }
 
+    // Stub implementations for Phase 10 new actions
+    if (actionId == progressionEditIdentity)
+        return "Edit progression identity...";
+
+    if (actionId == progressionForkVariant)
+        return "Fork as variant...";
+
+    if (actionId == progressionAddChord)
+        return "Add chord at end...";
+
+    if (actionId == progressionClearChords)
+        return "Clear chords...";
+
+    if (actionId == progressionAssignToSection)
+        return "Assign to section...";
+
+    if (actionId == progressionSubAllDominants)
+        return "Sub dominants...";
+
+    if (actionId == progressionTransposeToKey)
+        return "Transpose to session key...";
+
+    if (actionId == progressionSaveAsTemplate)
+        return "Save as template...";
+
     return "Progression action not implemented";
+}
+
+void WorkspaceShellComponent::handleProgressionAction(const juce::String& progressionId, int actionId)
+{
+    selectedProgressionId = progressionId;
+    auto result = runProgressionAction(actionId, progressionId);
+    
+    saveSongState();
+    refreshTimelineData();
+    
+    const auto message = result + " | " + summarizeSongState();
+    interactionStatus.setText(message, juce::dontSendNotification);
+    DBG(message);
+}
+
+juce::PopupMenu WorkspaceShellComponent::buildProgressionContextMenu(const juce::String& progressionId)
+{
+    juce::PopupMenu menu;
+    
+    menu.addItem(progressionEditIdentity, "Edit Identity...");
+    menu.addItem(progressionForkVariant, "Fork as Variant");
+    menu.addSeparator();
+    menu.addItem(progressionAddChord, "Add Chord at End");
+    menu.addItem(progressionClearChords, "Clear All Chords");
+    menu.addSeparator();
+    menu.addItem(progressionAssignToSection, "Assign to Section...");
+    
+    // Find sections that use this progression
+    auto sections = songState.getSections();
+    std::vector<juce::String> usedInSections;
+    for (const auto& section : sections)
+    {
+        auto refs = section.getProgressionRefs();
+        for (const auto& ref : refs)
+        {
+            if (ref.getProgressionId() == progressionId)
+            {
+                usedInSections.push_back(section.getName());
+                break;
+            }
+        }
+    }
+    
+    if (!usedInSections.empty())
+    {
+        juce::String usedInText = "Used in: ";
+        for (size_t i = 0; i < usedInSections.size(); ++i)
+        {
+            usedInText += usedInSections[i];
+            if (i < usedInSections.size() - 1)
+                usedInText += ", ";
+        }
+        menu.addItem(-1, usedInText, false);
+    }
+    
+    menu.addSeparator();
+    menu.addItem(progressionAnnotateKeyMode, "Annotate Key / Mode");
+    menu.addItem(progressionSubAllDominants, "Sub All Dominants");
+    menu.addItem(progressionTransposeToKey, "Transpose to Session Key");
+    menu.addSeparator();
+    menu.addItem(progressionGrabSampler, "Grab to Sampler Queue");
+    menu.addItem(progressionTagTransition, "Tag as Transition Material");
+    menu.addItem(progressionSaveAsTemplate, "Save as Template");
+    
+    return menu;
 }
 
 void WorkspaceShellComponent::clampLayoutValues(int totalTopWidth, int totalBodyHeight)
@@ -2672,7 +2875,13 @@ void WorkspaceShellComponent::resized()
     focusBalancedButton.setBounds(buttonArea.removeFromRight(148).reduced(4, 6));
     focusInButton.setBounds(buttonArea.removeFromRight(104).reduced(4, 6));
 
-    // Transport controls (left of focus buttons): BPM, Play, Stop, Rec
+    // Session key/mode selectors (right of focus buttons)
+    sessionModeLabel.setBounds(buttonArea.removeFromRight(40).reduced(4, 6));
+    sessionModeSelector.setBounds(buttonArea.removeFromRight(90).reduced(4, 6));
+    sessionKeyLabel.setBounds(buttonArea.removeFromRight(35).reduced(4, 6));
+    sessionKeySelector.setBounds(buttonArea.removeFromRight(75).reduced(4, 6));
+
+    // Transport controls (left of selectors): BPM, Play, Stop, Rec
     auto bpmArea = buttonArea.removeFromRight(100).reduced(4, 6);
     bpmLabel.setBounds(bpmArea.removeFromLeft(32));
     bpmEditor.setBounds(bpmArea);

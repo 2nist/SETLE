@@ -776,6 +776,131 @@ bool testChordZeroDurationFallback()
     return ok;
 }
 
+bool testSessionKeyModeSurvivesXmlRoundtrip()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("SessionKeyModeTest", 120.0);
+    song.setSessionKey("D");
+    song.setSessionMode("dorian");
+
+    // Round-trip through XML
+    auto file = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("test_session_xml.setle");
+    auto result = song.saveToFile(file, StorageFormat::xml);
+    if (!result.wasOk())
+        return expect(false, "Failed to save XML file");
+
+    auto loaded = Song::loadFromFile(file, StorageFormat::xml);
+    if (!loaded.has_value())
+        return expect(false, "Failed to load XML file");
+
+    file.deleteFile();
+
+    bool ok = true;
+    ok &= expect(loaded->getSessionKey() == "D", "Session key should be 'D' after XML roundtrip");
+    ok &= expect(loaded->getSessionMode() == "dorian", "Session mode should be 'dorian' after XML roundtrip");
+    return ok;
+}
+
+bool testSessionKeyModeSurvivesBinaryRoundtrip()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("SessionKeyModeBinaryTest", 120.0);
+    song.setSessionKey("F#");
+    song.setSessionMode("lydian");
+
+    // Round-trip through binary
+    auto file = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("test_session_binary.setle");
+    auto result = song.saveToFile(file, StorageFormat::binary);
+    if (!result.wasOk())
+        return expect(false, "Failed to save binary file");
+
+    auto loaded = Song::loadFromFile(file, StorageFormat::binary);
+    if (!loaded.has_value())
+        return expect(false, "Failed to load binary file");
+
+    file.deleteFile();
+
+    bool ok = true;
+    ok &= expect(loaded->getSessionKey() == "F#", "Session key should be 'F#' after binary roundtrip");
+    ok &= expect(loaded->getSessionMode() == "lydian", "Session mode should be 'lydian' after binary roundtrip");
+    return ok;
+}
+
+bool testSessionKeyModeSurvivesGzipRoundtrip()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("SessionKeyModeGzipTest", 120.0);
+    song.setSessionKey("Bb");
+    song.setSessionMode("mixolydian");
+
+    // Round-trip through gzip
+    auto file = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("test_session_gzip.setle.gz");
+    auto result = song.saveToFile(file, StorageFormat::gzipBinary);
+    if (!result.wasOk())
+        return expect(false, "Failed to save gzip file");
+
+    auto loaded = Song::loadFromFile(file, StorageFormat::gzipBinary);
+    if (!loaded.has_value())
+        return expect(false, "Failed to load gzip file");
+
+    file.deleteFile();
+
+    bool ok = true;
+    ok &= expect(loaded->getSessionKey() == "Bb", "Session key should be 'Bb' after gzip roundtrip");
+    ok &= expect(loaded->getSessionMode() == "mixolydian", "Session mode should be 'mixolydian' after gzip roundtrip");
+    return ok;
+}
+
+bool testSessionKeyModeDefaultsOnMigration()
+{
+    using namespace setle::model;
+
+    // Create a song and simulate a v0 file by removing session key/mode properties
+    auto song = Song::create("MigrationDefaultTest", 120.0);
+    song.setSessionKey("E");
+    song.setSessionMode("phrygian");
+
+    auto tree = song.valueTree();
+    tree.removeProperty(Schema::sessionKeyProp, nullptr);
+    tree.removeProperty(Schema::sessionModeProp, nullptr);
+
+    // Create a new Song from the modified tree to trigger ensureSchema()
+    auto migratedSong = Song(tree);
+    migratedSong.valueTree().setProperty(Schema::schemaVersionProp, 0, nullptr);  // Mark as v0
+    migratedSong.valueTree().setProperty(Schema::sessionKeyProp, "INVALID", nullptr);
+    migratedSong.valueTree().removeProperty(Schema::sessionKeyProp, nullptr);
+    migratedSong.valueTree().removeProperty(Schema::sessionModeProp, nullptr);
+
+    // Call ensureSchema() to apply defaults
+    // Note: ensureSchema() is private, so we test via file I/O
+    auto file = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("test_migration_defaults.setle");
+    
+    // Create a minimal v0 song XML manually
+    juce::String xmlContent = R"(<setleSong>
+  <progressions/>
+  <sections/>
+  <transitions/>
+</setleSong>)";
+    
+    file.replaceWithText(xmlContent);
+    auto loaded = Song::loadFromFile(file, StorageFormat::xml);
+    if (!loaded.has_value())
+    {
+        file.deleteFile();
+        return expect(false, "Failed to load migration test file");
+    }
+
+    file.deleteFile();
+
+    bool ok = true;
+    ok &= expect(loaded->getSessionKey() == "C", "Session key should default to 'C' on migration");
+    ok &= expect(loaded->getSessionMode() == "ionian", "Session mode should default to 'ionian' on migration");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -803,6 +928,10 @@ int main()
     ok &= testSectionUnequalWidths();                // P2
     ok &= testChordBeatWidthProportionality();       // P3
     ok &= testChordZeroDurationFallback();           // P4
+    ok &= testSessionKeyModeSurvivesXmlRoundtrip();  // 10B
+    ok &= testSessionKeyModeSurvivesBinaryRoundtrip(); // 10B
+    ok &= testSessionKeyModeSurvivesGzipRoundtrip(); // 10B
+    ok &= testSessionKeyModeDefaultsOnMigration();   // 10B
 
     if (!ok)
         return 1;
