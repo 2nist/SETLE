@@ -1,0 +1,206 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Er besucht den Klostergarten und den Kirchoff, \u00fcber den letztern findet sich folgendes Gedicht",
+  "category": "Classical",
+  "source": "er-besucht-den-klostergarten-und-den-kirchoff-ber-den-letztern-findet-sich-folgendes-gedicht.spl.prg",
+  "chords": [
+    {
+      "symbol": "C minorV[no3][no5]",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V42",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "C minorCad64",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V42",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "C minorCad64",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "Bb majorviio7/V",
+      "quality": "diminished",
+      "rootMidi": 70,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "Bb majorCad64",
+      "quality": "diminished",
+      "rootMidi": 70,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "Bb majorV7[no5]",
+      "quality": "diminished",
+      "rootMidi": 70,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Bb majorviio43[no3]",
+      "quality": "diminished",
+      "rootMidi": 70,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Bb majorviio43[no3]",
+      "quality": "diminished",
+      "rootMidi": 70,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.5
+    },
+    {
+      "symbol": "ii6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "Eb majorCad64",
+      "quality": "diminished",
+      "rootMidi": 63,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "Eb majorV7[no5]",
+      "quality": "diminished",
+      "rootMidi": 63,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 8.0
+    }
+  ]
+}

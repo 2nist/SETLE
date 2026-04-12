@@ -1,4 +1,5 @@
 #include "MixerStrip.h"
+#include "../theme/ThemeManager.h"
 
 namespace setle::mixer
 {
@@ -11,12 +12,13 @@ float dbToLinear(float db)
 
 juce::Colour meterColourForLevel(float linear)
 {
+    const auto& theme = ThemeManager::get().theme();
     const auto db = juce::Decibels::gainToDecibels(juce::jmax(0.000001f, linear), -100.0f);
     if (db >= -3.0f)
-        return juce::Colour(0xffcc3333);
+        return theme.accentWarm;
     if (db >= -6.0f)
-        return juce::Colour(0xffd4aa00);
-    return juce::Colour(0xff44aa44);
+        return theme.zoneD;
+    return theme.zoneC;
 }
 } // namespace
 
@@ -150,9 +152,10 @@ void MixerStrip::resized()
 void MixerStrip::paint(juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    g.setColour(juce::Colour(0xff161a20));
+    const auto& theme = ThemeManager::get().theme();
+    g.setColour(theme.surface1);
     g.fillRoundedRectangle(r, 4.0f);
-    g.setColour(juce::Colour(0xff36414a));
+    g.setColour(theme.surfaceEdge);
     g.drawRoundedRectangle(r.reduced(0.5f), 4.0f, 1.0f);
 
     auto meterBounds = getLocalBounds().reduced(8).withTrimmedTop(20 + 24 + 16).removeFromTop(80);
@@ -162,7 +165,7 @@ void MixerStrip::paint(juce::Graphics& g)
 
     auto drawMeter = [&g](juce::Rectangle<int> area, float level, float hold)
     {
-        g.setColour(juce::Colour(0xff222a30));
+        g.setColour(theme.surface2);
         g.fillRect(area);
 
         const int fill = juce::roundToInt(static_cast<float>(area.getHeight()) * juce::jlimit(0.0f, 1.0f, level));
@@ -174,7 +177,7 @@ void MixerStrip::paint(juce::Graphics& g)
         }
 
         const int holdY = area.getBottom() - juce::roundToInt(static_cast<float>(area.getHeight()) * juce::jlimit(0.0f, 1.0f, hold));
-        g.setColour(juce::Colours::white);
+        g.setColour(theme.inkLight);
         g.fillRect(area.getX(), juce::jlimit(area.getY(), area.getBottom() - 1, holdY), area.getWidth(), 1);
     };
 

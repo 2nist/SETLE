@@ -1,0 +1,188 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Ein recht Gem\u00fcth",
+  "category": "Classical",
+  "source": "ein-recht-gem-th.spl.prg",
+  "chords": [
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 0.5
+    },
+    {
+      "symbol": "F majorV65/vi",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "vi",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "F majorV7/vi",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "vi",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "F majorV42/ii",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "ii6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "ii",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "F majorCad64",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 0.5
+    },
+    {
+      "symbol": "F majorV65/vi",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "vi",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "F majorV7/vi",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "vi",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "F majorV42/ii",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "ii6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "ii",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "F majorCad64",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    }
+  ]
+}

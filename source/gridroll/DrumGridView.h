@@ -3,6 +3,9 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "GridRollCell.h"
+#include "GroovePanel.h"
+#include "DrumPatternBrowser.h"
+#include "DrumPatternLibrary.h"
 
 namespace setle::gridroll
 {
@@ -57,6 +60,8 @@ public:
     void removeRow(int rowIndex);
 
     const std::vector<DrumRow>& getRows() const { return rows; }
+    std::vector<GridRollCell> getActivePatternCells() const;
+    void applyPattern(const DrumPattern& pattern);
 
     /** Enable fill pattern mode for this frame. */
     void setFillMode(bool active);
@@ -116,7 +121,12 @@ private:
     juce::Point<int> dragStartPos;
 
     juce::TextButton fillButton { "Fill" };
+    juce::TextButton patternsButton { "Patterns" };
     juce::ComboBox subdivSelector;
+
+    GroovePanel groovePanel;
+    DrumPatternLibrary patternLibrary;
+    std::unique_ptr<DrumPatternBrowser> patternBrowser;
 
     static constexpr int kHeaderControlH = 24;
 

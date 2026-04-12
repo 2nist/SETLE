@@ -1,0 +1,152 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Flying",
+  "category": "Folk",
+  "source": "flying.spl.prg",
+  "chords": [
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 16.25
+    },
+    {
+      "symbol": "F7",
+      "quality": "dominant7",
+      "rootMidi": 65,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "F",
+      "quality": "major",
+      "rootMidi": 65,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G7",
+      "quality": "dominant7",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 12.0
+    },
+    {
+      "symbol": "C7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 3.75
+    },
+    {
+      "symbol": "F",
+      "quality": "major",
+      "rootMidi": 65,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "F",
+      "quality": "major",
+      "rootMidi": 65,
+      "durationBeats": 3.75
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 11.75
+    },
+    {
+      "symbol": "C7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "F",
+      "quality": "major",
+      "rootMidi": 65,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "F",
+      "quality": "major",
+      "rootMidi": 65,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 15.5
+    },
+    {
+      "symbol": "Amin",
+      "quality": "minor",
+      "rootMidi": 69,
+      "durationBeats": 19.5
+    },
+    {
+      "symbol": "F#dim",
+      "quality": "diminished",
+      "rootMidi": 66,
+      "durationBeats": 29.5
+    }
+  ]
+}

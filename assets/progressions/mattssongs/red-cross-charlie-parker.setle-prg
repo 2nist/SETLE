@@ -1,0 +1,86 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Red Cross - Charlie Parker",
+  "category": "Folk",
+  "source": "red-cross-charlie-parker.spl.prg",
+  "chords": [
+    {
+      "symbol": "Cmaj7",
+      "quality": "major7",
+      "rootMidi": 60,
+      "durationBeats": 10.0
+    },
+    {
+      "symbol": "C#maj7/C",
+      "quality": "major7",
+      "rootMidi": 61,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Cmaj7",
+      "quality": "major7",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "Cmaj7",
+      "quality": "major7",
+      "rootMidi": 60,
+      "durationBeats": 10.0
+    },
+    {
+      "symbol": "C#maj7/C",
+      "quality": "major7",
+      "rootMidi": 61,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Cmaj7",
+      "quality": "major7",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "E(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 64,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "A(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 69,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "D(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "Cmaj7",
+      "quality": "major7",
+      "rootMidi": 60,
+      "durationBeats": 10.0
+    },
+    {
+      "symbol": "C#maj7/C",
+      "quality": "major7",
+      "rootMidi": 61,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Cmaj7",
+      "quality": "major7",
+      "rootMidi": 60,
+      "durationBeats": 8.0
+    }
+  ]
+}

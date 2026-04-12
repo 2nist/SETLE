@@ -1,5 +1,7 @@
 #include "ProgressionLibraryBrowser.h"
 
+#include <juce_core/juce_core.h>
+
 namespace setle::ui
 {
 
@@ -16,6 +18,7 @@ ProgressionLibraryBrowser::ProgressionLibraryBrowser(const juce::String& session
     modeFilter.addItem("Minor", 3);
     modeFilter.addItem("Dorian", 4);
     modeFilter.addItem("Mixolydian", 5);
+    modeFilter.addItem("Bundled", 6);
     modeFilter.setSelectedId(1, juce::dontSendNotification);
     modeFilter.onChange = [this] { rebuildBrowserRows(); };
     addAndMakeVisible(modeFilter);
@@ -30,7 +33,6 @@ ProgressionLibraryBrowser::ProgressionLibraryBrowser(const juce::String& session
     addAndMakeVisible(searchEditor);
 
     addAndMakeVisible(scrollableContainer);
-
     rebuildBrowserRows();
 }
 
@@ -94,20 +96,24 @@ void ProgressionLibraryBrowser::rebuildBrowserRows()
     browserRows.clear();
 
     auto templates = getProgressionTemplates();
+    const auto bundled = getBundledProgressions();
+    templates.insert(templates.end(), bundled.begin(), bundled.end());
+
     auto modeFilterId = modeFilter.getSelectedId();
     auto searchText = searchEditor.getText().toLowerCase();
 
     for (auto& tmpl : templates)
     {
-        // Filter by mode
-        if (modeFilterId != 1)
+        if (modeFilterId == 6 && !tmpl.isBundled)
+            continue;
+
+        if (modeFilterId != 1 && modeFilterId != 6)
         {
             auto modeNames = juce::StringArray { "", "Major", "Minor", "Dorian", "Mixolydian" };
             if (modeFilterId < modeNames.size() && modeNames[modeFilterId] != tmpl.mode)
                 continue;
         }
 
-        // Filter by search text
         if (!searchText.isEmpty() && !tmpl.name.toLowerCase().contains(searchText))
             continue;
 
@@ -117,6 +123,7 @@ void ProgressionLibraryBrowser::rebuildBrowserRows()
             if (onRowClicked)
                 onRowClicked(id);
         });
+
         scrollableContainer.addAndMakeVisible(*row);
         browserRows.push_back(std::move(row));
     }
@@ -126,35 +133,71 @@ void ProgressionLibraryBrowser::rebuildBrowserRows()
 
 std::vector<ProgressionLibraryBrowser::ProgressionTemplate> ProgressionLibraryBrowser::getProgressionTemplates() const
 {
-    // Return a simplified set of template progressions
-    // In a full implementation, these would be loaded from a library file
     return {
-        { "tmpl_1", "I-IV-V", "I–IV–V", "C", "F", "G", "", "major" },
-        { "tmpl_2", "I-V-vi-IV", "I–V–vi–IV", "C", "G", "A", "F", "major" },
-        { "tmpl_3", "i-VII-VI-VII", "i–VII–VI–VII", "A", "G", "F", "G", "minor" },
-        { "tmpl_4", "I-ii-iii-IV", "I–ii–iii–IV", "C", "D", "E", "F", "major" },
-        { "tmpl_5", "vi-IV-I-V", "vi–IV–I–V", "A", "F", "C", "G", "major" },
-        { "tmpl_6", "ii-V-I", "ii–V–I", "D", "G", "C", "", "major" },
+        { "tmpl_1", "I-IV-V", "Templates", "I-IV-V", "C", "F", "G", "", "Major", false },
+        { "tmpl_2", "I-V-vi-IV", "Templates", "I-V-vi-IV", "C", "G", "A", "F", "Major", false },
+        { "tmpl_3", "i-VII-VI-VII", "Templates", "i-VII-VI-VII", "A", "G", "F", "G", "Minor", false },
+        { "tmpl_4", "I-ii-iii-IV", "Templates", "I-ii-iii-IV", "C", "D", "E", "F", "Major", false },
+        { "tmpl_5", "vi-IV-I-V", "Templates", "vi-IV-I-V", "A", "F", "C", "G", "Major", false },
+        { "tmpl_6", "ii-V-I", "Templates", "ii-V-I", "D", "G", "C", "", "Major", false },
     };
+}
+
+std::vector<ProgressionLibraryBrowser::ProgressionTemplate> ProgressionLibraryBrowser::getBundledProgressions() const
+{
+    std::vector<ProgressionTemplate> out;
+
+    const auto appDir = juce::File::getSpecialLocation(juce::File::currentApplicationFile).getParentDirectory();
+    const auto root = appDir.getChildFile("assets").getChildFile("progressions");
+    if (!root.isDirectory())
+        return out;
+
+    for (const auto& dataset : juce::RangedDirectoryIterator(root, false, "*", juce::File::findDirectories))
+    {
+        for (const auto& file : juce::RangedDirectoryIterator(dataset.getFile(), false, "*.setle-prg"))
+        {
+            const auto parsed = juce::JSON::parse(file.getFile().loadFileAsString());
+            auto* obj = parsed.getDynamicObject();
+            if (obj == nullptr)
+                continue;
+
+            ProgressionTemplate tmpl;
+            tmpl.templateId = file.getFile().getFileNameWithoutExtension();
+            tmpl.name = obj->getProperty("name").toString();
+            tmpl.category = obj->getProperty("category").toString();
+            tmpl.degreeSummary = tmpl.category;
+            tmpl.mode = "Bundled";
+            tmpl.isBundled = true;
+
+            if (auto chords = obj->getProperty("chords"); chords.isArray())
+            {
+                auto* arr = chords.getArray();
+                juce::String joined;
+                for (int i = 0; i < juce::jmin(4, arr->size()); ++i)
+                {
+                    auto* chordObj = arr->getReference(i).getDynamicObject();
+                    if (chordObj == nullptr)
+                        continue;
+                    if (i > 0)
+                        joined << " ";
+                    joined << chordObj->getProperty("symbol").toString();
+                }
+                tmpl.chord1 = joined;
+            }
+
+            out.push_back(std::move(tmpl));
+        }
+    }
+
+    return out;
 }
 
 juce::String ProgressionLibraryBrowser::transposeChordToKey(const juce::String& chordSymbol, int degreesFromC) const
 {
-    // Simplified transposition - in full implementation, would use DiatonicHarmony
-    auto keys = juce::StringArray { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
-    auto findKey = [&keys](const juce::String& k)
-    {
-        for (int i = 0; i < keys.size(); ++i)
-            if (keys[i] == k) return i;
-        return 0;
-    };
-
-    int currentKeyIndex = findKey(currentSessionKey);
-    // Stub: return the chord symbol as-is for now
+    (void)degreesFromC;
     return chordSymbol;
 }
 
-// BrowserRow implementation
 ProgressionLibraryBrowser::BrowserRow::BrowserRow(const ProgressionTemplate& tmpl)
     : template_(tmpl)
 {
@@ -167,13 +210,16 @@ void ProgressionLibraryBrowser::BrowserRow::paint(juce::Graphics& g)
 
     g.setColour(juce::Colours::white.withAlpha(0.88f));
     g.setFont(juce::FontOptions(13.0f));
-    
+
     auto bounds = getLocalBounds().reduced(6, 4);
-    g.drawText(template_.name, bounds.removeFromLeft(100), juce::Justification::centredLeft, true);
-    
+    g.drawText(template_.name, bounds.removeFromLeft(180), juce::Justification::centredLeft, true);
+
     g.setOpacity(0.7f);
-    g.drawText(template_.degreeSummary, bounds.removeFromLeft(120), juce::Justification::centredLeft, true);
-    
+    g.drawText(template_.category.isNotEmpty() ? template_.category : template_.degreeSummary,
+               bounds.removeFromLeft(100),
+               juce::Justification::centredLeft,
+               true);
+
     g.setFont(juce::FontOptions(11.0f));
     juce::String chordText = template_.chord1;
     if (!template_.chord2.isEmpty()) chordText += " " + template_.chord2;

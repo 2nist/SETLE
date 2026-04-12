@@ -1,4 +1,5 @@
 #include "ChordGridView.h"
+#include "../theme/ThemeManager.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,11 +10,6 @@ namespace setle::gridroll
 // ---------------------------------------------------------------
 // Colour helpers
 // ---------------------------------------------------------------
-static constexpr juce::uint32 kTonicColour    = 0xffdd9933;  // amber  – tonic
-static constexpr juce::uint32 kPredomColour   = 0xff3377cc;  // blue   – pre-dominant
-static constexpr juce::uint32 kDomColour      = 0xffcc4444;  // red    – dominant
-static constexpr juce::uint32 kNeutralColour  = 0xff556677;  // slate  – unknown
-
 static constexpr int kResizeHandleWidth = 8;
 static constexpr int kMinCellPixelWidth = 20;
 
@@ -22,8 +18,9 @@ ChordGridView::ChordGridView(model::Song& songRef)
     : song(songRef)
 {
     addAndMakeVisible(addChordButton);
-    addChordButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3a4a));
-    addChordButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.8f));
+    const auto& theme = ThemeManager::get().theme();
+    addChordButton.setColour(juce::TextButton::buttonColourId, theme.controlBg);
+    addChordButton.setColour(juce::TextButton::textColourOffId, theme.controlText.withAlpha(0.9f));
     addChordButton.onClick = [this]
     {
         showAddChordPopover(addChordButton.getScreenBounds().getBottomLeft());
@@ -127,13 +124,14 @@ void ChordGridView::rebuildLayoutCache()
 // ---------------------------------------------------------------
 juce::Colour ChordGridView::functionColour(const juce::String& fn) const
 {
+    const auto& theme = ThemeManager::get().theme();
     if (fn == "T" || fn == "tonic" || fn == "t")
-        return juce::Colour(kTonicColour);
+        return theme.zoneB;
     if (fn == "PD" || fn == "subdominant" || fn == "pd")
-        return juce::Colour(kPredomColour);
+        return theme.zoneA;
     if (fn == "D" || fn == "dominant" || fn == "d")
-        return juce::Colour(kDomColour);
-    return juce::Colour(kNeutralColour);
+        return theme.accentWarm;
+    return theme.surfaceEdge;
 }
 
 // ---------------------------------------------------------------
@@ -238,12 +236,13 @@ void ChordGridView::paintCell(juce::Graphics& g,
 // ---------------------------------------------------------------
 void ChordGridView::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff1a2332));
+    const auto& theme = ThemeManager::get().theme();
+    g.fillAll(theme.surface2);
 
     // Beat grid lines
     const double bpp = beatsPerPixel();
     const double total = totalBeats();
-    g.setColour(juce::Colours::white.withAlpha(0.05f));
+    g.setColour(theme.inkLight.withAlpha(0.05f));
     for (double beat = 0.0; beat <= total; beat += 1.0)
     {
         const int x = static_cast<int>(beat / bpp);
@@ -259,7 +258,7 @@ void ChordGridView::paint(juce::Graphics& g)
     if (playheadBeat >= 0.0)
     {
         const int px = static_cast<int>(playheadBeat / bpp);
-        g.setColour(juce::Colour(0xffeeee22));
+        g.setColour(theme.playheadColor.withAlpha(0.9f));
         g.fillRect(px, 0, 2, getHeight());
     }
 }

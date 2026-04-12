@@ -8,6 +8,8 @@
 #include <functional>
 #include <set>
 
+#include "../theme/ThemePresets.h"
+
 namespace te = tracktion::engine;
 
 namespace setle::ui
@@ -1635,6 +1637,15 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     topStrip.addAndMakeVisible(focusOutButton);
     topStrip.addAndMakeVisible(undoTheoryButton);
     topStrip.addAndMakeVisible(redoTheoryButton);
+    topStrip.addAndMakeVisible(themeButton);
+    themeButton.onClick = [this] { showThemeEditor(!themeDismissOverlay.isVisible()); };
+
+    themeDismissOverlay.setAlwaysOnTop(true);
+    themeDismissOverlay.setInterceptsMouseClicks(false, false);
+    addChildComponent(themeDismissOverlay);
+
+    themeEditorPanel = std::make_unique<ThemeEditorPanel>();
+    addChildComponent(*themeEditorPanel);
 
     // Session Key/Mode Selectors
     sessionKeyLabel.setText("Key:", juce::dontSendNotification);
@@ -1820,12 +1831,10 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         bpmEditor.setText(juce::String(bpm, 1), juce::dontSendNotification);
     };
 
-    juce::PropertiesFile::Options options;
-    options.applicationName = "SETLE";
-    options.filenameSuffix = "settings";
-    options.folderName = "SETLE";
-    options.storageFormat = juce::PropertiesFile::storeAsXML;
-    appProperties.setStorageParameters(options);
+    juce::LookAndFeel::setDefaultLookAndFeel(&setleLookAndFeel);
+    ThemeManager::get().addListener(this);
+    ThemeManager::get().applyTheme(ThemePresets::presetByName(setle::state::AppPreferences::get().getActiveThemeName()));
+
     refreshCaptureSourceSelector();
     midiDeviceSignature = buildMidiDeviceSignature();
 
@@ -1835,8 +1844,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     // --- Phase 4: create a single-track Tracktion Edit and sync BPM ---
     edit = te::Edit::createSingleTrackEdit(engineRef);
     historyBuffer = std::make_unique<setle::capture::HistoryBuffer>(64);
-    if (auto* settings = appProperties.getUserSettings())
-        refreshCaptureSourceSelector(settings->getValue("capture.source", ""));
+    refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
     if (grabSamplerQueue != nullptr)
         grabSamplerQueue->setSong(&songState);
     if (edit != nullptr)
@@ -1938,10 +1946,18 @@ WorkspaceShellComponent::~WorkspaceShellComponent()
     stopTimer();
     saveLayoutState();
     saveSongState();
+    ThemeManager::get().removeListener(this);
+    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
 }
 
 bool WorkspaceShellComponent::keyPressed(const juce::KeyPress& key)
 {
+    if (key == juce::KeyPress::escapeKey && themeEditorPanel != nullptr && themeEditorPanel->isVisible())
+    {
+        showThemeEditor(false);
+        return true;
+    }
+
     const auto modifiers = key.getModifiers();
     const auto commandLike = modifiers.isCommandDown() || modifiers.isCtrlDown();
 
@@ -1966,9 +1982,51 @@ bool WorkspaceShellComponent::keyPressed(const juce::KeyPress& key)
     return false;
 }
 
+void WorkspaceShellComponent::mouseDown(const juce::MouseEvent& event)
+{
+    if (themeEditorPanel != nullptr && themeEditorPanel->isVisible() && !themeEditorPanel->getBounds().contains(event.getPosition()))
+    {
+        showThemeEditor(false);
+    }
+}
+
 void WorkspaceShellComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff121417));
+    g.fillAll(ThemeManager::get().theme().surface0);
+}
+
+void WorkspaceShellComponent::themeChanged()
+{
+    if (themeEditorPanel != nullptr)
+        themeEditorPanel->refreshControls();
+    repaintEntireTree();
+}
+
+void WorkspaceShellComponent::repaintEntireTree()
+{
+    std::function<void(juce::Component*)> repaintChildren = [&](juce::Component* component)
+    {
+        if (component == nullptr)
+            return;
+
+        component->repaint();
+        for (int i = 0; i < component->getNumChildComponents(); ++i)
+            repaintChildren(component->getChildComponent(i));
+    };
+
+    repaintChildren(this);
+}
+
+void WorkspaceShellComponent::showThemeEditor(bool shouldShow)
+{
+    if (themeEditorPanel == nullptr)
+        return;
+
+    themeDismissOverlay.setVisible(shouldShow);
+    themeEditorPanel->setVisible(shouldShow);
+    if (shouldShow)
+        themeEditorPanel->toFront(true);
+    resized();
 }
 
 void WorkspaceShellComponent::applyFocusMode(FocusMode mode)
@@ -2002,8 +2060,9 @@ void WorkspaceShellComponent::updateFocusButtonState()
 {
     auto setButtonState = [](juce::TextButton& button, bool active)
     {
-        button.setColour(juce::TextButton::buttonColourId, active ? juce::Colour(0xff2c4a67) : juce::Colour(0xff303338));
-        button.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
+        const auto& theme = ThemeManager::get().theme();
+        button.setColour(juce::TextButton::buttonColourId, active ? theme.controlOnBg : theme.controlBg);
+        button.setColour(juce::TextButton::textColourOffId, active ? theme.controlTextOn : theme.controlText);
     };
 
     setButtonState(focusInButton, focusMode == FocusMode::inFocused);
@@ -2111,37 +2170,80 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
     };
 
     // ---- Tab strip ----
-    for (auto* btn : { &workTabTheoryButton, &workTabGridRollButton })
+    for (auto* btn : { &workTabTheoryButton, &workTabGridRollButton, &workTabFxButton })
     {
         btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
         workPanel->addAndMakeVisible(*btn);
     }
     workTabTheoryButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c4a67)); // default active
     workTabGridRollButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
-    workTabTheoryButton.onClick  = [this] { switchWorkTab(false); };
-    workTabGridRollButton.onClick = [this] { switchWorkTab(true); };
+    workTabFxButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
+    workTabTheoryButton.onClick   = [this] { switchWorkTab(0); };
+    workTabGridRollButton.onClick  = [this] { switchWorkTab(1); };
+    workTabFxButton.onClick        = [this] { switchWorkTab(2); };
+
+    // Create EffBuilderComponent
+    effBuilderComponent = std::make_unique<setle::eff::EffBuilderComponent>();
+    workPanel->addAndMakeVisible(*effBuilderComponent);
+    effBuilderComponent->setVisible(false);
+
     // gridRollComponent is created later in the constructor after edit is initialised
 }
 
-void WorkspaceShellComponent::switchWorkTab(bool showGridRoll)
+void WorkspaceShellComponent::switchWorkTab(int tabIndex)
 {
-    workPanelShowGridRoll = showGridRoll;
+    workPanelTabIndex    = tabIndex;
+    workPanelShowGridRoll = (tabIndex == 1);
 
-    theoryEditorPanel.setVisible(!showGridRoll);
+    theoryEditorPanel.setVisible(tabIndex == 0);
+
     if (gridRollComponent != nullptr)
     {
-        if (showGridRoll)
+        if (tabIndex == 1)
             gridRollComponent->setTheorySnap(theorySnap);
-        gridRollComponent->setVisible(showGridRoll);
+        gridRollComponent->setVisible(tabIndex == 1);
+    }
+
+    if (effBuilderComponent != nullptr)
+    {
+        effBuilderComponent->setVisible(tabIndex == 2);
+
+        if (tabIndex == 2)
+        {
+            // Wire up the first available active slot's eff processor
+            for (auto& [trackId, slot] : instrumentSlots)
+            {
+                if (slot != nullptr && slot->getInfo().isActive)
+                {
+                    selectedFxTrackId = trackId;
+                    auto* proc = slot->getEffProcessor();
+                    if (proc == nullptr)
+                    {
+                        // Create an empty chain for this track on first visit
+                        setle::eff::EffDefinition emptyDef;
+                        emptyDef.effId    = juce::Uuid().toString();
+                        emptyDef.name     = "Track FX";
+                        emptyDef.schemaVersion = 1;
+                        slot->loadEffChain(emptyDef);
+                        proc = slot->getEffProcessor();
+                    }
+                    const auto effFile = getEffFileForTrack(trackId);
+                    effBuilderComponent->loadDefinition(proc, proc->getDefinition(), effFile);
+                    break;
+                }
+            }
+        }
     }
 
     // Update tab button visual state
     const auto activeCol   = juce::Colour(0xff2c4a67);
     const auto inactiveCol = juce::Colour(0xff2a3040);
     workTabTheoryButton.setColour(juce::TextButton::buttonColourId,
-                                   showGridRoll ? inactiveCol : activeCol);
+                                   tabIndex == 0 ? activeCol : inactiveCol);
     workTabGridRollButton.setColour(juce::TextButton::buttonColourId,
-                                    showGridRoll ? activeCol : inactiveCol);
+                                    tabIndex == 1 ? activeCol : inactiveCol);
+    workTabFxButton.setColour(juce::TextButton::buttonColourId,
+                               tabIndex == 2 ? activeCol : inactiveCol);
     resized();
 }
 
@@ -2982,12 +3084,27 @@ void WorkspaceShellComponent::applyDrumPatternToSlots(const std::vector<setle::g
 {
     (void) progressionId;
 
+    std::map<int, float> swingByNote;
+    for (const auto& cell : cells)
+    {
+        if (cell.type != setle::gridroll::GridRollCell::CellType::DrumHit)
+            continue;
+        swingByNote[cell.midiNote] = juce::jmax(swingByNote[cell.midiNote], cell.swing);
+    }
+
     ensureInstrumentSlots();
     for (auto& [trackId, slot] : instrumentSlots)
     {
         (void) trackId;
         if (slot != nullptr)
+        {
             slot->setDrumPattern(cells);
+            if (auto* processor = slot->getEffProcessor())
+            {
+                for (const auto& [midiNote, swing] : swingByNote)
+                    processor->setDrumSwingForNote(midiNote, swing);
+            }
+        }
     }
 }
 
@@ -3004,11 +3121,7 @@ void WorkspaceShellComponent::initialiseSongState()
     seedSongStateIfNeeded();
     ensureSelectionDefaults();
 
-    juce::String savedCaptureSource;
-    if (auto* settings = appProperties.getUserSettings())
-        savedCaptureSource = settings->getValue("capture.source", "");
-
-    refreshCaptureSourceSelector(savedCaptureSource);
+    refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
 
     // Restore session key/mode selectors from songState
     {
@@ -3039,6 +3152,7 @@ void WorkspaceShellComponent::initialiseSongState()
 
     saveSongState();
     refreshTimelineData();
+    loadEffChains();
 
     interactionStatus.setText("Theory state ready - " + summarizeSongState(), juce::dontSendNotification);
 }
@@ -3134,10 +3248,54 @@ void WorkspaceShellComponent::saveSongState()
         return;
 
     persistInstrumentSlotAssignments();
+    saveEffChains();
 
     const auto result = songState.saveToFile(getSongStateFile(), model::StorageFormat::xml);
     if (result.failed())
         DBG("Failed to save song state: " + result.getErrorMessage());
+}
+
+juce::File WorkspaceShellComponent::getEffectsFolder() const
+{
+    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+        .getChildFile("SETLE")
+        .getChildFile("effects");
+}
+
+juce::File WorkspaceShellComponent::getEffFileForTrack(const juce::String& trackId) const
+{
+    return getEffectsFolder().getChildFile(trackId + ".eff");
+}
+
+void WorkspaceShellComponent::saveEffChains()
+{
+    for (auto& [trackId, slot] : instrumentSlots)
+    {
+        if (slot == nullptr) continue;
+        auto* proc = slot->getEffProcessor();
+        if (proc == nullptr) continue;
+        const auto& def = proc->getDefinition();
+        if (def.effId.isEmpty()) continue;
+
+        const auto file = getEffFileForTrack(trackId);
+        file.getParentDirectory().createDirectory();
+        setle::eff::EffSerializer::saveToFile(def, file);
+    }
+}
+
+void WorkspaceShellComponent::loadEffChains()
+{
+    for (auto& [trackId, slot] : instrumentSlots)
+    {
+        if (slot == nullptr) continue;
+        const auto file = getEffFileForTrack(trackId);
+        if (!file.existsAsFile()) continue;
+
+        const auto def = setle::eff::EffSerializer::loadFromFile(file);
+        if (def.effId.isEmpty()) continue;
+
+        slot->loadEffChain(def);
+    }
 }
 
 juce::String WorkspaceShellComponent::createSongSnapshot() const
@@ -4081,8 +4239,7 @@ void WorkspaceShellComponent::applyCaptureSourceSelection()
     else
         historyBuffer->setSource(identifier);
 
-    if (auto* settings = appProperties.getUserSettings())
-        settings->setValue("capture.source", identifier);
+    setle::state::AppPreferences::get().setCaptureSource(identifier);
 }
 
 juce::String WorkspaceShellComponent::buildMidiDeviceSignature() const
@@ -4166,32 +4323,25 @@ void WorkspaceShellComponent::clampLayoutValues(int totalTopWidth, int totalBody
 
 void WorkspaceShellComponent::loadLayoutState()
 {
-    if (auto* settings = appProperties.getUserSettings())
-    {
-        leftPanelWidth = settings->getIntValue("ui.leftWidth", leftPanelWidth);
-        rightPanelWidth = settings->getIntValue("ui.rightWidth", rightPanelWidth);
-        timelineHeight = settings->getIntValue("ui.timelineHeight", timelineHeight);
+    leftPanelWidth = setle::state::AppPreferences::get().getUiLeftWidth(leftPanelWidth);
+    rightPanelWidth = setle::state::AppPreferences::get().getUiRightWidth(rightPanelWidth);
+    timelineHeight = setle::state::AppPreferences::get().getUiTimelineHeight(timelineHeight);
 
-        const auto modeRaw = settings->getIntValue("ui.focusMode", static_cast<int>(FocusMode::balanced));
-        if (modeRaw == static_cast<int>(FocusMode::inFocused))
-            focusMode = FocusMode::inFocused;
-        else if (modeRaw == static_cast<int>(FocusMode::outFocused))
-            focusMode = FocusMode::outFocused;
-        else
-            focusMode = FocusMode::balanced;
-    }
+    const auto modeRaw = setle::state::AppPreferences::get().getUiFocusMode(static_cast<int>(FocusMode::balanced));
+    if (modeRaw == static_cast<int>(FocusMode::inFocused))
+        focusMode = FocusMode::inFocused;
+    else if (modeRaw == static_cast<int>(FocusMode::outFocused))
+        focusMode = FocusMode::outFocused;
+    else
+        focusMode = FocusMode::balanced;
 }
 
 void WorkspaceShellComponent::saveLayoutState()
 {
-    if (auto* settings = appProperties.getUserSettings())
-    {
-        settings->setValue("ui.leftWidth", leftPanelWidth);
-        settings->setValue("ui.rightWidth", rightPanelWidth);
-        settings->setValue("ui.timelineHeight", timelineHeight);
-        settings->setValue("ui.focusMode", static_cast<int>(focusMode));
-        settings->saveIfNeeded();
-    }
+    setle::state::AppPreferences::get().setUiLeftWidth(leftPanelWidth);
+    setle::state::AppPreferences::get().setUiRightWidth(rightPanelWidth);
+    setle::state::AppPreferences::get().setUiTimelineHeight(timelineHeight);
+    setle::state::AppPreferences::get().setUiFocusMode(static_cast<int>(focusMode));
 }
 
 void WorkspaceShellComponent::timerCallback()
@@ -4201,11 +4351,7 @@ void WorkspaceShellComponent::timerCallback()
     {
         midiDeviceSignature = signature;
 
-        juce::String preferredSource;
-        if (auto* settings = appProperties.getUserSettings())
-            preferredSource = settings->getValue("capture.source", "");
-
-        refreshCaptureSourceSelector(preferredSource);
+        refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
     }
 
     if (edit == nullptr)
@@ -4469,6 +4615,7 @@ void WorkspaceShellComponent::resized()
     topStrip.setBounds(topBounds);
 
     auto buttonArea = topBounds.removeFromRight(1410);
+    themeButton.setBounds(buttonArea.removeFromRight(72).reduced(4, 6));
     redoTheoryButton.setBounds(buttonArea.removeFromRight(112).reduced(4, 6));
     undoTheoryButton.setBounds(buttonArea.removeFromRight(122).reduced(4, 6));
     focusOutButton.setBounds(buttonArea.removeFromRight(118).reduced(4, 6));
@@ -4527,6 +4674,7 @@ void WorkspaceShellComponent::resized()
         auto tabRow = workLocal.removeFromTop(28);
         workTabTheoryButton.setBounds(tabRow.removeFromLeft(120).reduced(2, 2));
         workTabGridRollButton.setBounds(tabRow.removeFromLeft(100).reduced(2, 2));
+        workTabFxButton.setBounds(tabRow.removeFromLeft(60).reduced(2, 2));
     }
     workLocal.removeFromTop(6); // gap between tabs and content
 
@@ -4535,6 +4683,9 @@ void WorkspaceShellComponent::resized()
 
     if (gridRollComponent != nullptr)
         gridRollComponent->setBounds(editorBounds);
+
+    if (effBuilderComponent != nullptr)
+        effBuilderComponent->setBounds(editorBounds);
 
     auto panelBounds = theoryEditorPanel.getLocalBounds().reduced(10);
 
@@ -4565,6 +4716,12 @@ void WorkspaceShellComponent::resized()
     reloadTheoryEditorButton.setBounds(buttonRow.removeFromRight(96));
     buttonRow.removeFromRight(6);
     applyTheoryEditorButton.setBounds(buttonRow.removeFromRight(140));
+
+    if (themeEditorPanel != nullptr)
+    {
+        themeDismissOverlay.setBounds(getLocalBounds());
+        themeEditorPanel->setBounds(getWidth() - 320, topStripHeight, 320, getHeight() - topStripHeight);
+    }
 }
 
 } // namespace setle::ui

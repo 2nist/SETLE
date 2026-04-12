@@ -23,9 +23,11 @@ private:
     {
         juce::String templateId;
         juce::String name;
+        juce::String category;
         juce::String degreeSummary;
         juce::String chord1, chord2, chord3, chord4;
         juce::String mode; // "major", "minor", "dorian", "mixolydian"
+        bool isBundled { false };
     };
 
     class BrowserRow final : public juce::Component
@@ -49,6 +51,7 @@ private:
 
     void rebuildBrowserRows();
     std::vector<ProgressionTemplate> getProgressionTemplates() const;
+    std::vector<ProgressionTemplate> getBundledProgressions() const;
     juce::String transposeChordToKey(const juce::String& chordSymbol, int degreesFromC) const;
     
     juce::Label filterLabel;

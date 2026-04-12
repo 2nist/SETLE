@@ -1,4 +1,5 @@
 #include "DrumGridView.h"
+#include "DrumPatternMidiReader.h"
 
 #include <algorithm>
 #include <cmath>
@@ -46,6 +47,39 @@ DrumGridView::DrumGridView()
         }
         repaint();
     };
+
+    addAndMakeVisible(patternsButton);
+    patternsButton.onClick = [this]
+    {
+        if (patternBrowser == nullptr)
+        {
+            patternBrowser = std::make_unique<DrumPatternBrowser>(patternLibrary);
+            patternBrowser->onPatternSelected = [this](const DrumPattern& pattern) { applyPattern(pattern); };
+            addAndMakeVisible(*patternBrowser);
+        }
+
+        patternBrowser->setVisible(!patternBrowser->isVisible());
+        resized();
+    };
+
+    addChildComponent(groovePanel);
+    groovePanel.onGrooveChanged = [this](int rowIndex, GroovePanel::RowGroove groove)
+    {
+        if (rowIndex < 0 || rowIndex >= static_cast<int>(rows.size()))
+            return;
+
+        auto& row = rows[static_cast<size_t>(rowIndex)];
+        auto& cells = fillModeActive ? row.fillCells : row.cells;
+        for (auto& cell : cells)
+            cell.swing = groove.swingPercent;
+        if (onCellsChanged)
+            onCellsChanged();
+    };
+
+    auto appDir = juce::File::getSpecialLocation(juce::File::currentApplicationFile).getParentDirectory();
+    auto patternsRoot = appDir.getChildFile("assets").getChildFile("patterns");
+    auto manifest = patternsRoot.getChildFile("pattern_manifest_batch.json");
+    patternLibrary.loadFromManifest(manifest, patternsRoot);
 }
 
 // ---------------------------------------------------------------
@@ -82,6 +116,35 @@ void DrumGridView::removeRow(int rowIndex)
     rows.erase(rows.begin() + rowIndex);
     setSize(getWidth(), totalHeight() + kHeaderControlH);
     repaint();
+}
+
+std::vector<GridRollCell> DrumGridView::getActivePatternCells() const
+{
+    std::vector<GridRollCell> out;
+
+    for (const auto& row : rows)
+    {
+        const auto& cells = fillModeActive ? row.fillCells : row.cells;
+        if (cells.empty() || row.steps <= 0)
+            continue;
+
+        const float stepBeats = 1.0f / static_cast<float>(row.steps);
+        for (size_t i = 0; i < cells.size(); ++i)
+        {
+            const auto& src = cells[i];
+            if (src.muted)
+                continue;
+
+            auto cell = src;
+            cell.type = GridRollCell::CellType::DrumHit;
+            cell.midiNote = row.midiNote;
+            cell.startBeat = static_cast<float>(i) * stepBeats;
+            cell.durationBeats = stepBeats;
+            out.push_back(std::move(cell));
+        }
+    }
+
+    return out;
 }
 
 void DrumGridView::ensureSteps(DrumRow& row)
@@ -344,6 +407,14 @@ void DrumGridView::resized()
     // Place top controls
     fillButton.setBounds(kHeaderWidth, 3, 44, 18);
     subdivSelector.setBounds(kHeaderWidth + 50, 3, 80, 18);
+    patternsButton.setBounds(kHeaderWidth + 136, 3, 66, 18);
+
+    if (patternBrowser != nullptr && patternBrowser->isVisible())
+        patternBrowser->setBounds(getWidth() - 360, kHeaderControlH + 2, 356, juce::jmin(240, getHeight() - kHeaderControlH - 4));
+
+    if (groovePanel.isVisible())
+        groovePanel.setBounds(getWidth() - 210, kHeaderControlH + 2, 206, 96);
+
     setSize(getWidth(), totalHeight() + kHeaderControlH);
 }
 
@@ -453,6 +524,7 @@ void DrumGridView::showRowContextMenu(int rowIndex, juce::Point<int> screenPos)
     menu.addItem(1, "Add Row");
     menu.addItem(2, "Remove Row");
     menu.addItem(3, "Assign MIDI Note...");
+    menu.addItem(8, "Set Groove...");
     menu.addSeparator();
     menu.addItem(10, "Set Pattern Length → 1 bar",  true,
                  rows[static_cast<size_t>(rowIndex)].patternBars == 1);
@@ -503,6 +575,13 @@ void DrumGridView::showRowContextMenu(int rowIndex, juce::Point<int> screenPos)
                 }
             });
     }
+    else if (result == 8)
+    {
+        groovePanel.openForRow(rowIndex);
+        groovePanel.setVisible(true);
+        resized();
+        groovePanel.grabKeyboardFocus();
+    }
     else if (result >= 10 && result <= 13)
     {
         rows[static_cast<size_t>(rowIndex)].patternBars = result - 9;
@@ -511,6 +590,38 @@ void DrumGridView::showRowContextMenu(int rowIndex, juce::Point<int> screenPos)
         repaint();
         if (onCellsChanged) onCellsChanged();
     }
+}
+
+void DrumGridView::applyPattern(const DrumPattern& pattern)
+{
+    auto parsed = DrumPatternMidiReader::readFile(pattern.midiFile, kDefaultSteps);
+    if (!parsed.success)
+        return;
+
+    for (auto& row : rows)
+    {
+        ensureSteps(row);
+        auto& cells = fillModeActive ? row.fillCells : row.cells;
+        for (auto& cell : cells)
+            cell.muted = true;
+    }
+
+    for (const auto& [step, velocity] : parsed.stepEvents)
+    {
+        for (auto& row : rows)
+        {
+            auto& cells = fillModeActive ? row.fillCells : row.cells;
+            if (step < 0 || step >= static_cast<int>(cells.size()))
+                continue;
+            auto& cell = cells[static_cast<size_t>(step)];
+            cell.muted = false;
+            cell.velocity = juce::jlimit(0.0f, 1.0f, static_cast<float>(velocity) / 127.0f);
+        }
+    }
+
+    if (onCellsChanged)
+        onCellsChanged();
+    repaint();
 }
 
 // ---------------------------------------------------------------

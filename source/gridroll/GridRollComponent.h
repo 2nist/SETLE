@@ -7,6 +7,7 @@
 #include "DrumGridView.h"
 #include "NoteDetailView.h"
 #include "../model/SetleSongModel.h"
+#include "../theme/ThemeManager.h"
 
 namespace te = tracktion::engine;
 
@@ -49,6 +50,9 @@ public:
     /** Called when a status message should be shown. */
     std::function<void(const juce::String&)> onStatusMessage;
 
+    /** Called when drum pattern cells change and should be pushed to drum instruments. */
+    std::function<void(const std::vector<GridRollCell>&, const juce::String& progressionId)> onDrumPatternEdited;
+
     void resized() override;
     void paint(juce::Graphics& g) override;
 
@@ -58,6 +62,7 @@ private:
     // ---------------------------------------------------------------
     void applyMode();
     void syncChordCellsToModel();
+    void syncDrumCellsToBackend();
     void openNoteDetail(int cellIndex);
     void closeNoteDetail();
 
@@ -84,6 +89,8 @@ private:
     juce::TextButton splitModeButton { "Split" };
     juce::Label      progressionName;
     juce::Label      sessionKeyDisplay;
+    juce::ToggleButton scaleLockToggle { "Scale" };
+    juce::ToggleButton chordLockToggle { "Chord" };
     juce::TextButton zoomInButton    { "+" };
     juce::TextButton zoomOutButton   { "-" };
 

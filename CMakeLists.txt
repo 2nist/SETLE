@@ -173,8 +173,34 @@ target_sources(SETLE PRIVATE
     source/gridroll/NoteDetailView.h
     source/gridroll/DrumGridView.cpp
     source/gridroll/DrumGridView.h
+    source/gridroll/GroovePanel.cpp
+    source/gridroll/GroovePanel.h
+    source/gridroll/DrumPatternLibrary.cpp
+    source/gridroll/DrumPatternLibrary.h
+    source/gridroll/DrumPatternBrowser.cpp
+    source/gridroll/DrumPatternBrowser.h
+    source/gridroll/DrumPatternMidiReader.cpp
+    source/gridroll/DrumPatternMidiReader.h
     source/gridroll/GridRollComponent.cpp
     source/gridroll/GridRollComponent.h
+    source/midi/MidiConstraintEngine.cpp
+    source/midi/MidiConstraintEngine.h
+    source/theory/DiatonicHarmony.cpp
+    source/theory/DiatonicHarmony.h
+    source/theory/TheoryAdapter.cpp
+    source/theory/TheoryAdapter.h
+    source/theory/BachTheory.cpp
+    source/theory/BachTheory.h
+    source/state/AppPreferences.cpp
+    source/state/AppPreferences.h
+    source/theme/ThemeData.h
+    source/theme/ThemeManager.cpp
+    source/theme/ThemeManager.h
+    source/theme/ThemePresets.cpp
+    source/theme/ThemePresets.h
+    source/theme/SetleLookAndFeel.h
+    source/theme/ThemeEditorPanel.cpp
+    source/theme/ThemeEditorPanel.h
     source/model/SetleSongModel.cpp
     source/model/SetleSongModel.h
     source/mixer/BusManager.cpp
@@ -197,6 +223,17 @@ target_sources(SETLE PRIVATE
     source/ui/ProgressionLibraryBrowser.h
     source/ui/ProgressionChordPalette.cpp
     source/ui/ProgressionChordPalette.h
+    source/eff/EffModel.h
+    source/eff/EffSerializer.h
+    source/eff/EffSerializer.cpp
+    source/eff/EffProcessor.h
+    source/eff/EffProcessor.cpp
+    source/eff/EffTemplates.h
+    source/eff/EffTemplates.cpp
+    source/eff/EffBlockPickerOverlay.h
+    source/eff/EffBlockPickerOverlay.cpp
+    source/eff/EffBuilderComponent.h
+    source/eff/EffBuilderComponent.cpp
 )
 
 # Compile definitions

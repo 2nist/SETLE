@@ -1,0 +1,128 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Wild Honey Pie",
+  "category": "Folk",
+  "source": "wild-honey-pie.spl.prg",
+  "chords": [
+    {
+      "symbol": "G7",
+      "quality": "dominant7",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "F7",
+      "quality": "dominant7",
+      "rootMidi": 65,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "E7",
+      "quality": "dominant7",
+      "rootMidi": 64,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "Eb7",
+      "quality": "dominant7",
+      "rootMidi": 63,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G7",
+      "quality": "dominant7",
+      "rootMidi": 67,
+      "durationBeats": 12.0
+    },
+    {
+      "symbol": "F7",
+      "quality": "dominant7",
+      "rootMidi": 65,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "E7",
+      "quality": "dominant7",
+      "rootMidi": 64,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Eb7",
+      "quality": "dominant7",
+      "rootMidi": 63,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G7",
+      "quality": "dominant7",
+      "rootMidi": 67,
+      "durationBeats": 12.0
+    },
+    {
+      "symbol": "F7",
+      "quality": "dominant7",
+      "rootMidi": 65,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "E7",
+      "quality": "dominant7",
+      "rootMidi": 64,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "Eb7",
+      "quality": "dominant7",
+      "rootMidi": 63,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G7",
+      "quality": "dominant7",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "F7",
+      "quality": "dominant7",
+      "rootMidi": 65,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G7",
+      "quality": "dominant7",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "F7",
+      "quality": "dominant7",
+      "rootMidi": 65,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G7",
+      "quality": "dominant7",
+      "rootMidi": 67,
+      "durationBeats": 4.25
+    }
+  ]
+}

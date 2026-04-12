@@ -4,6 +4,7 @@
 
 #include "GridRollCell.h"
 #include "../model/SetleSongModel.h"
+#include "../midi/MidiConstraintEngine.h"
 
 namespace setle::gridroll
 {
@@ -45,6 +46,10 @@ public:
                   const juce::String& sessionMode);
 
     const std::vector<model::Note>& getNotes() const { return notes; }
+    void setScaleLock(bool enabled);
+    void setChordLock(bool enabled);
+    bool getScaleLock() const noexcept;
+    bool getChordLock() const noexcept;
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -94,6 +99,13 @@ private:
     juce::String sessionMode { "ionian" };
     std::vector<int> scaleIntervals; // 0–11 pitch classes in key
     std::vector<int> chordTones;     // pitch class indices from cell
+    juce::String currentChordSymbol;
+
+    midi::MidiConstraintEngine constraintEngine;
+
+    juce::ToggleButton scaleLockButton { "Scale Lock" };
+    juce::ToggleButton chordLockButton { "Chord Lock" };
+    static constexpr int kHeaderHeight = 24;
 
     // Drag state
     enum class DragKind { None, AddNote, MoveNote, ResizeNote };

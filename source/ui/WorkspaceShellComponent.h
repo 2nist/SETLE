@@ -15,6 +15,12 @@
 #include "../timeline/TimelineTracksComponent.h"
 #include "../timeline/TrackManager.h"
 #include "../gridroll/GridRollComponent.h"
+#include "../eff/EffBuilderComponent.h"
+#include "../eff/EffSerializer.h"
+#include "../state/AppPreferences.h"
+#include "../theme/SetleLookAndFeel.h"
+#include "../theme/ThemeEditorPanel.h"
+#include "../theme/ThemeManager.h"
 #include "ProgressionLibraryBrowser.h"
 #include "ProgressionChordPalette.h"
 
@@ -24,14 +30,17 @@ namespace setle::ui
 {
 
 class WorkspaceShellComponent final : public juce::Component,
-                                      private juce::Timer
+                                      private juce::Timer,
+                                      public ThemeManager::Listener
 {
 public:
     explicit WorkspaceShellComponent(te::Engine& engine);
     ~WorkspaceShellComponent() override;
 
     bool keyPressed(const juce::KeyPress& key) override;
+    void mouseDown(const juce::MouseEvent& event) override;
     void resized() override;
+    void themeChanged() override;
 
 private:
     class LabelPanel;
@@ -99,7 +108,8 @@ private:
     void updateUndoRedoButtonState();
     void configureTheoryEditorPanel();
     void openTheoryEditor(TheoryMenuTarget target, int actionId, const juce::String& actionName);
-    void switchWorkTab(bool showGridRoll);
+    void switchWorkTab(int tabIndex); // 0=Theory, 1=GridRoll, 2=FX
+    void switchWorkTab(bool showGridRoll) { switchWorkTab(showGridRoll ? 1 : 0); }
     void populateTheoryObjectSelector();
     void populateTheoryFieldsForCurrentSelection();
     void commitTheoryEditorAction();
@@ -126,6 +136,14 @@ private:
     void loadLayoutState();
     void saveLayoutState();
     void timerCallback() override;
+    void repaintEntireTree();
+    void showThemeEditor(bool shouldShow);
+
+    // FX chain persistence
+    juce::File getEffectsFolder() const;
+    juce::File getEffFileForTrack(const juce::String& trackId) const;
+    void saveEffChains();
+    void loadEffChains();
 
     te::Engine& engineRef;
     std::unique_ptr<te::Edit> edit;
@@ -156,6 +174,7 @@ private:
     juce::TextButton focusOutButton { "Focus OUT" };
     juce::TextButton undoTheoryButton { "Undo Theory" };
     juce::TextButton redoTheoryButton { "Redo Theory" };
+    juce::TextButton themeButton { "Theme" };
 
     juce::Label sessionKeyLabel;
     juce::ComboBox sessionKeySelector;
@@ -165,7 +184,9 @@ private:
     juce::Label topTitle;
     juce::Label interactionStatus;
 
-    juce::ApplicationProperties appProperties;
+    SetleLookAndFeel setleLookAndFeel;
+    std::unique_ptr<ThemeEditorPanel> themeEditorPanel;
+    juce::Component themeDismissOverlay;
     std::unique_ptr<setle::capture::GrabSamplerQueue> grabSamplerQueue;
     std::unique_ptr<setle::capture::HistoryBuffer> historyBuffer;
     std::unique_ptr<setle::timeline::TrackManager> trackManager;
@@ -203,12 +224,16 @@ private:
     juce::TextEditor theoryFieldEditor5;
     juce::TextButton applyTheoryEditorButton { "Apply Edit" };
     juce::TextButton reloadTheoryEditorButton { "Reload" };
-    juce::TextButton workTabTheoryButton  { "Theory Editor" };
+    juce::TextButton workTabTheoryButton   { "Theory Editor" };
     juce::TextButton workTabGridRollButton { "GridRoll" };
+    juce::TextButton workTabFxButton       { "FX" };
+    int workPanelTabIndex { 0 };  // 0=Theory, 1=GridRoll, 2=FX
     bool workPanelShowGridRoll { false };
     std::unique_ptr<ProgressionLibraryBrowser> libraryBrowser;
     std::unique_ptr<ProgressionChordPalette> chordPalette;
     std::unique_ptr<setle::gridroll::GridRollComponent> gridRollComponent;
+    std::unique_ptr<setle::eff::EffBuilderComponent> effBuilderComponent;
+    juce::String selectedFxTrackId;
     TheoryMenuTarget activeEditorTarget { TheoryMenuTarget::section };
     int activeEditorActionId = 0;
 

@@ -1,4 +1,5 @@
 #include "TrackLane.h"
+#include "../theme/ThemeManager.h"
 
 #include <cmath>
 
@@ -61,12 +62,14 @@ void TrackLane::paint(juce::Graphics& g)
 
     const auto isMidi = trackRef.state.getProperty(kTrackKindProperty).toString() == kTrackKindMidi;
 
-    g.setColour(juce::Colour(0xff1b1f29));
+    const auto& theme = ThemeManager::get().theme();
+
+    g.setColour(theme.surface2);
     g.fillRect(headerArea);
-    g.setColour(juce::Colours::white.withAlpha(0.12f));
+    g.setColour(theme.surfaceEdge.withAlpha(0.35f));
     g.drawRect(headerArea);
 
-    g.setColour(juce::Colour(0xff11161e));
+    g.setColour(theme.surface1);
     g.fillRect(clipArea);
 
     const auto beatSpan = juce::jmax(1.0, visibleEndBeat - visibleStartBeat);
@@ -78,7 +81,7 @@ void TrackLane::paint(juce::Graphics& g)
         const auto frac = (static_cast<double>(beat) - visibleStartBeat) / beatSpan;
         const auto x = clipArea.getX() + static_cast<int>(std::round(frac * clipArea.getWidth()));
         const bool major = (beat % 4) == 0;
-        g.setColour(juce::Colours::white.withAlpha(major ? 0.20f : 0.08f));
+        g.setColour(theme.inkLight.withAlpha(major ? 0.20f : 0.08f));
         g.drawVerticalLine(x, static_cast<float>(clipArea.getY()), static_cast<float>(clipArea.getBottom()));
     }
 
@@ -89,18 +92,18 @@ void TrackLane::paint(juce::Graphics& g)
         if (painted.clip == nullptr)
             continue;
 
-        g.setColour(isMidi ? juce::Colour(0xff2b8a6e) : juce::Colour(0xff6078c4));
+        g.setColour(isMidi ? theme.zoneC.withAlpha(0.85f) : theme.zoneA.withAlpha(0.85f));
         g.fillRoundedRectangle(painted.bounds.toFloat().reduced(1.0f), 4.0f);
-        g.setColour(juce::Colours::white.withAlpha(0.40f));
+        g.setColour(theme.inkLight.withAlpha(0.40f));
         g.drawRoundedRectangle(painted.bounds.toFloat().reduced(1.0f), 4.0f, 1.0f);
 
-        g.setColour(juce::Colours::white.withAlpha(0.90f));
+        g.setColour(theme.inkLight.withAlpha(0.90f));
         g.setFont(juce::FontOptions(11.0f));
         g.drawText(painted.clip->getName(), painted.bounds.reduced(6, 2), juce::Justification::centredLeft, true);
     }
 
     const auto playheadX = clipArea.getX() + static_cast<int>(std::round(playheadFraction * clipArea.getWidth()));
-    g.setColour(juce::Colours::white.withAlpha(0.85f));
+    g.setColour(theme.playheadColor.withAlpha(0.9f));
     g.drawVerticalLine(playheadX, static_cast<float>(clipArea.getY()), static_cast<float>(clipArea.getBottom()));
 }
 

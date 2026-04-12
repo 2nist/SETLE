@@ -1,4 +1,5 @@
 #include "GridRollComponent.h"
+#include "../state/AppPreferences.h"
 
 namespace setle::gridroll
 {
@@ -30,6 +31,7 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
     // ---- drum callbacks ----
     drumGrid->onCellsChanged = [this]
     {
+        syncDrumCellsToBackend();
         if (onProgressionEdited) onProgressionEdited(progressionId);
     };
     drumGrid->onStatusMessage = [this](const juce::String& msg)
@@ -64,21 +66,37 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
 
     for (auto* btn : { &chordModeButton, &drumModeButton, &splitModeButton })
     {
-        btn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3a4a));
-        btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.8f));
-        btn->setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff3a5a7a));
+        const auto& theme = ThemeManager::get().theme();
+        btn->setColour(juce::TextButton::buttonColourId, theme.controlBg);
+        btn->setColour(juce::TextButton::textColourOffId, theme.controlText.withAlpha(0.9f));
+        btn->setColour(juce::TextButton::buttonOnColourId, theme.controlOnBg);
         addAndMakeVisible(*btn);
     }
 
-    progressionName.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.9f));
+    progressionName.setColour(juce::Label::textColourId, ThemeManager::get().theme().inkLight.withAlpha(0.9f));
     progressionName.setFont(juce::FontOptions(13.0f).withStyle("Bold"));
     progressionName.setEditable(false);
     progressionName.setText("—", juce::dontSendNotification);
     addAndMakeVisible(progressionName);
 
-    sessionKeyDisplay.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.55f));
+    sessionKeyDisplay.setColour(juce::Label::textColourId, ThemeManager::get().theme().inkMuted.withAlpha(0.7f));
     sessionKeyDisplay.setFont(juce::FontOptions(11.0f));
     addAndMakeVisible(sessionKeyDisplay);
+
+    scaleLockToggle.onClick = [this]
+    {
+        if (noteDetail != nullptr)
+            noteDetail->setScaleLock(scaleLockToggle.getToggleState());
+        setle::state::AppPreferences::get().setScaleLockEnabled(scaleLockToggle.getToggleState());
+    };
+    chordLockToggle.onClick = [this]
+    {
+        if (noteDetail != nullptr)
+            noteDetail->setChordLock(chordLockToggle.getToggleState());
+        setle::state::AppPreferences::get().setChordLockEnabled(chordLockToggle.getToggleState());
+    };
+    addAndMakeVisible(scaleLockToggle);
+    addAndMakeVisible(chordLockToggle);
 
     zoomInButton.onClick  = [this]
     {
@@ -92,10 +110,16 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
     };
     for (auto* b : { &zoomInButton, &zoomOutButton })
     {
-        b->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
-        b->setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.8f));
+        const auto& theme = ThemeManager::get().theme();
+        b->setColour(juce::TextButton::buttonColourId, theme.controlBg);
+        b->setColour(juce::TextButton::textColourOffId, theme.controlText.withAlpha(0.9f));
         addAndMakeVisible(*b);
     }
+
+    scaleLockToggle.setToggleState(setle::state::AppPreferences::get().getScaleLockEnabled(), juce::dontSendNotification);
+    chordLockToggle.setToggleState(setle::state::AppPreferences::get().getChordLockEnabled(), juce::dontSendNotification);
+    noteDetail->setScaleLock(scaleLockToggle.getToggleState());
+    noteDetail->setChordLock(chordLockToggle.getToggleState());
 
     applyMode();
     setSize(800, 300);
@@ -162,10 +186,11 @@ void GridRollComponent::applyMode()
 // ---------------------------------------------------------------
 void GridRollComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff141e2a));
+    const auto& theme = ThemeManager::get().theme();
+    g.fillAll(theme.surface1);
 
     // Header background
-    g.setColour(juce::Colour(0xff1c2c3c));
+    g.setColour(theme.headerBg);
     g.fillRect(0, 0, getWidth(), kHeaderHeight);
 }
 
@@ -182,8 +207,10 @@ void GridRollComponent::resized()
     header.removeFromLeft(8);
 
     // Progression name
-    progressionName.setBounds(header.removeFromLeft(200).reduced(4, 4));
-    sessionKeyDisplay.setBounds(header.removeFromLeft(120).reduced(4, 4));
+    progressionName.setBounds(header.removeFromLeft(180).reduced(4, 4));
+    sessionKeyDisplay.setBounds(header.removeFromLeft(110).reduced(4, 4));
+    scaleLockToggle.setBounds(header.removeFromLeft(64).reduced(2, 4));
+    chordLockToggle.setBounds(header.removeFromLeft(68).reduced(2, 4));
 
     // Zoom controls (right side)
     zoomOutButton.setBounds(header.removeFromRight(28).reduced(4, 6));
@@ -240,6 +267,8 @@ void GridRollComponent::openNoteDetail(int cellIndex)
 
     expandedCellIdx = cellIndex;
     noteDetail->loadCell(cells[static_cast<size_t>(cellIndex)], key, mode);
+    noteDetail->setScaleLock(scaleLockToggle.getToggleState());
+    noteDetail->setChordLock(chordLockToggle.getToggleState());
     noteDetail->setVisible(true);
     noteDetail->grabKeyboardFocus();
     resized();
@@ -307,6 +336,14 @@ void GridRollComponent::syncChordCellsToModel()
 
     if (onProgressionEdited)
         onProgressionEdited(progressionId);
+}
+
+void GridRollComponent::syncDrumCellsToBackend()
+{
+    if (onDrumPatternEdited == nullptr || drumGrid == nullptr)
+        return;
+
+    onDrumPatternEdited(drumGrid->getActivePatternCells(), progressionId);
 }
 
 } // namespace setle::gridroll
