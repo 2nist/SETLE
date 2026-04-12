@@ -33,7 +33,7 @@ public:
         // One Engine per application — lives for the app lifetime.
         engine = std::make_unique<te::Engine> (getApplicationName());
 
-        mainWindow = std::make_unique<MainWindow> (getApplicationName());
+        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
     }
 
     void shutdown() override
@@ -54,14 +54,14 @@ public:
     // Everything real gets built on top of this.
     struct MainWindow : public juce::DocumentWindow
     {
-        MainWindow (const juce::String& name)
+        MainWindow (const juce::String& name, te::Engine& engine)
             : DocumentWindow (name,
                               juce::Desktop::getInstance().getDefaultLookAndFeel()
                                   .findColour (juce::ResizableWindow::backgroundColourId),
                               DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
-            setContentOwned (new setle::ui::WorkspaceShellComponent(), true);
+            setContentOwned (new setle::ui::WorkspaceShellComponent(engine), true);
             setResizable (true, true);
             centreWithSize (1280, 800);
             setVisible (true);

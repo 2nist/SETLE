@@ -8,6 +8,8 @@
 #include <functional>
 #include <set>
 
+namespace te = tracktion::engine;
+
 namespace setle::ui
 {
 
@@ -696,7 +698,8 @@ private:
     int lastMousePosition = 0;
 };
 
-WorkspaceShellComponent::WorkspaceShellComponent()
+WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
+    : engineRef(engine)
 {
     setWantsKeyboardFocus(true);
 
@@ -713,6 +716,11 @@ WorkspaceShellComponent::WorkspaceShellComponent()
 
     topStrip.addAndMakeVisible(topTitle);
     topStrip.addAndMakeVisible(interactionStatus);
+    topStrip.addAndMakeVisible(playButton);
+    topStrip.addAndMakeVisible(stopButton);
+    topStrip.addAndMakeVisible(recordButton);
+    topStrip.addAndMakeVisible(bpmLabel);
+    topStrip.addAndMakeVisible(bpmEditor);
     topStrip.addAndMakeVisible(focusInButton);
     topStrip.addAndMakeVisible(focusBalancedButton);
     topStrip.addAndMakeVisible(focusOutButton);
@@ -784,6 +792,45 @@ WorkspaceShellComponent::WorkspaceShellComponent()
     undoTheoryButton.onClick = [this] { performUndo(); };
     redoTheoryButton.onClick = [this] { performRedo(); };
 
+    playButton.onClick = [this]
+    {
+        if (edit != nullptr)
+        {
+            loadProgressionToEdit();
+            edit->getTransport().play(false);
+        }
+    };
+
+    stopButton.onClick = [this]
+    {
+        if (edit != nullptr)
+            edit->getTransport().stop(false, false);
+    };
+
+    recordButton.onClick = [this]
+    {
+        if (edit != nullptr)
+        {
+            loadProgressionToEdit();
+            edit->getTransport().record(false);
+        }
+    };
+
+    bpmLabel.setText("BPM", juce::dontSendNotification);
+    bpmLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.72f));
+    bpmLabel.setFont(juce::FontOptions(13.0f));
+    bpmEditor.setInputRestrictions(6, "0123456789.");
+    bpmEditor.setJustification(juce::Justification::centred);
+    bpmEditor.onReturnKey = [this]
+    {
+        const double bpm = juce::jlimit(20.0, 300.0, bpmEditor.getText().getDoubleValue());
+        songState.setBpm(bpm);
+        if (edit != nullptr)
+            if (auto* tempo = edit->tempoSequence.getTempo(0))
+                tempo->setBpm(bpm);
+        bpmEditor.setText(juce::String(bpm, 1), juce::dontSendNotification);
+    };
+
     juce::PropertiesFile::Options options;
     options.applicationName = "SETLE";
     options.filenameSuffix = "settings";
@@ -793,6 +840,16 @@ WorkspaceShellComponent::WorkspaceShellComponent()
 
     loadLayoutState();
     initialiseSongState();
+
+    // --- Phase 4: create a single-track Tracktion Edit and sync BPM ---
+    edit = te::Edit::createSingleTrackEdit(engineRef);
+    if (edit != nullptr)
+    {
+        if (auto* tempo = edit->tempoSequence.getTempo(0))
+            tempo->setBpm(songState.getBpm());
+    }
+    bpmEditor.setText(juce::String(songState.getBpm(), 1), juce::dontSendNotification);
+
     openTheoryEditor(TheoryMenuTarget::section, sectionEditTheory, "Edit Section Theory");
     updateFocusButtonState();
     updateUndoRedoButtonState();
@@ -2347,6 +2404,90 @@ void WorkspaceShellComponent::saveLayoutState()
     }
 }
 
+void WorkspaceShellComponent::loadProgressionToEdit()
+{
+    if (edit == nullptr)
+        return;
+
+    auto tracks = te::getAudioTracks(*edit);
+    if (tracks.isEmpty())
+        return;
+
+    auto* track = tracks.getFirst();
+
+    // Remove all existing clips
+    {
+        juce::Array<te::Clip*> oldClips;
+        for (auto* clip : track->getClips())
+            oldClips.add(clip);
+        for (auto* clip : oldClips)
+            clip->removeFromParent();
+    }
+
+    auto progressionOpt = getSelectedProgression();
+    if (!progressionOpt.has_value())
+        return;
+
+    const auto chords = progressionOpt->getChords();
+    if (chords.empty())
+        return;
+
+    const double bpm     = (edit->tempoSequence.getTempo(0) != nullptr)
+                               ? edit->tempoSequence.getTempo(0)->getBpm()
+                               : 120.0;
+    const double secPerBeat = 60.0 / bpm;
+
+    // Calculate total duration in seconds
+    double totalBeats = 0.0;
+    for (const auto& chord : chords)
+    {
+        double d = chord.getDurationBeats();
+        totalBeats += (d > 0.0 ? d : 1.0);
+    }
+    const double totalSecs = totalBeats * secPerBeat;
+
+    // Insert one MIDI clip spanning the whole progression
+    const auto clipRange = tracktion::TimeRange (
+        tracktion::TimePosition::fromSeconds(0.0),
+        tracktion::TimePosition::fromSeconds(totalSecs));
+
+    auto clip = track->insertMIDIClip(clipRange, nullptr);
+    if (clip == nullptr)
+        return;
+
+    auto& seq = clip->getSequence();
+    double beatPos = 0.0;
+
+    for (const auto& chord : chords)
+    {
+        double d = chord.getDurationBeats();
+        if (d <= 0.0)
+            d = 1.0;
+
+        const auto startBeat = tracktion::BeatPosition::fromBeats(beatPos);
+        const auto beatLen   = tracktion::BeatDuration::fromBeats(d * 0.95);
+
+        const auto notes = chord.getNotes();
+        if (notes.empty())
+        {
+            // Fall back to root-only note
+            seq.addNote(chord.getRootMidi(), startBeat, beatLen, 80, 0, nullptr);
+        }
+        else
+        {
+            for (const auto& note : notes)
+                seq.addNote(note.getPitch(),
+                            startBeat,
+                            beatLen,
+                            static_cast<int>(note.getVelocity() * 127.0f),
+                            0,
+                            nullptr);
+        }
+
+        beatPos += d;
+    }
+}
+
 void WorkspaceShellComponent::resized()
 {
     auto bounds = getLocalBounds();
@@ -2355,12 +2496,20 @@ void WorkspaceShellComponent::resized()
     auto topBounds = bounds.removeFromTop(topStripHeight);
     topStrip.setBounds(topBounds);
 
-    auto buttonArea = topBounds.removeFromRight(620);
+    auto buttonArea = topBounds.removeFromRight(890);
     redoTheoryButton.setBounds(buttonArea.removeFromRight(112).reduced(4, 6));
     undoTheoryButton.setBounds(buttonArea.removeFromRight(122).reduced(4, 6));
     focusOutButton.setBounds(buttonArea.removeFromRight(118).reduced(4, 6));
     focusBalancedButton.setBounds(buttonArea.removeFromRight(148).reduced(4, 6));
     focusInButton.setBounds(buttonArea.removeFromRight(104).reduced(4, 6));
+
+    // Transport controls (left of focus buttons): BPM, Play, Stop, Rec
+    auto bpmArea = buttonArea.removeFromRight(100).reduced(4, 6);
+    bpmLabel.setBounds(bpmArea.removeFromLeft(32));
+    bpmEditor.setBounds(bpmArea);
+    recordButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
+    stopButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
+    playButton.setBounds(buttonArea.removeFromRight(52).reduced(4, 6));
 
     topTitle.setBounds(topBounds.removeFromLeft(250).reduced(8, 6));
     interactionStatus.setBounds(topBounds.reduced(8, 8));
