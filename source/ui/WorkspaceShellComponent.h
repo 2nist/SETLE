@@ -3,8 +3,10 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+#include <memory>
 #include <vector>
 
+#include "../capture/GrabSamplerQueue.h"
 #include "../model/SetleSongModel.h"
 
 namespace te = tracktion::engine;
@@ -51,9 +53,20 @@ private:
     juce::String runChordAction(int actionId);
     juce::String runNoteAction(int actionId);
     juce::String runProgressionAction(int actionId);
+    void updateInPanelQueueView();
+    void playQueueSlot(int slotIndex);
+    void stopQueuePlayback();
+    void promoteQueueSlotToLibrary(int slotIndex);
+    void dropQueueSlotToTimeline(int slotIndex);
+    void clearQueueSlot(int slotIndex);
+    void editQueueSlotInTheoryPanel(int slotIndex);
+    void renameQueueSlot(int slotIndex);
 
     void initialiseSongState();
     void loadProgressionToEdit();
+    void loadProgressionToEdit(const juce::String& progressionId,
+                               double startTimeSeconds,
+                               bool preferNonSystemTrack);
     juce::File getSongStateFile() const;
     void loadSongState();
     void seedSongStateIfNeeded();
@@ -114,6 +127,7 @@ private:
     juce::Label interactionStatus;
 
     juce::ApplicationProperties appProperties;
+    std::unique_ptr<setle::capture::GrabSamplerQueue> grabSamplerQueue;
     model::Song songState;
     std::vector<juce::String> undoSnapshots;
     std::vector<juce::String> redoSnapshots;

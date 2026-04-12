@@ -122,6 +122,9 @@ juce_add_gui_app(SETLE
 # Sources — just Main.cpp to start
 target_sources(SETLE PRIVATE
     source/Main.cpp
+    source/capture/GrabSlot.h
+    source/capture/GrabSamplerQueue.h
+    source/capture/GrabSamplerQueue.cpp
     source/model/SetleSongModel.cpp
     source/model/SetleSongModel.h
     source/ui/WorkspaceShellComponent.cpp

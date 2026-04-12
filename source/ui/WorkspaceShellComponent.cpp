@@ -255,9 +255,282 @@ class WorkspaceShellComponent::InDevicePanel final : public juce::Component,
                                                      private juce::MidiInputCallback
 {
 public:
-    explicit InDevicePanel(te::Engine& e) : engine(e)
+    using QueueProvider = std::function<setle::capture::GrabSamplerQueue*()>;
+    using SongProvider = std::function<const model::Song*()>;
+
+    struct QueueActions
+    {
+        std::function<void(int)> playSlot;
+        std::function<void()> stopPlayback;
+        std::function<void(int)> editSlot;
+        std::function<void(int)> promoteSlot;
+        std::function<void(int)> dropToTimeline;
+        std::function<void(int)> clearSlot;
+        std::function<void(int)> toggleLoop;
+        std::function<void(int)> renameSlot;
+    };
+
+private:
+    class GrabSlotCard final : public juce::Component
+    {
+    public:
+        GrabSlotCard(int indexInQueue,
+                     QueueProvider queueProviderIn,
+                     SongProvider songProviderIn,
+                     QueueActions& queueActionsIn)
+            : slotIndex(indexInQueue),
+              queueProvider(std::move(queueProviderIn)),
+              songProvider(std::move(songProviderIn)),
+              queueActions(queueActionsIn)
+        {
+            playButton.onClick = [this]
+            {
+                const auto* slot = getSlot();
+                if (slot == nullptr)
+                    return;
+
+                if (slot->state == capture::GrabSlot::State::Playing)
+                {
+                    if (queueActions.stopPlayback)
+                        queueActions.stopPlayback();
+                    return;
+                }
+
+                if (queueActions.playSlot)
+                    queueActions.playSlot(slotIndex);
+            };
+
+            editButton.setButtonText("Edit");
+            editButton.onClick = [this]
+            {
+                if (queueActions.editSlot)
+                    queueActions.editSlot(slotIndex);
+            };
+
+            promoteButton.setButtonText("-> Library");
+            promoteButton.onClick = [this]
+            {
+                if (queueActions.promoteSlot)
+                    queueActions.promoteSlot(slotIndex);
+            };
+
+            addAndMakeVisible(playButton);
+            addAndMakeVisible(editButton);
+            addAndMakeVisible(promoteButton);
+            refresh();
+        }
+
+        void refresh()
+        {
+            const auto* slot = getSlot();
+            const auto isReady = slot != nullptr && slot->state != capture::GrabSlot::State::Empty;
+
+            playButton.setVisible(isReady);
+            editButton.setVisible(isReady);
+            promoteButton.setVisible(isReady);
+
+            if (slot != nullptr && slot->state == capture::GrabSlot::State::Playing)
+                playButton.setButtonText("Stop");
+            else
+                playButton.setButtonText("Play");
+
+            repaint();
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced(8, 6);
+            auto buttonRow = area.removeFromBottom(24);
+            playButton.setBounds(buttonRow.removeFromLeft(56));
+            buttonRow.removeFromLeft(6);
+            editButton.setBounds(buttonRow.removeFromLeft(56));
+            buttonRow.removeFromLeft(6);
+            promoteButton.setBounds(buttonRow.removeFromLeft(90));
+        }
+
+        void mouseUp(const juce::MouseEvent& event) override
+        {
+            if (!event.mods.isRightButtonDown())
+                return;
+
+            const auto* slot = getSlot();
+            if (slot == nullptr || slot->state == capture::GrabSlot::State::Empty)
+                return;
+
+            juce::PopupMenu menu;
+            if (slot->state == capture::GrabSlot::State::Playing)
+                menu.addItem(1, "Stop");
+            else
+                menu.addItem(1, "Play");
+
+            menu.addItem(2, "Loop", true, slot->looping);
+            menu.addSeparator();
+            menu.addItem(3, "Rename...");
+            menu.addItem(4, "Edit in Theory Panel");
+            menu.addSeparator();
+            menu.addItem(5, "Promote to Library");
+            menu.addItem(6, "Drop to Timeline at Playhead");
+            menu.addSeparator();
+            menu.addItem(7, "Clear Slot");
+
+            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
+                               [this](int selected)
+                               {
+                                   if (selected == 1)
+                                   {
+                                       const auto* slotState = getSlot();
+                                       if (slotState == nullptr)
+                                           return;
+
+                                       if (slotState->state == capture::GrabSlot::State::Playing)
+                                       {
+                                           if (queueActions.stopPlayback)
+                                               queueActions.stopPlayback();
+                                       }
+                                       else if (queueActions.playSlot)
+                                       {
+                                           queueActions.playSlot(slotIndex);
+                                       }
+                                   }
+                                   else if (selected == 2)
+                                   {
+                                       if (queueActions.toggleLoop)
+                                           queueActions.toggleLoop(slotIndex);
+                                   }
+                                   else if (selected == 3)
+                                   {
+                                       if (queueActions.renameSlot)
+                                           queueActions.renameSlot(slotIndex);
+                                   }
+                                   else if (selected == 4)
+                                   {
+                                       if (queueActions.editSlot)
+                                           queueActions.editSlot(slotIndex);
+                                   }
+                                   else if (selected == 5)
+                                   {
+                                       if (queueActions.promoteSlot)
+                                           queueActions.promoteSlot(slotIndex);
+                                   }
+                                   else if (selected == 6)
+                                   {
+                                       if (queueActions.dropToTimeline)
+                                           queueActions.dropToTimeline(slotIndex);
+                                   }
+                                   else if (selected == 7)
+                                   {
+                                       if (queueActions.clearSlot)
+                                           queueActions.clearSlot(slotIndex);
+                                   }
+                               });
+        }
+
+        void paint(juce::Graphics& g) override
+        {
+            auto bounds = getLocalBounds().reduced(2);
+
+            const auto* slot = getSlot();
+            if (slot == nullptr || slot->state == capture::GrabSlot::State::Empty)
+            {
+                g.setColour(juce::Colour(0xff1e2b24));
+                g.fillRoundedRectangle(bounds.toFloat(), 4.0f);
+                g.setColour(juce::Colours::white.withAlpha(0.35f));
+                g.drawRoundedRectangle(bounds.toFloat(), 4.0f, 1.0f);
+                g.setFont(juce::FontOptions(12.0f));
+                g.drawText("[ Empty - drag or grab ]", bounds, juce::Justification::centred, true);
+                return;
+            }
+
+            const bool playing = slot->state == capture::GrabSlot::State::Playing;
+            g.setColour(playing ? juce::Colour(0xff224d2a) : juce::Colour(0xff1e2b24));
+            g.fillRoundedRectangle(bounds.toFloat(), 4.0f);
+            g.setColour(playing ? juce::Colour(0xff66d27a) : juce::Colours::white.withAlpha(0.35f));
+            g.drawRoundedRectangle(bounds.toFloat(), 4.0f, playing ? 2.0f : 1.0f);
+
+            auto textArea = bounds.reduced(8, 4);
+            auto row1 = textArea.removeFromTop(16);
+            auto row2 = textArea.removeFromTop(16);
+
+            const auto marker = playing ? juce::String("▶") : juce::String(" ");
+            g.setFont(juce::FontOptions(12.5f));
+            g.setColour(juce::Colours::white.withAlpha(0.92f));
+
+            auto firstThree = juce::String();
+            auto keyMode = juce::String();
+            auto beatCount = 0.0;
+
+            if (const auto* song = songProvider())
+            {
+                if (auto progression = song->findProgressionById(slot->progressionId))
+                {
+                    int count = 0;
+                    for (const auto& chord : progression->getChords())
+                    {
+                        if (count > 0)
+                            firstThree << " ";
+                        firstThree << chord.getSymbol();
+                        ++count;
+                        if (count >= 3)
+                            break;
+                    }
+
+                    keyMode = progression->getKey() + " " + progression->getMode();
+                    beatCount = progression->getLengthBeats();
+                }
+            }
+
+            g.drawText(marker + "  " + slot->displayName + "  •  " + firstThree,
+                       row1,
+                       juce::Justification::centredLeft,
+                       true);
+
+            g.setColour(juce::Colours::white.withAlpha(0.64f));
+            g.setFont(juce::FontOptions(11.5f));
+            g.drawText("    " + keyMode + "  •  " + juce::String(beatCount, 1) + " beats",
+                       row2,
+                       juce::Justification::centredLeft,
+                       true);
+        }
+
+    private:
+        const capture::GrabSlot* getSlot() const
+        {
+            if (auto* queue = queueProvider())
+                return &queue->getSlot(slotIndex);
+            return nullptr;
+        }
+
+        int slotIndex = 0;
+        QueueProvider queueProvider;
+        SongProvider songProvider;
+        QueueActions& queueActions;
+        juce::TextButton playButton;
+        juce::TextButton editButton;
+        juce::TextButton promoteButton;
+    };
+
+public:
+    InDevicePanel(te::Engine& e,
+                  QueueProvider queueProviderIn,
+                  SongProvider songProviderIn,
+                  QueueActions queueActionsIn)
+        : engine(e),
+          queueProvider(std::move(queueProviderIn)),
+          songProvider(std::move(songProviderIn)),
+          queueActions(std::move(queueActionsIn))
     {
         openMidiInputs();
+
+        for (int i = 0; i < 4; ++i)
+        {
+            slotCards[static_cast<size_t>(i)] = std::make_unique<GrabSlotCard>(
+                i,
+                [this]() { return queueProvider != nullptr ? queueProvider() : nullptr; },
+                [this]() { return songProvider != nullptr ? songProvider() : nullptr; },
+                queueActions);
+            addAndMakeVisible(*slotCards[static_cast<size_t>(i)]);
+        }
+
         startTimerHz(4);
     }
 
@@ -338,6 +611,7 @@ public:
         area.removeFromTop(8);
 
         // ── MIDI Monitor ──────────────────────────────────────────────────────
+        auto queueArea = area.removeFromBottom(200);
         if (area.getHeight() < 36)
             return;
 
@@ -374,6 +648,35 @@ public:
                 g.drawText(text, area.removeFromTop(13), juce::Justification::centredLeft, true);
             }
         }
+
+        queueArea.removeFromTop(6);
+        drawSectionLabel(g, queueArea, "Grab Queue");
+
+        g.setColour(juce::Colours::white.withAlpha(0.08f));
+        g.drawRoundedRectangle(queueArea.toFloat(), 4.0f, 1.0f);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(10, 8);
+        area.removeFromTop(22); // IN title
+        area.removeFromTop(4);
+
+        auto queueArea = area.removeFromBottom(200);
+        queueArea.removeFromTop(6);
+        queueArea.removeFromTop(14); // section label
+        queueArea.removeFromTop(4);
+
+        const int gap = 4;
+        const int cellHeight = (queueArea.getHeight() - gap * 3) / 4;
+        for (int i = 0; i < 4; ++i)
+        {
+            if (auto* card = slotCards[static_cast<size_t>(i)].get())
+            {
+                card->setBounds(queueArea.removeFromTop(cellHeight));
+                queueArea.removeFromTop(gap);
+            }
+        }
     }
 
 private:
@@ -404,7 +707,14 @@ private:
         return false;
     }
 
-    void timerCallback() override { repaint(); }
+    void timerCallback() override
+    {
+        for (auto& card : slotCards)
+            if (card != nullptr)
+                card->refresh();
+
+        repaint();
+    }
 
     void handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& msg) override
     {
@@ -415,6 +725,10 @@ private:
     }
 
     te::Engine& engine;
+    QueueProvider queueProvider;
+    SongProvider songProvider;
+    QueueActions queueActions;
+    std::array<std::unique_ptr<GrabSlotCard>, 4> slotCards;
     std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
     juce::CriticalSection logLock;
     juce::Array<juce::MidiMessage> midiLog;
@@ -873,6 +1187,8 @@ private:
 WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     : engineRef(engine)
 {
+    grabSamplerQueue = std::make_unique<setle::capture::GrabSamplerQueue>();
+
     setWantsKeyboardFocus(true);
 
     auto topStripLabelFont = juce::FontOptions(15.0f);
@@ -900,7 +1216,28 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     topStrip.addAndMakeVisible(redoTheoryButton);
     addAndMakeVisible(topStrip);
 
-    inPanel = new InDevicePanel(engineRef);
+    inPanel = new InDevicePanel(
+        engineRef,
+        [this]() { return grabSamplerQueue.get(); },
+        [this]() -> const model::Song* { return &songState; },
+        {
+            [this](int slotIndex) { playQueueSlot(slotIndex); },
+            [this]() { stopQueuePlayback(); },
+            [this](int slotIndex) { editQueueSlotInTheoryPanel(slotIndex); },
+            [this](int slotIndex) { promoteQueueSlotToLibrary(slotIndex); },
+            [this](int slotIndex) { dropQueueSlotToTimeline(slotIndex); },
+            [this](int slotIndex) { clearQueueSlot(slotIndex); },
+            [this](int slotIndex)
+            {
+                if (grabSamplerQueue == nullptr)
+                    return;
+
+                auto& slot = grabSamplerQueue->getSlotMutable(slotIndex);
+                slot.looping = !slot.looping;
+                updateInPanelQueueView();
+            },
+            [this](int slotIndex) { renameQueueSlot(slotIndex); }
+        });
     addAndMakeVisible(inPanel);
 
     workPanel = new LabelPanel(
@@ -1012,6 +1349,8 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 
     // --- Phase 4: create a single-track Tracktion Edit and sync BPM ---
     edit = te::Edit::createSingleTrackEdit(engineRef);
+    if (grabSamplerQueue != nullptr)
+        grabSamplerQueue->setSong(&songState);
     if (edit != nullptr)
     {
         if (auto* tempo = edit->tempoSequence.getTempo(0))
@@ -1022,6 +1361,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     openTheoryEditor(TheoryMenuTarget::section, sectionEditTheory, "Edit Section Theory");
     updateFocusButtonState();
     updateUndoRedoButtonState();
+    updateInPanelQueueView();
 }
 
 WorkspaceShellComponent::~WorkspaceShellComponent()
@@ -1862,6 +2202,8 @@ void WorkspaceShellComponent::refreshTimelineData()
 void WorkspaceShellComponent::initialiseSongState()
 {
     loadSongState();
+    if (grabSamplerQueue != nullptr)
+        grabSamplerQueue->setSong(&songState);
     seedSongStateIfNeeded();
     ensureSelectionDefaults();
     saveSongState();
@@ -2498,7 +2840,7 @@ juce::String WorkspaceShellComponent::runNoteAction(int actionId)
 
 juce::String WorkspaceShellComponent::runProgressionAction(int actionId)
 {
-    if (actionId == progressionGrabSampler || actionId == progressionCreateCandidate || actionId == progressionAnnotateKeyMode)
+    if (actionId == progressionCreateCandidate || actionId == progressionAnnotateKeyMode)
     {
         openTheoryEditor(TheoryMenuTarget::progression, actionId, "Progression Action");
         return "Progression editor opened in WORK panel";
@@ -2507,6 +2849,20 @@ juce::String WorkspaceShellComponent::runProgressionAction(int actionId)
     auto progression = getSelectedProgression();
     if (!progression.has_value())
         return "Progression action skipped: no selected progression available";
+
+    if (actionId == progressionGrabSampler)
+    {
+        if (grabSamplerQueue == nullptr)
+            return "Sampler queue unavailable";
+
+        const auto slot = grabSamplerQueue->loadProgression(
+            progression->getId(),
+            progression->getName(),
+            0.75f);
+        updateInPanelQueueView();
+
+        return "Progression moved to sampler queue slot " + juce::String(slot + 1);
+    }
 
     if (actionId == progressionTagTransition)
     {
@@ -2573,7 +2929,123 @@ void WorkspaceShellComponent::saveLayoutState()
     }
 }
 
+void WorkspaceShellComponent::updateInPanelQueueView()
+{
+    if (auto* panel = dynamic_cast<InDevicePanel*>(inPanel))
+        panel->repaint();
+}
+
+void WorkspaceShellComponent::playQueueSlot(int slotIndex)
+{
+    if (grabSamplerQueue == nullptr || edit == nullptr)
+        return;
+
+    grabSamplerQueue->playSlot(slotIndex, *edit);
+    updateInPanelQueueView();
+    interactionStatus.setText("Playing sampler slot " + juce::String(slotIndex + 1), juce::dontSendNotification);
+}
+
+void WorkspaceShellComponent::stopQueuePlayback()
+{
+    if (grabSamplerQueue == nullptr || edit == nullptr)
+        return;
+
+    grabSamplerQueue->stopPlayback(*edit);
+    updateInPanelQueueView();
+    interactionStatus.setText("Sampler playback stopped", juce::dontSendNotification);
+}
+
+void WorkspaceShellComponent::promoteQueueSlotToLibrary(int slotIndex)
+{
+    if (grabSamplerQueue == nullptr)
+        return;
+
+    const auto progressionId = grabSamplerQueue->promoteToLibrary(slotIndex, songState);
+    if (progressionId.isEmpty())
+    {
+        interactionStatus.setText("Promote failed: progression missing", juce::dontSendNotification);
+        return;
+    }
+
+    selectedProgressionId = progressionId;
+    openTheoryEditor(TheoryMenuTarget::progression, progressionAnnotateKeyMode, "Annotate Key / Mode");
+    grabSamplerQueue->clearSlot(slotIndex);
+    updateInPanelQueueView();
+    interactionStatus.setText("Promoted slot " + juce::String(slotIndex + 1) + " to library", juce::dontSendNotification);
+}
+
+void WorkspaceShellComponent::dropQueueSlotToTimeline(int slotIndex)
+{
+    if (grabSamplerQueue == nullptr || edit == nullptr)
+        return;
+
+    const auto& slot = grabSamplerQueue->getSlot(slotIndex);
+    if (slot.state == setle::capture::GrabSlot::State::Empty || slot.progressionId.isEmpty())
+        return;
+
+    const auto playheadSeconds = edit->getTransport().getPosition().inSeconds();
+    loadProgressionToEdit(slot.progressionId, playheadSeconds, true);
+    interactionStatus.setText("Dropped slot " + juce::String(slotIndex + 1) + " to timeline at playhead", juce::dontSendNotification);
+}
+
+void WorkspaceShellComponent::clearQueueSlot(int slotIndex)
+{
+    if (grabSamplerQueue == nullptr)
+        return;
+
+    grabSamplerQueue->clearSlot(slotIndex);
+    updateInPanelQueueView();
+    interactionStatus.setText("Cleared sampler slot " + juce::String(slotIndex + 1), juce::dontSendNotification);
+}
+
+void WorkspaceShellComponent::editQueueSlotInTheoryPanel(int slotIndex)
+{
+    if (grabSamplerQueue == nullptr)
+        return;
+
+    const auto& slot = grabSamplerQueue->getSlot(slotIndex);
+    if (slot.progressionId.isEmpty())
+        return;
+
+    selectedProgressionId = slot.progressionId;
+    openTheoryEditor(TheoryMenuTarget::progression, progressionAnnotateKeyMode, "Annotate Key / Mode");
+}
+
+void WorkspaceShellComponent::renameQueueSlot(int slotIndex)
+{
+    if (grabSamplerQueue == nullptr)
+        return;
+
+    auto& slot = grabSamplerQueue->getSlotMutable(slotIndex);
+    if (slot.progressionId.isEmpty())
+        return;
+
+    juce::AlertWindow window("Rename Grab Slot", "Enter new slot label", juce::AlertWindow::NoIcon);
+    window.addTextEditor("name", slot.displayName, "Name");
+    window.addButton("Rename", 1);
+    window.addButton("Cancel", 0);
+
+    if (window.runModalLoop() == 1)
+    {
+        auto newName = window.getTextEditorContents("name").trim();
+        if (newName.isNotEmpty())
+            slot.displayName = newName;
+        updateInPanelQueueView();
+    }
+}
+
 void WorkspaceShellComponent::loadProgressionToEdit()
+{
+    auto progressionOpt = getSelectedProgression();
+    if (!progressionOpt.has_value())
+        return;
+
+    loadProgressionToEdit(progressionOpt->getId(), 0.0, false);
+}
+
+void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progressionId,
+                                                    double startTimeSeconds,
+                                                    bool preferNonSystemTrack)
 {
     if (edit == nullptr)
         return;
@@ -2582,9 +3054,26 @@ void WorkspaceShellComponent::loadProgressionToEdit()
     if (tracks.isEmpty())
         return;
 
-    auto* track = tracks.getFirst();
+    te::AudioTrack* track = nullptr;
+    if (preferNonSystemTrack)
+    {
+        for (auto* t : tracks)
+        {
+            if (t != nullptr && t->state.getProperty("setleSystemTag").toString().isEmpty())
+            {
+                track = t;
+                break;
+            }
+        }
+    }
 
-    // Remove all existing clips
+    if (track == nullptr)
+        track = tracks.getFirst();
+
+    if (track == nullptr)
+        return;
+
+    if (!preferNonSystemTrack)
     {
         juce::Array<te::Clip*> oldClips;
         for (auto* clip : track->getClips())
@@ -2593,7 +3082,7 @@ void WorkspaceShellComponent::loadProgressionToEdit()
             clip->removeFromParent();
     }
 
-    auto progressionOpt = getSelectedProgression();
+    auto progressionOpt = songState.findProgressionById(progressionId);
     if (!progressionOpt.has_value())
         return;
 
@@ -2617,8 +3106,8 @@ void WorkspaceShellComponent::loadProgressionToEdit()
 
     // Insert one MIDI clip spanning the whole progression
     const auto clipRange = tracktion::TimeRange (
-        tracktion::TimePosition::fromSeconds(0.0),
-        tracktion::TimePosition::fromSeconds(totalSecs));
+        tracktion::TimePosition::fromSeconds(startTimeSeconds),
+        tracktion::TimePosition::fromSeconds(startTimeSeconds + totalSecs));
 
     auto clip = track->insertMIDIClip(clipRange, nullptr);
     if (clip == nullptr)
