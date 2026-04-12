@@ -1010,14 +1010,36 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     loadLayoutState();
     initialiseSongState();
 
-    // --- Phase 4: create a single-track Tracktion Edit and sync BPM ---
+    // --- Phase 4/5: create a single-track Tracktion Edit and activate audio graph ---
     edit = te::Edit::createSingleTrackEdit(engineRef);
     if (edit != nullptr)
     {
         if (auto* tempo = edit->tempoSequence.getTempo(0))
             tempo->setBpm(songState.getBpm());
+
+        // 5A: build the audio graph so transport commands produce sound
+        edit->getTransport().ensureContextAllocated();
+
+        // 5C: enable the first available MIDI output device
+        auto& dm = engineRef.getDeviceManager();
+        for (int i = 0; i < dm.getNumMidiOutDevices(); ++i)
+        {
+            if (auto* midiOut = dm.getMidiOutDevice(i))
+            {
+                midiOut->setEnabled(true);
+                break;
+            }
+        }
     }
     bpmEditor.setText(juce::String(songState.getBpm(), 1), juce::dontSendNotification);
+
+    // 5D: position display and 30 Hz update timer
+    positionLabel.setText("0:00.000", juce::dontSendNotification);
+    positionLabel.setFont(juce::FontOptions(13.0f));
+    positionLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.80f));
+    positionLabel.setJustificationType(juce::Justification::centred);
+    topStrip.addAndMakeVisible(positionLabel);
+    startTimerHz(30);
 
     openTheoryEditor(TheoryMenuTarget::section, sectionEditTheory, "Edit Section Theory");
     updateFocusButtonState();
@@ -2573,6 +2595,20 @@ void WorkspaceShellComponent::saveLayoutState()
     }
 }
 
+void WorkspaceShellComponent::timerCallback()
+{
+    if (edit == nullptr)
+        return;
+
+    const auto pos = edit->getTransport().getPosition();
+    const double totalSecs = pos.inSeconds();
+    const int mins = static_cast<int>(totalSecs) / 60;
+    const double secs = std::fmod(totalSecs, 60.0);
+    positionLabel.setText(
+        juce::String(mins) + ":" + juce::String(secs, 3).paddedLeft('0', 6),
+        juce::dontSendNotification);
+}
+
 void WorkspaceShellComponent::loadProgressionToEdit()
 {
     if (edit == nullptr)
@@ -2621,7 +2657,7 @@ void WorkspaceShellComponent::loadProgressionToEdit()
         tracktion::TimePosition::fromSeconds(totalSecs));
 
     auto clip = track->insertMIDIClip(clipRange, nullptr);
-    if (clip == nullptr)
+    if (clip.get() == nullptr)
         return;
 
     auto& seq = clip->getSequence();
@@ -2679,6 +2715,7 @@ void WorkspaceShellComponent::resized()
     recordButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
     stopButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
     playButton.setBounds(buttonArea.removeFromRight(52).reduced(4, 6));
+    positionLabel.setBounds(buttonArea.removeFromRight(80).reduced(4, 6));
 
     topTitle.setBounds(topBounds.removeFromLeft(250).reduced(8, 6));
     interactionStatus.setBounds(topBounds.reduced(8, 8));
