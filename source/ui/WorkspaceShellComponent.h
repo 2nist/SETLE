@@ -3,12 +3,15 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+#include <map>
 #include <memory>
 #include <vector>
 
 #include "../capture/GrabSamplerQueue.h"
 #include "../capture/HistoryBuffer.h"
+#include "../instruments/InstrumentSlot.h"
 #include "../model/SetleSongModel.h"
+#include "../mixer/MixerComponent.h"
 #include "../timeline/TimelineTracksComponent.h"
 #include "../timeline/TrackManager.h"
 #include "../gridroll/GridRollComponent.h"
@@ -32,6 +35,7 @@ public:
 
 private:
     class LabelPanel;
+    class OutPanelHost;
     class TimelineShell;
     class DragBar;
     class InDevicePanel;
@@ -111,6 +115,13 @@ private:
     juce::String summarizeSongState() const;
 
     void refreshTimelineData();
+    void ensureInstrumentSlots();
+    void applyPersistedInstrumentSlotAssignments();
+    void persistInstrumentSlotAssignments();
+    void rebuildOutPanelStrips();
+    void applyDrumPatternToSlots(const std::vector<setle::gridroll::GridRollCell>& cells,
+                                 const juce::String& progressionId);
+    juce::String getTrackIdForTrack(const te::Track& track) const;
     void clampLayoutValues(int totalTopWidth, int totalBodyHeight);
     void loadLayoutState();
     void saveLayoutState();
@@ -122,7 +133,7 @@ private:
     juce::Component topStrip;
     juce::Component* inPanel;
     LabelPanel* workPanel;
-    LabelPanel* outPanel;
+    std::unique_ptr<setle::mixer::MixerComponent> mixerComponent;
     TimelineShell* timelineShell;
     setle::timeline::TimelineTracksComponent* timelineTracks { nullptr };
 
@@ -158,6 +169,7 @@ private:
     std::unique_ptr<setle::capture::GrabSamplerQueue> grabSamplerQueue;
     std::unique_ptr<setle::capture::HistoryBuffer> historyBuffer;
     std::unique_ptr<setle::timeline::TrackManager> trackManager;
+    std::map<juce::String, std::unique_ptr<setle::instruments::InstrumentSlot>> instrumentSlots;
     model::Song songState;
     std::vector<juce::String> undoSnapshots;
     std::vector<juce::String> redoSnapshots;

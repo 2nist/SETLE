@@ -127,6 +127,45 @@ target_sources(SETLE PRIVATE
     source/capture/GrabSlot.h
     source/capture/HistoryBuffer.cpp
     source/capture/HistoryBuffer.h
+    source/instruments/drum/DrumMachineProcessor.cpp
+    source/instruments/drum/DrumMachineProcessor.h
+    source/instruments/drum/DrumMachineEditorComponent.cpp
+    source/instruments/drum/DrumMachineEditorComponent.h
+    source/instruments/drum/DrumVoiceDSP.cpp
+    source/instruments/drum/DrumVoiceDSP.h
+    source/instruments/drum/DrumVoiceParams.h
+    source/instruments/drum/FmDrumVoice.cpp
+    source/instruments/drum/FmDrumVoice.h
+    source/instruments/drum/DrumKitPatch.h
+    source/instruments/drum/DrumModuleState.h
+    source/instruments/drum/TracktionDrumMachinePlugin.cpp
+    source/instruments/drum/TracktionDrumMachinePlugin.h
+    source/instruments/InstrumentSlot.cpp
+    source/instruments/InstrumentSlot.h
+    source/instruments/reel/ReelBuffer.cpp
+    source/instruments/reel/ReelBuffer.h
+    source/instruments/reel/ReelGranular.cpp
+    source/instruments/reel/ReelGranular.h
+    source/instruments/reel/ReelLoopPlayer.cpp
+    source/instruments/reel/ReelLoopPlayer.h
+    source/instruments/reel/ReelParams.h
+    source/instruments/reel/ReelProcessor.cpp
+    source/instruments/reel/ReelProcessor.h
+    source/instruments/reel/ReelSampler.cpp
+    source/instruments/reel/ReelSampler.h
+    source/instruments/reel/ReelSlicer.cpp
+    source/instruments/reel/ReelSlicer.h
+    source/instruments/reel/TracktionReelPlugin.cpp
+    source/instruments/reel/TracktionReelPlugin.h
+    source/module/ModuleProcessor.h
+    source/instruments/polysynth/PolySynthProcessor.cpp
+    source/instruments/polysynth/PolySynthProcessor.h
+    source/instruments/polysynth/PolySynthEditorComponent.cpp
+    source/instruments/polysynth/PolySynthEditorComponent.h
+    source/instruments/polysynth/PolyVoice.h
+    source/instruments/polysynth/SineOscNode.h
+    source/instruments/polysynth/TracktionPolySynthPlugin.cpp
+    source/instruments/polysynth/TracktionPolySynthPlugin.h
     source/gridroll/GridRollCell.h
     source/gridroll/ChordGridView.cpp
     source/gridroll/ChordGridView.h
@@ -138,6 +177,14 @@ target_sources(SETLE PRIVATE
     source/gridroll/GridRollComponent.h
     source/model/SetleSongModel.cpp
     source/model/SetleSongModel.h
+    source/mixer/BusManager.cpp
+    source/mixer/BusManager.h
+    source/mixer/MasterStrip.cpp
+    source/mixer/MasterStrip.h
+    source/mixer/MixerComponent.cpp
+    source/mixer/MixerComponent.h
+    source/mixer/MixerStrip.cpp
+    source/mixer/MixerStrip.h
     source/timeline/TrackManager.cpp
     source/timeline/TrackManager.h
     source/timeline/TrackLane.cpp

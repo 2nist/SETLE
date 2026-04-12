@@ -65,6 +65,39 @@ enum TheoryActionId
     historyClear = 507
 };
 
+static const juce::Identifier kInstrumentSlotsContainerId { "instrumentSlots" };
+static const juce::Identifier kInstrumentSlotEntryId { "instrumentSlot" };
+static const juce::Identifier kSlotTrackIdProp { "trackId" };
+static const juce::Identifier kSlotTypeProp { "slotType" };
+static const juce::Identifier kSlotPersistentIdProp { "persistentId" };
+static const juce::Identifier kSlotPersistentNameProp { "persistentName" };
+
+juce::String slotTypeToString(setle::instruments::InstrumentSlot::SlotType type)
+{
+    using SlotType = setle::instruments::InstrumentSlot::SlotType;
+    switch (type)
+    {
+        case SlotType::PolySynth:   return "PolySynth";
+        case SlotType::DrumMachine: return "DrumMachine";
+        case SlotType::ReelSampler: return "ReelSampler";
+        case SlotType::VST3:        return "VST3";
+        case SlotType::MidiOut:     return "MidiOut";
+        case SlotType::Empty:       break;
+    }
+    return "Empty";
+}
+
+setle::instruments::InstrumentSlot::SlotType slotTypeFromString(const juce::String& value)
+{
+    using SlotType = setle::instruments::InstrumentSlot::SlotType;
+    if (value == "PolySynth") return SlotType::PolySynth;
+    if (value == "DrumMachine") return SlotType::DrumMachine;
+    if (value == "ReelSampler") return SlotType::ReelSampler;
+    if (value == "VST3") return SlotType::VST3;
+    if (value == "MidiOut") return SlotType::MidiOut;
+    return SlotType::Empty;
+}
+
 juce::String chordRootNameForMidi(int midiNote)
 {
     static constexpr std::array<const char*, 12> names { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
@@ -783,6 +816,331 @@ private:
     juce::Colour colour;
 };
 
+class WorkspaceShellComponent::OutPanelHost final : public juce::Component
+{
+public:
+    using SlotType = setle::instruments::InstrumentSlot::SlotType;
+    using TypeChangedCallback = std::function<void(const juce::String&, SlotType)>;
+    using VstScanCallback = std::function<void()>;
+    using VstLoadCallback = std::function<void(const juce::String&)>;
+    using MidiOutChangedCallback = std::function<void(const juce::String&, const juce::String&)>;
+
+    class InstrumentStrip final : public juce::Component
+    {
+    public:
+        InstrumentStrip()
+        {
+            addAndMakeVisible(trackNameLabel);
+            addAndMakeVisible(typeSelector);
+            addAndMakeVisible(scanVstButton);
+            addAndMakeVisible(loadVstButton);
+            addAndMakeVisible(midiOutSelector);
+            addAndMakeVisible(muteButton);
+            addAndMakeVisible(volumeSlider);
+            addAndMakeVisible(panSlider);
+
+            trackNameLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.92f));
+            trackNameLabel.setFont(juce::FontOptions(14.0f));
+            trackNameLabel.setJustificationType(juce::Justification::centredLeft);
+
+            muteButton.setButtonText("M");
+            muteButton.setClickingTogglesState(true);
+            muteButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3f46));
+            muteButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
+
+            volumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+            volumeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
+            volumeSlider.setRange(0.0, 1.0, 0.01);
+            volumeSlider.setValue(0.75, juce::dontSendNotification);
+            volumeSlider.onValueChange = [this]
+            {
+                if (volumePlugin != nullptr)
+                    volumePlugin->setSliderPos(static_cast<float>(volumeSlider.getValue()));
+            };
+
+            panSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+            panSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
+            panSlider.setRange(-1.0, 1.0, 0.01);
+            panSlider.setValue(0.0, juce::dontSendNotification);
+            panSlider.onValueChange = [this]
+            {
+                if (volumePlugin != nullptr)
+                    volumePlugin->setPan(static_cast<float>(panSlider.getValue()));
+            };
+
+            muteButton.onClick = [this]
+            {
+                if (volumePlugin != nullptr)
+                    volumePlugin->muteOrUnmute();
+            };
+
+            typeSelector.addItem("PolySynth", 1);
+            typeSelector.addItem("DrumMachine", 2);
+            typeSelector.addItem("ReelSampler", 3);
+            typeSelector.addItem("VST3", 4);
+            typeSelector.addItem("MIDI Out", 5);
+            typeSelector.onChange = [this]
+            {
+                if (onTypeChanged == nullptr)
+                    return;
+
+                switch (typeSelector.getSelectedId())
+                {
+                    case 1: onTypeChanged(trackId, SlotType::PolySynth); break;
+                    case 2: onTypeChanged(trackId, SlotType::DrumMachine); break;
+                    case 3: onTypeChanged(trackId, SlotType::ReelSampler); break;
+                    case 4: onTypeChanged(trackId, SlotType::VST3); break;
+                    case 5: onTypeChanged(trackId, SlotType::MidiOut); break;
+                    default: break;
+                }
+
+                updateTypeSpecificControls();
+            };
+
+            loadVstButton.setButtonText("Load VST...");
+            loadVstButton.onClick = [this]
+            {
+                if (onVstLoadRequested != nullptr)
+                    onVstLoadRequested(trackId);
+            };
+
+            scanVstButton.setButtonText("Scan VST3...");
+            scanVstButton.onClick = [this]
+            {
+                if (onVstScanRequested != nullptr)
+                    onVstScanRequested();
+            };
+
+            midiOutSelector.onChange = [this]
+            {
+                if (onMidiOutChanged == nullptr)
+                    return;
+
+                const auto idx = midiOutSelector.getSelectedItemIndex();
+                if (idx >= 0 && idx < static_cast<int>(midiOutputIdentifiers.size()))
+                    onMidiOutChanged(trackId, midiOutputIdentifiers[static_cast<size_t>(idx)]);
+            };
+        }
+
+        void configure(te::AudioTrack& audioTrack,
+                       const juce::String& name,
+                       const juce::String& id,
+                       setle::instruments::InstrumentSlot* slot,
+                       TypeChangedCallback callback,
+                       VstScanCallback scanCallback,
+                       VstLoadCallback vstCallback,
+                       MidiOutChangedCallback midiOutCallback)
+        {
+            trackId = id;
+            onTypeChanged = std::move(callback);
+            onVstScanRequested = std::move(scanCallback);
+            onVstLoadRequested = std::move(vstCallback);
+            onMidiOutChanged = std::move(midiOutCallback);
+            trackNameLabel.setText(name, juce::dontSendNotification);
+            volumePlugin = audioTrack.getVolumePlugin();
+
+            midiOutSelector.clear(juce::dontSendNotification);
+            midiOutputIdentifiers.clear();
+            midiOutSelector.addItem("Default MIDI Output", 1);
+            midiOutputIdentifiers.push_back("default");
+            int itemId = 2;
+            for (const auto& device : juce::MidiOutput::getAvailableDevices())
+            {
+                midiOutSelector.addItem(device.name, itemId++);
+                midiOutputIdentifiers.push_back(device.identifier);
+            }
+            midiOutSelector.setSelectedItemIndex(0, juce::dontSendNotification);
+
+            if (volumePlugin != nullptr)
+            {
+                volumeSlider.setValue(volumePlugin->getSliderPos(), juce::dontSendNotification);
+                panSlider.setValue(volumePlugin->getPan(), juce::dontSendNotification);
+            }
+
+            auto selected = 1;
+            auto midiSelectionIndex = 0;
+            if (slot != nullptr)
+            {
+                const auto info = slot->getInfo();
+                switch (info.type)
+                {
+                    case SlotType::PolySynth: selected = 1; break;
+                    case SlotType::DrumMachine: selected = 2; break;
+                    case SlotType::ReelSampler: selected = 3; break;
+                    case SlotType::VST3: selected = 4; break;
+                    case SlotType::MidiOut: selected = 5; break;
+                    case SlotType::Empty: selected = 1; break;
+                }
+
+                if (info.type == SlotType::MidiOut)
+                {
+                    for (int i = 0; i < static_cast<int>(midiOutputIdentifiers.size()); ++i)
+                    {
+                        if (midiOutputIdentifiers[static_cast<size_t>(i)] == info.persistentIdentifier)
+                        {
+                            midiSelectionIndex = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (auto* editor = slot->getEditorComponent())
+                {
+                    if (editor->getParentComponent() != this)
+                        addAndMakeVisible(*editor);
+                    editorComponent = editor;
+                }
+            }
+
+            typeSelector.setSelectedId(selected, juce::dontSendNotification);
+            midiOutSelector.setSelectedItemIndex(midiSelectionIndex, juce::dontSendNotification);
+            updateTypeSpecificControls();
+            resized();
+        }
+
+        void paint(juce::Graphics& g) override
+        {
+            auto r = getLocalBounds().toFloat();
+            g.setColour(juce::Colour(0xff1a1e24));
+            g.fillRoundedRectangle(r, 5.0f);
+            g.setColour(juce::Colour(0xff3b4650));
+            g.drawRoundedRectangle(r.reduced(0.5f), 5.0f, 1.0f);
+        }
+
+        void resized() override
+        {
+            auto b = getLocalBounds().reduced(8);
+            auto row = b.removeFromTop(28);
+            trackNameLabel.setBounds(row.removeFromLeft(160));
+            muteButton.setBounds(row.removeFromRight(32));
+            row.removeFromRight(6);
+            scanVstButton.setBounds(row.removeFromRight(112));
+            row.removeFromRight(4);
+            loadVstButton.setBounds(row.removeFromRight(104));
+            row.removeFromRight(4);
+            midiOutSelector.setBounds(row.removeFromRight(170));
+            row.removeFromRight(4);
+            typeSelector.setBounds(row.removeFromRight(120));
+
+            b.removeFromTop(6);
+            if (editorComponent != nullptr)
+                editorComponent->setBounds(b.removeFromTop(84));
+            else
+                b.removeFromTop(84);
+
+            b.removeFromTop(6);
+            auto mix = b.removeFromTop(24);
+            volumeSlider.setBounds(mix.removeFromLeft(220));
+            mix.removeFromLeft(8);
+            panSlider.setBounds(mix.removeFromLeft(220));
+        }
+
+    private:
+        void updateTypeSpecificControls()
+        {
+            const auto id = typeSelector.getSelectedId();
+            scanVstButton.setVisible(id == 4);
+            loadVstButton.setVisible(id == 4);
+            midiOutSelector.setVisible(id == 5);
+        }
+
+        juce::String trackId;
+        TypeChangedCallback onTypeChanged;
+        VstScanCallback onVstScanRequested;
+        VstLoadCallback onVstLoadRequested;
+        MidiOutChangedCallback onMidiOutChanged;
+        juce::Label trackNameLabel;
+        juce::ComboBox typeSelector;
+        juce::TextButton scanVstButton;
+        juce::TextButton loadVstButton;
+        juce::ComboBox midiOutSelector;
+        std::vector<juce::String> midiOutputIdentifiers;
+        juce::TextButton muteButton;
+        juce::Slider volumeSlider;
+        juce::Slider panSlider;
+        te::VolumeAndPanPlugin* volumePlugin { nullptr };
+        juce::Component::SafePointer<juce::Component> editorComponent;
+    };
+
+    OutPanelHost()
+    {
+        addAndMakeVisible(viewport);
+        viewport.setViewedComponent(&content, false);
+        viewport.setScrollBarsShown(true, false);
+    }
+
+    void rebuild(const juce::Array<te::Track*>& tracks,
+                 std::map<juce::String, std::unique_ptr<setle::instruments::InstrumentSlot>>& slots,
+                 TypeChangedCallback callback,
+                 VstScanCallback scanCallback,
+                 VstLoadCallback vstCallback,
+                 MidiOutChangedCallback midiOutCallback)
+    {
+        onTypeChanged = std::move(callback);
+        onVstScanRequested = std::move(scanCallback);
+        onVstLoadRequested = std::move(vstCallback);
+        onMidiOutChanged = std::move(midiOutCallback);
+        strips.clear();
+
+        for (auto* track : tracks)
+        {
+            if (track == nullptr)
+                continue;
+
+            if (setle::timeline::TrackManager::isSystemTrack(*track))
+                continue;
+
+            auto* audioTrack = dynamic_cast<te::AudioTrack*>(track);
+            if (audioTrack == nullptr)
+                continue;
+
+            const auto trackId = audioTrack->itemID.toString();
+            auto it = slots.find(trackId);
+            if (it == slots.end())
+                continue;
+
+            auto strip = std::make_unique<InstrumentStrip>();
+            strip->configure(*audioTrack,
+                             audioTrack->getName(),
+                             trackId,
+                             it->second.get(),
+                             onTypeChanged,
+                             onVstScanRequested,
+                             onVstLoadRequested,
+                             onMidiOutChanged);
+            content.addAndMakeVisible(*strip);
+            strips.push_back(std::move(strip));
+        }
+
+        resized();
+        repaint();
+    }
+
+    void resized() override
+    {
+        viewport.setBounds(getLocalBounds());
+
+        auto width = juce::jmax(260, getWidth() - 14);
+        int y = 6;
+        for (auto& strip : strips)
+        {
+            strip->setBounds(6, y, width - 12, 160);
+            y += 168;
+        }
+
+        content.setSize(width, juce::jmax(y + 6, getHeight()));
+    }
+
+private:
+    juce::Viewport viewport;
+    juce::Component content;
+    std::vector<std::unique_ptr<InstrumentStrip>> strips;
+    TypeChangedCallback onTypeChanged;
+    VstScanCallback onVstScanRequested;
+    VstLoadCallback onVstLoadRequested;
+    MidiOutChangedCallback onMidiOutChanged;
+};
+
 class WorkspaceShellComponent::TimelineShell final : public juce::Component
 {
 public:
@@ -1369,12 +1727,6 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     addAndMakeVisible(workPanel);
     configureTheoryEditorPanel();
 
-    outPanel = new LabelPanel(
-        "OUT",
-        juce::Colour(0xff2d2431),
-        "Mixer, FX chain, routing,\nexport and output diagnostics");
-    addAndMakeVisible(outPanel);
-
     timelineShell = new TimelineShell(
         [this](TheoryMenuTarget target, int actionId, const juce::String& actionName)
         {
@@ -1494,6 +1846,24 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 
         trackManager = std::make_unique<setle::timeline::TrackManager>(*edit);
         trackManager->ensureDefaultTracks();
+        ensureInstrumentSlots();
+        applyPersistedInstrumentSlotAssignments();
+
+        mixerComponent = std::make_unique<setle::mixer::MixerComponent>(*edit, *trackManager, instrumentSlots);
+        addAndMakeVisible(*mixerComponent);
+
+        if (auto midiTracks = trackManager->getMidiTracks(); !midiTracks.isEmpty())
+        {
+            if (auto* firstMidi = midiTracks.getFirst())
+            {
+                const auto trackId = firstMidi->itemID.toString();
+                auto it = instrumentSlots.find(trackId);
+                if (it != instrumentSlots.end() && it->second->getInfo().type == setle::instruments::InstrumentSlot::SlotType::Empty)
+                    it->second->loadPolySynth();
+            }
+        }
+
+        rebuildOutPanelStrips();
 
         timelineTracks = new setle::timeline::TimelineTracksComponent(*edit, *trackManager);
         timelineTracks->setVisibleBeatRange(0.0, 32.0);
@@ -1544,6 +1914,11 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         gridRollComponent->onStatusMessage = [this](const juce::String& msg)
         {
             interactionStatus.setText(msg, juce::dontSendNotification);
+        };
+        gridRollComponent->onDrumPatternEdited = [this](const std::vector<setle::gridroll::GridRollCell>& cells,
+                                                        const juce::String& progId)
+        {
+            applyDrumPatternToSlots(cells, progId);
         };
         if (!selectedProgressionId.isEmpty())
             gridRollComponent->setTargetProgression(selectedProgressionId);
@@ -2399,6 +2774,9 @@ void WorkspaceShellComponent::refreshTimelineData()
     if (timelineTracks != nullptr)
         timelineTracks->refreshTracks();
 
+    ensureInstrumentSlots();
+    rebuildOutPanelStrips();
+
     const auto sections = songState.getSections();
     const auto progressions = songState.getProgressions();
 
@@ -2448,6 +2826,174 @@ void WorkspaceShellComponent::refreshTimelineData()
             populateTheoryFieldsForCurrentSelection();
             interactionStatus.setText("Selected chord: " + chordId.substring(0, 8), juce::dontSendNotification);
         });
+}
+
+void WorkspaceShellComponent::ensureInstrumentSlots()
+{
+    if (edit == nullptr || trackManager == nullptr)
+        return;
+
+    std::set<juce::String> liveTrackIds;
+    const auto tracks = trackManager->getAllUserTracks();
+    for (auto* track : tracks)
+    {
+        auto* audioTrack = dynamic_cast<te::AudioTrack*>(track);
+        if (audioTrack == nullptr)
+            continue;
+
+        const auto trackId = audioTrack->itemID.toString();
+        liveTrackIds.insert(trackId);
+
+        if (instrumentSlots.find(trackId) == instrumentSlots.end())
+            instrumentSlots[trackId] = std::make_unique<setle::instruments::InstrumentSlot>(*audioTrack, *edit);
+    }
+
+    for (auto it = instrumentSlots.begin(); it != instrumentSlots.end();)
+    {
+        if (liveTrackIds.find(it->first) == liveTrackIds.end())
+            it = instrumentSlots.erase(it);
+        else
+            ++it;
+    }
+}
+
+void WorkspaceShellComponent::applyPersistedInstrumentSlotAssignments()
+{
+    if (!songState.isValid() || instrumentSlots.empty())
+        return;
+
+    const auto root = songState.valueTree();
+    const auto container = root.getChildWithName(kInstrumentSlotsContainerId);
+    if (!container.isValid())
+        return;
+
+    for (const auto& child : container)
+    {
+        if (!child.hasType(kInstrumentSlotEntryId))
+            continue;
+
+        const auto trackId = child.getProperty(kSlotTrackIdProp, {}).toString();
+        if (trackId.isEmpty())
+            continue;
+
+        auto it = instrumentSlots.find(trackId);
+        if (it == instrumentSlots.end() || it->second == nullptr)
+            continue;
+
+        const auto type = slotTypeFromString(child.getProperty(kSlotTypeProp, {}).toString());
+        const auto persistentId = child.getProperty(kSlotPersistentIdProp, {}).toString();
+        const auto persistentName = child.getProperty(kSlotPersistentNameProp, {}).toString();
+
+        it->second->clear();
+        switch (type)
+        {
+            case setle::instruments::InstrumentSlot::SlotType::PolySynth:
+                it->second->loadPolySynth();
+                break;
+            case setle::instruments::InstrumentSlot::SlotType::DrumMachine:
+                it->second->loadDrumMachine();
+                break;
+            case setle::instruments::InstrumentSlot::SlotType::ReelSampler:
+                it->second->loadReelSampler();
+                break;
+            case setle::instruments::InstrumentSlot::SlotType::MidiOut:
+                it->second->loadMidiOut(persistentId.isNotEmpty() ? persistentId : "default");
+                break;
+            case setle::instruments::InstrumentSlot::SlotType::VST3:
+            {
+                juce::PluginDescription resolved;
+                bool found = false;
+                for (const auto& desc : engineRef.getPluginManager().knownPluginList.getTypes())
+                {
+                    if (!desc.pluginFormatName.containsIgnoreCase("VST3"))
+                        continue;
+
+                    if ((!persistentId.isEmpty() && desc.fileOrIdentifier == persistentId)
+                        || (!persistentName.isEmpty() && desc.name == persistentName))
+                    {
+                        resolved = desc;
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    resolved.name = persistentName.isNotEmpty() ? persistentName : "VST3";
+                    resolved.fileOrIdentifier = persistentId;
+                    resolved.pluginFormatName = "VST3";
+                }
+
+                it->second->loadVST3(resolved);
+                break;
+            }
+            case setle::instruments::InstrumentSlot::SlotType::Empty:
+                break;
+        }
+    }
+}
+
+void WorkspaceShellComponent::persistInstrumentSlotAssignments()
+{
+    if (!songState.isValid())
+        return;
+
+    const auto root = songState.valueTree();
+    if (!root.isValid())
+        return;
+
+    for (int i = root.getNumChildren(); --i >= 0;)
+    {
+        if (root.getChild(i).hasType(kInstrumentSlotsContainerId))
+            root.removeChild(i, nullptr);
+    }
+
+    juce::ValueTree container(kInstrumentSlotsContainerId);
+    for (const auto& [trackId, slot] : instrumentSlots)
+    {
+        if (slot == nullptr)
+            continue;
+
+        const auto info = slot->getInfo();
+        if (info.type == setle::instruments::InstrumentSlot::SlotType::Empty)
+            continue;
+
+        juce::ValueTree entry(kInstrumentSlotEntryId);
+        entry.setProperty(kSlotTrackIdProp, trackId, nullptr);
+        entry.setProperty(kSlotTypeProp, slotTypeToString(info.type), nullptr);
+        entry.setProperty(kSlotPersistentIdProp, info.persistentIdentifier, nullptr);
+        entry.setProperty(kSlotPersistentNameProp, info.persistentName, nullptr);
+        container.appendChild(entry, nullptr);
+    }
+
+    root.appendChild(container, nullptr);
+}
+
+void WorkspaceShellComponent::rebuildOutPanelStrips()
+{
+    if (mixerComponent == nullptr)
+        return;
+
+    mixerComponent->refreshStrips();
+}
+
+void WorkspaceShellComponent::applyDrumPatternToSlots(const std::vector<setle::gridroll::GridRollCell>& cells,
+                                                      const juce::String& progressionId)
+{
+    (void) progressionId;
+
+    ensureInstrumentSlots();
+    for (auto& [trackId, slot] : instrumentSlots)
+    {
+        (void) trackId;
+        if (slot != nullptr)
+            slot->setDrumPattern(cells);
+    }
+}
+
+juce::String WorkspaceShellComponent::getTrackIdForTrack(const te::Track& track) const
+{
+    return track.itemID.toString();
 }
 
 void WorkspaceShellComponent::initialiseSongState()
@@ -2586,6 +3132,8 @@ void WorkspaceShellComponent::saveSongState()
 {
     if (!songState.isValid())
         return;
+
+    persistInstrumentSlotAssignments();
 
     const auto result = songState.saveToFile(getSongStateFile(), model::StorageFormat::xml);
     if (result.failed())
@@ -3146,6 +3694,69 @@ juce::String WorkspaceShellComponent::runProgressionAction(int actionId, const j
             progression->getId(),
             progression->getName(),
             0.75f);
+
+        // Build a deterministic preview buffer so Reel has immediate audio content
+        // even before full coupled audio capture is implemented.
+        {
+            constexpr double sr = 44100.0;
+            const auto secPerBeat = 60.0 / juce::jmax(1.0, songState.getBpm());
+
+            double totalBeats = 0.0;
+            for (const auto& chord : progression->getChords())
+                totalBeats += juce::jmax(0.25, chord.getDurationBeats());
+            totalBeats = juce::jmax(1.0, totalBeats);
+
+            const int totalSamples = static_cast<int>(std::ceil(totalBeats * secPerBeat * sr));
+            juce::AudioBuffer<float> preview(2, juce::jmax(1, totalSamples));
+            preview.clear();
+
+            double beatCursor = 0.0;
+            for (const auto& chord : progression->getChords())
+            {
+                const auto chordBeats = juce::jmax(0.25, chord.getDurationBeats());
+                const int startSample = juce::jlimit(0, preview.getNumSamples() - 1,
+                    static_cast<int>(std::floor(beatCursor * secPerBeat * sr)));
+                const int endSample = juce::jlimit(startSample + 1, preview.getNumSamples(),
+                    static_cast<int>(std::ceil((beatCursor + chordBeats) * secPerBeat * sr)));
+
+                std::vector<int> pitches;
+                for (const auto& note : chord.getNotes())
+                    pitches.push_back(note.getPitch());
+                if (pitches.empty())
+                    pitches.push_back(chord.getRootMidi());
+
+                std::vector<double> phase(static_cast<size_t>(pitches.size()), 0.0);
+                std::vector<double> inc(static_cast<size_t>(pitches.size()), 0.0);
+                for (size_t i = 0; i < pitches.size(); ++i)
+                    inc[i] = juce::MathConstants<double>::twoPi
+                             * juce::MidiMessage::getMidiNoteInHertz(pitches[i]) / sr;
+
+                for (int s = startSample; s < endSample; ++s)
+                {
+                    const double t = static_cast<double>(s - startSample) / juce::jmax(1, endSample - startSample);
+                    const float env = static_cast<float>(std::pow(1.0 - juce::jmin(0.999, t), 0.45));
+                    float sample = 0.0f;
+
+                    for (size_t i = 0; i < pitches.size(); ++i)
+                    {
+                        sample += static_cast<float>(std::sin(phase[i]));
+                        phase[i] += inc[i];
+                        if (phase[i] >= juce::MathConstants<double>::twoPi)
+                            phase[i] -= juce::MathConstants<double>::twoPi;
+                    }
+
+                    sample /= static_cast<float>(juce::jmax(1, static_cast<int>(pitches.size())));
+                    sample *= env * 0.23f;
+                    preview.addSample(0, s, sample);
+                    preview.addSample(1, s, sample);
+                }
+
+                beatCursor += chordBeats;
+            }
+
+            grabSamplerQueue->setSlotAudioBuffer(slot, preview, sr);
+        }
+
         updateInPanelQueueView();
 
         return "Progression moved to sampler queue slot " + juce::String(slot + 1);
@@ -3614,6 +4225,13 @@ void WorkspaceShellComponent::timerCallback()
 
     if (gridRollComponent != nullptr)
         gridRollComponent->setPlayheadBeat(playheadBeat);
+
+    for (auto& [trackId, slot] : instrumentSlots)
+    {
+        (void) trackId;
+        if (slot != nullptr)
+            slot->setTransportBeat(playheadBeat);
+    }
 }
 
 void WorkspaceShellComponent::updateInPanelQueueView()
@@ -3895,7 +4513,8 @@ void WorkspaceShellComponent::resized()
     leftResizeBar->setBounds(leftSplitterArea);
 
     auto outArea = bounds.removeFromRight(rightPanelWidth);
-    outPanel->setBounds(outArea);
+    if (mixerComponent != nullptr)
+        mixerComponent->setBounds(outArea);
 
     auto rightSplitterArea = bounds.removeFromRight(splitterThickness);
     rightResizeBar->setBounds(rightSplitterArea);
