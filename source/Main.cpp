@@ -32,6 +32,7 @@ public:
         // temporary files and the Edit data model.
         // One Engine per application — lives for the app lifetime.
         engine = std::make_unique<te::Engine> (getApplicationName());
+        engine->getDeviceManager().initialise();
 
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
     }

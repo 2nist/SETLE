@@ -249,6 +249,178 @@ juce::String normalizeRepeatIndices(const juce::String& serialized, const juce::
 }
 } // namespace
 
+//==============================================================================
+class WorkspaceShellComponent::InDevicePanel final : public juce::Component,
+                                                     private juce::Timer,
+                                                     private juce::MidiInputCallback
+{
+public:
+    explicit InDevicePanel(te::Engine& e) : engine(e)
+    {
+        openMidiInputs();
+        startTimerHz(4);
+    }
+
+    ~InDevicePanel() override
+    {
+        stopTimer();
+        for (auto& m : midiInputs)
+            m->stop();
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        const auto bounds = getLocalBounds();
+        g.setColour(juce::Colour(0xff22352a));
+        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 5.0f);
+
+        auto area = bounds.reduced(10, 8);
+
+        // Title
+        g.setFont(juce::FontOptions(16.0f));
+        g.setColour(juce::Colours::white.withAlpha(0.88f));
+        g.drawText("IN", area.removeFromTop(22), juce::Justification::centredLeft, false);
+
+        area.removeFromTop(4);
+
+        // ── Audio Output ──────────────────────────────────────────────────────
+        drawSectionLabel(g, area, "Audio Output");
+        {
+            auto& dm = engine.getDeviceManager().deviceManager;
+            auto* dev = dm.getCurrentAudioDevice();
+            if (dev != nullptr)
+            {
+                const auto sr = static_cast<int>(dev->getCurrentSampleRate());
+                const auto bs = dev->getCurrentBufferSizeSamples();
+                const auto devName = dev->getName();
+                g.setColour(juce::Colours::white.withAlpha(0.80f));
+                g.setFont(juce::FontOptions(12.0f));
+                g.drawText(devName, area.removeFromTop(16), juce::Justification::centredLeft, true);
+                g.setColour(juce::Colours::white.withAlpha(0.50f));
+                g.setFont(juce::FontOptions(11.0f));
+                g.drawText(juce::String(sr) + " Hz  |  " + juce::String(bs) + " samples",
+                           area.removeFromTop(15), juce::Justification::centredLeft, true);
+            }
+            else
+            {
+                g.setColour(juce::Colours::white.withAlpha(0.40f));
+                g.setFont(juce::FontOptions(12.0f));
+                g.drawText("(no audio device open)", area.removeFromTop(16), juce::Justification::centredLeft, true);
+            }
+        }
+        area.removeFromTop(8);
+
+        // ── MIDI Inputs ───────────────────────────────────────────────────────
+        drawSectionLabel(g, area, "MIDI Inputs");
+        {
+            const auto midiDevices = juce::MidiInput::getAvailableDevices();
+            if (midiDevices.isEmpty())
+            {
+                g.setColour(juce::Colours::white.withAlpha(0.40f));
+                g.setFont(juce::FontOptions(12.0f));
+                g.drawText("(no MIDI inputs found)", area.removeFromTop(15), juce::Justification::centredLeft, true);
+            }
+            else
+            {
+                for (const auto& info : midiDevices)
+                {
+                    if (area.getHeight() < 14)
+                        break;
+                    const bool isOpen = isDeviceOpen(info.identifier);
+                    g.setColour(isOpen ? juce::Colour(0xff6ac87b) : juce::Colours::white.withAlpha(0.45f));
+                    g.setFont(juce::FontOptions(12.0f));
+                    const auto dot = isOpen ? juce::String(juce::CharPointer_UTF8("\xe2\x97\x8f "))
+                                            : juce::String(juce::CharPointer_UTF8("\xe2\x97\x8b "));
+                    g.drawText(dot + info.name, area.removeFromTop(15), juce::Justification::centredLeft, true);
+                }
+            }
+        }
+        area.removeFromTop(8);
+
+        // ── MIDI Monitor ──────────────────────────────────────────────────────
+        if (area.getHeight() < 36)
+            return;
+
+        drawSectionLabel(g, area, "MIDI Monitor");
+        {
+            juce::Array<juce::MidiMessage> snapshot;
+            {
+                const juce::ScopedLock sl(logLock);
+                for (const auto& m : midiLog)
+                    snapshot.add(m);
+            }
+
+            g.setFont(juce::FontOptions(11.0f, juce::Font::plain));
+            // Draw newest at top
+            for (int i = snapshot.size() - 1; i >= 0 && area.getHeight() >= 13; --i)
+            {
+                const auto& msg = snapshot.getReference(i);
+                juce::String text;
+                if (msg.isNoteOn())
+                    text = "NoteOn  ch" + juce::String(msg.getChannel()) + "  n" + juce::String(msg.getNoteNumber()) + "  v" + juce::String(msg.getVelocity());
+                else if (msg.isNoteOff())
+                    text = "NoteOff ch" + juce::String(msg.getChannel()) + "  n" + juce::String(msg.getNoteNumber());
+                else if (msg.isController())
+                    text = "CC  ch" + juce::String(msg.getChannel()) + "  #" + juce::String(msg.getControllerNumber()) + "=" + juce::String(msg.getControllerValue());
+                else if (msg.isProgramChange())
+                    text = "PC  ch" + juce::String(msg.getChannel()) + "  p" + juce::String(msg.getProgramChangeNumber());
+                else if (msg.isPitchWheel())
+                    text = "PW  ch" + juce::String(msg.getChannel()) + "  " + juce::String(msg.getPitchWheelValue());
+                else
+                    text = "0x" + juce::String::toHexString(msg.getRawData(), juce::jmin(3, msg.getRawDataSize()));
+
+                const float alpha = 0.35f + 0.65f * (static_cast<float>(i) / static_cast<float>(juce::jmax(1, snapshot.size() - 1)));
+                g.setColour(juce::Colours::white.withAlpha(alpha));
+                g.drawText(text, area.removeFromTop(13), juce::Justification::centredLeft, true);
+            }
+        }
+    }
+
+private:
+    static void drawSectionLabel(juce::Graphics& g, juce::Rectangle<int>& area, const juce::String& label)
+    {
+        g.setColour(juce::Colour(0xff4a8a60).withAlpha(0.85f));
+        g.setFont(juce::FontOptions(10.5f));
+        g.drawText(label.toUpperCase(), area.removeFromTop(14), juce::Justification::centredLeft, false);
+    }
+
+    void openMidiInputs()
+    {
+        for (const auto& info : juce::MidiInput::getAvailableDevices())
+        {
+            if (auto dev = juce::MidiInput::openDevice(info.identifier, this))
+            {
+                dev->start();
+                midiInputs.push_back(std::move(dev));
+            }
+        }
+    }
+
+    bool isDeviceOpen(const juce::String& identifier) const
+    {
+        for (const auto& m : midiInputs)
+            if (m->getIdentifier() == identifier)
+                return true;
+        return false;
+    }
+
+    void timerCallback() override { repaint(); }
+
+    void handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& msg) override
+    {
+        const juce::ScopedLock sl(logLock);
+        midiLog.add(msg);
+        if (midiLog.size() > 12)
+            midiLog.remove(0);
+    }
+
+    te::Engine& engine;
+    std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
+    juce::CriticalSection logLock;
+    juce::Array<juce::MidiMessage> midiLog;
+};
+
+//==============================================================================
 class WorkspaceShellComponent::LabelPanel : public juce::Component
 {
 public:
@@ -728,10 +900,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     topStrip.addAndMakeVisible(redoTheoryButton);
     addAndMakeVisible(topStrip);
 
-    inPanel = new LabelPanel(
-        "IN",
-        juce::Colour(0xff22352a),
-        "Inputs, device map, clip library,\nand grab sampler queue");
+    inPanel = new InDevicePanel(engineRef);
     addAndMakeVisible(inPanel);
 
     workPanel = new LabelPanel(

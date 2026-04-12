@@ -25,6 +25,7 @@ private:
     class LabelPanel;
     class TimelineShell;
     class DragBar;
+    class InDevicePanel;
 
     enum class TheoryMenuTarget
     {
@@ -88,7 +89,7 @@ private:
     std::unique_ptr<te::Edit> edit;
 
     juce::Component topStrip;
-    LabelPanel* inPanel;
+    juce::Component* inPanel;
     LabelPanel* workPanel;
     LabelPanel* outPanel;
     TimelineShell* timelineShell;
