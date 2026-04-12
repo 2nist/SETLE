@@ -1,10 +1,13 @@
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <tracktion_engine/tracktion_engine.h>
 
 #include <vector>
 
 #include "../model/SetleSongModel.h"
+
+namespace te = tracktion::engine;
 
 namespace setle::ui
 {
@@ -12,7 +15,7 @@ namespace setle::ui
 class WorkspaceShellComponent final : public juce::Component
 {
 public:
-    WorkspaceShellComponent();
+    explicit WorkspaceShellComponent(te::Engine& engine);
     ~WorkspaceShellComponent() override;
 
     bool keyPressed(const juce::KeyPress& key) override;
@@ -22,6 +25,7 @@ private:
     class LabelPanel;
     class TimelineShell;
     class DragBar;
+    class InDevicePanel;
 
     enum class TheoryMenuTarget
     {
@@ -49,6 +53,7 @@ private:
     juce::String runProgressionAction(int actionId);
 
     void initialiseSongState();
+    void loadProgressionToEdit();
     juce::File getSongStateFile() const;
     void loadSongState();
     void seedSongStateIfNeeded();
@@ -80,8 +85,11 @@ private:
     void loadLayoutState();
     void saveLayoutState();
 
+    te::Engine& engineRef;
+    std::unique_ptr<te::Edit> edit;
+
     juce::Component topStrip;
-    LabelPanel* inPanel;
+    juce::Component* inPanel;
     LabelPanel* workPanel;
     LabelPanel* outPanel;
     TimelineShell* timelineShell;
@@ -89,6 +97,12 @@ private:
     DragBar* leftResizeBar;
     DragBar* rightResizeBar;
     DragBar* timelineResizeBar;
+
+    juce::TextButton playButton   { juce::CharPointer_UTF8("\xe2\x96\xb6") };  // ▶
+    juce::TextButton stopButton   { juce::CharPointer_UTF8("\xe2\x96\xa0") };  // ■
+    juce::TextButton recordButton { juce::CharPointer_UTF8("\xe2\x97\x8f") };  // ●
+    juce::Label     bpmLabel;
+    juce::TextEditor bpmEditor;
 
     juce::TextButton focusInButton { "Focus IN" };
     juce::TextButton focusBalancedButton { "Focus Balanced" };
