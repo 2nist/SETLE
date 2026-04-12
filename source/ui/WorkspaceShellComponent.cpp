@@ -1050,8 +1050,12 @@ void WorkspaceShellComponent::populateTheoryFieldsForCurrentSelection()
         {
             if (activeEditorActionId == sectionEditTheory)
             {
-                setField(theoryFieldLabel1, theoryFieldEditor1, "Section Name", section->getName());
-                setField(theoryFieldLabel2, theoryFieldEditor2, "Repeat Count", juce::String(section->getRepeatCount()));
+                setField(theoryFieldLabel1, theoryFieldEditor1, "Name", section->getName());
+                setField(theoryFieldLabel2, theoryFieldEditor2, "Repeat count", juce::String(section->getRepeatCount()));
+                setField(theoryFieldLabel3, theoryFieldEditor3, "Energy", "");
+                auto progressionRefs = section->getProgressionRefs();
+                setField(theoryFieldLabel4, theoryFieldEditor4, "Progression ID",
+                         progressionRefs.empty() ? "" : progressionRefs.front().getProgressionId());
                 applyTheoryEditorButton.setButtonText("Apply Section Edit");
             }
             else if (activeEditorActionId == sectionSetRepeatPattern)
@@ -1079,9 +1083,9 @@ void WorkspaceShellComponent::populateTheoryFieldsForCurrentSelection()
             {
                 setField(theoryFieldLabel1, theoryFieldEditor1, "Symbol", chord->getSymbol());
                 setField(theoryFieldLabel2, theoryFieldEditor2, "Quality", chord->getQuality());
-                setField(theoryFieldLabel3, theoryFieldEditor3, "Function", chord->getFunction());
-                setField(theoryFieldLabel4, theoryFieldEditor4, "Root MIDI", juce::String(chord->getRootMidi()));
-                setField(theoryFieldLabel5, theoryFieldEditor5, "Duration Beats", juce::String(chord->getDurationBeats()));
+                setField(theoryFieldLabel3, theoryFieldEditor3, "Root MIDI", juce::String(chord->getRootMidi()));
+                setField(theoryFieldLabel4, theoryFieldEditor4, "Duration (beats)", juce::String(chord->getDurationBeats()));
+                setField(theoryFieldLabel5, theoryFieldEditor5, "Function", chord->getFunction());
                 applyTheoryEditorButton.setButtonText("Apply Chord Edit");
             }
             else if (activeEditorActionId == chordSubstitution)
@@ -1129,8 +1133,11 @@ void WorkspaceShellComponent::populateTheoryFieldsForCurrentSelection()
             }
             else if (activeEditorActionId == progressionAnnotateKeyMode)
             {
-                setField(theoryFieldLabel1, theoryFieldEditor1, "Key", progression->getKey());
-                setField(theoryFieldLabel2, theoryFieldEditor2, "Mode", progression->getMode());
+                setField(theoryFieldLabel1, theoryFieldEditor1, "Name", progression->getName());
+                setField(theoryFieldLabel2, theoryFieldEditor2, "Key", progression->getKey());
+                setField(theoryFieldLabel3, theoryFieldEditor3, "Mode", progression->getMode());
+                setField(theoryFieldLabel4, theoryFieldEditor4, "Length (beats)", juce::String(progression->getLengthBeats()));
+                setField(theoryFieldLabel5, theoryFieldEditor5, "Variant of", progression->getVariantOf());
                 applyTheoryEditorButton.setButtonText("Apply Key/Mode");
             }
         }
@@ -1240,13 +1247,14 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
 
         if (activeEditorActionId == chordEdit)
         {
-            const auto rootText = theoryFieldEditor4.getText().trim();
-            const auto durationText = theoryFieldEditor5.getText().trim();
+            const auto rootText = theoryFieldEditor3.getText().trim();
+            const auto durationText = theoryFieldEditor4.getText().trim();
             if (rootText.isNotEmpty() && !isStrictInt(rootText))
                 return "Chord edit rejected: Root MIDI must be an integer";
             if (durationText.isNotEmpty() && !isStrictDouble(durationText))
                 return "Chord edit rejected: Duration Beats must be numeric";
 
+            const auto beforeSymbol = chord->getSymbol();
             chord->setSymbol(theoryFieldEditor1.getText().trim().isNotEmpty()
                                  ? theoryFieldEditor1.getText().trim()
                                  : chord->getSymbol());
@@ -1254,12 +1262,13 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
             chord->setQuality(theoryFieldEditor2.getText().trim().isNotEmpty()
                                   ? theoryFieldEditor2.getText().trim()
                                   : chord->getQuality());
-            chord->setFunction(theoryFieldEditor3.getText().trim().isNotEmpty()
-                                   ? theoryFieldEditor3.getText().trim()
+            chord->setRootMidi(juce::jlimit(0, 127, parseIntOr(theoryFieldEditor3.getText(), chord->getRootMidi())));
+            chord->setDurationBeats(juce::jmax(0.125, parseDoubleOr(theoryFieldEditor4.getText(), chord->getDurationBeats())));
+            chord->setFunction(theoryFieldEditor5.getText().trim().isNotEmpty()
+                                   ? theoryFieldEditor5.getText().trim()
                                    : chord->getFunction());
-            chord->setRootMidi(juce::jlimit(0, 127, parseIntOr(theoryFieldEditor4.getText(), chord->getRootMidi())));
-            chord->setDurationBeats(juce::jmax(0.125, parseDoubleOr(theoryFieldEditor5.getText(), chord->getDurationBeats())));
-            return "Chord updated from center editor";
+            const auto afterSymbol = chord->getSymbol();
+            return "Applied chord edit: " + beforeSymbol + " → " + afterSymbol;
         }
 
         if (activeEditorActionId == chordSubstitution)
@@ -1359,10 +1368,20 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
 
         if (activeEditorActionId == progressionAnnotateKeyMode)
         {
-            const auto key = theoryFieldEditor1.getText().trim();
-            const auto mode = theoryFieldEditor2.getText().trim();
+            const auto name = theoryFieldEditor1.getText().trim();
+            const auto key = theoryFieldEditor2.getText().trim();
+            const auto mode = theoryFieldEditor3.getText().trim();
+            const auto lengthText = theoryFieldEditor4.getText().trim();
+            const auto variantOf = theoryFieldEditor5.getText().trim();
+
+            if (lengthText.isNotEmpty() && !isStrictDouble(lengthText))
+                return "Progression edit rejected: Length (beats) must be numeric";
+
+            progression->setName(name.isNotEmpty() ? name : progression->getName());
             progression->setKey(key.isNotEmpty() ? key : progression->getKey());
             progression->setMode(mode.isNotEmpty() ? mode : progression->getMode());
+            progression->setLengthBeats(juce::jmax(0.125, parseDoubleOr(theoryFieldEditor4.getText(), progression->getLengthBeats())));
+            progression->setVariantOf(variantOf.isNotEmpty() ? variantOf : progression->getVariantOf());
             return "Progression key/mode updated from center editor";
         }
 
