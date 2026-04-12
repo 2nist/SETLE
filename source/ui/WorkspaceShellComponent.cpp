@@ -1126,8 +1126,8 @@ public:
         int y = 6;
         for (auto& strip : strips)
         {
-            strip->setBounds(6, y, width - 12, 160);
-            y += 168;
+            strip->setBounds(6, y, width - 12, 180);
+            y += 188;
         }
 
         content.setSize(width, juce::jmax(y + 6, getHeight()));
@@ -1857,8 +1857,8 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         ensureInstrumentSlots();
         applyPersistedInstrumentSlotAssignments();
 
-        mixerComponent = std::make_unique<setle::mixer::MixerComponent>(*edit, *trackManager, instrumentSlots);
-        addAndMakeVisible(*mixerComponent);
+        outPanelHost = std::make_unique<OutPanelHost>();
+        addAndMakeVisible(*outPanelHost);
 
         if (auto midiTracks = trackManager->getMidiTracks(); !midiTracks.isEmpty())
         {
@@ -3073,10 +3073,78 @@ void WorkspaceShellComponent::persistInstrumentSlotAssignments()
 
 void WorkspaceShellComponent::rebuildOutPanelStrips()
 {
-    if (mixerComponent == nullptr)
+    if (outPanelHost == nullptr || trackManager == nullptr)
         return;
 
-    mixerComponent->refreshStrips();
+    outPanelHost->rebuild(
+        trackManager->getAllUserTracks(),
+        instrumentSlots,
+        [this](const juce::String& trackId, setle::instruments::InstrumentSlot::SlotType type)
+        {
+            auto it = instrumentSlots.find(trackId);
+            if (it == instrumentSlots.end() || it->second == nullptr)
+                return;
+
+            switch (type)
+            {
+                case setle::instruments::InstrumentSlot::SlotType::PolySynth:   it->second->loadPolySynth(); break;
+                case setle::instruments::InstrumentSlot::SlotType::DrumMachine: it->second->loadDrumMachine(); break;
+                case setle::instruments::InstrumentSlot::SlotType::ReelSampler: it->second->loadReelSampler(); break;
+                case setle::instruments::InstrumentSlot::SlotType::VST3:        it->second->loadVST3(juce::PluginDescription{}); break;
+                case setle::instruments::InstrumentSlot::SlotType::MidiOut:     it->second->loadMidiOut("default"); break;
+                case setle::instruments::InstrumentSlot::SlotType::Empty:       it->second->clear(); break;
+            }
+
+            persistInstrumentSlotAssignments();
+            rebuildOutPanelStrips();
+        },
+        [this]()
+        {
+            interactionStatus.setText("VST3 scan uses Tracktion known plugin list.", juce::dontSendNotification);
+        },
+        [this](const juce::String& trackId)
+        {
+            juce::PopupMenu menu;
+            std::vector<juce::PluginDescription> vst3Descs;
+
+            int itemId = 1;
+            for (const auto& desc : engineRef.getPluginManager().knownPluginList.getTypes())
+            {
+                if (!desc.pluginFormatName.containsIgnoreCase("VST3"))
+                    continue;
+
+                menu.addItem(itemId++, desc.name.isNotEmpty() ? desc.name : desc.fileOrIdentifier);
+                vst3Descs.push_back(desc);
+            }
+
+            if (vst3Descs.empty())
+            {
+                interactionStatus.setText("No VST3 plugins found in known plugin list.", juce::dontSendNotification);
+                return;
+            }
+
+            const auto chosen = menu.show();
+            if (chosen <= 0 || chosen > static_cast<int>(vst3Descs.size()))
+                return;
+
+            auto it = instrumentSlots.find(trackId);
+            if (it == instrumentSlots.end() || it->second == nullptr)
+                return;
+
+            it->second->loadVST3(vst3Descs[static_cast<size_t>(chosen - 1)]);
+            persistInstrumentSlotAssignments();
+            rebuildOutPanelStrips();
+        },
+        [this](const juce::String& trackId, const juce::String& deviceIdentifier)
+        {
+            auto it = instrumentSlots.find(trackId);
+            if (it == instrumentSlots.end() || it->second == nullptr)
+                return;
+
+            it->second->loadMidiOut(deviceIdentifier);
+            persistInstrumentSlotAssignments();
+            rebuildOutPanelStrips();
+        });
 }
 
 void WorkspaceShellComponent::applyDrumPatternToSlots(const std::vector<setle::gridroll::GridRollCell>& cells,
@@ -4660,8 +4728,8 @@ void WorkspaceShellComponent::resized()
     leftResizeBar->setBounds(leftSplitterArea);
 
     auto outArea = bounds.removeFromRight(rightPanelWidth);
-    if (mixerComponent != nullptr)
-        mixerComponent->setBounds(outArea);
+    if (outPanelHost != nullptr)
+        outPanelHost->setBounds(outArea);
 
     auto rightSplitterArea = bounds.removeFromRight(splitterThickness);
     rightResizeBar->setBounds(rightSplitterArea);

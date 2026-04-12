@@ -151,6 +151,8 @@ target_sources(SETLE PRIVATE
     source/instruments/reel/ReelParams.h
     source/instruments/reel/ReelProcessor.cpp
     source/instruments/reel/ReelProcessor.h
+    source/instruments/reel/ReelEditorComponent.cpp
+    source/instruments/reel/ReelEditorComponent.h
     source/instruments/reel/ReelSampler.cpp
     source/instruments/reel/ReelSampler.h
     source/instruments/reel/ReelSlicer.cpp

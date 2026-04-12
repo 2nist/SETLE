@@ -11,7 +11,6 @@
 #include "../capture/HistoryBuffer.h"
 #include "../instruments/InstrumentSlot.h"
 #include "../model/SetleSongModel.h"
-#include "../mixer/MixerComponent.h"
 #include "../timeline/TimelineTracksComponent.h"
 #include "../timeline/TrackManager.h"
 #include "../gridroll/GridRollComponent.h"
@@ -151,7 +150,7 @@ private:
     juce::Component topStrip;
     juce::Component* inPanel;
     LabelPanel* workPanel;
-    std::unique_ptr<setle::mixer::MixerComponent> mixerComponent;
+    std::unique_ptr<OutPanelHost> outPanelHost;
     TimelineShell* timelineShell;
     setle::timeline::TimelineTracksComponent* timelineTracks { nullptr };
 
