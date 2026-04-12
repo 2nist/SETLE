@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 
+#include "../capture/GrabSamplerQueue.h"
 #include "../capture/HistoryBuffer.h"
 #include "../model/SetleSongModel.h"
 
@@ -61,9 +62,20 @@ private:
     void refreshCaptureSourceSelector(const juce::String& preferredSourceIdentifier = {});
     void applyCaptureSourceSelection();
     juce::String buildMidiDeviceSignature() const;
+    void updateInPanelQueueView();
+    void playQueueSlot(int slotIndex);
+    void stopQueuePlayback();
+    void promoteQueueSlotToLibrary(int slotIndex);
+    void dropQueueSlotToTimeline(int slotIndex);
+    void clearQueueSlot(int slotIndex);
+    void editQueueSlotInTheoryPanel(int slotIndex);
+    void renameQueueSlot(int slotIndex);
 
     void initialiseSongState();
     void loadProgressionToEdit();
+    void loadProgressionToEdit(const juce::String& progressionId,
+                               double startTimeSeconds,
+                               bool preferNonSystemTrack);
     juce::File getSongStateFile() const;
     void loadSongState();
     void seedSongStateIfNeeded();
@@ -129,6 +141,7 @@ private:
     juce::Label interactionStatus;
 
     juce::ApplicationProperties appProperties;
+    std::unique_ptr<setle::capture::GrabSamplerQueue> grabSamplerQueue;
     std::unique_ptr<setle::capture::HistoryBuffer> historyBuffer;
     model::Song songState;
     std::vector<juce::String> undoSnapshots;
