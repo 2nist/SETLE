@@ -289,5 +289,23 @@ private:
     juce::ValueTree state;
 };
 
+// ---------------------------------------------------------------------------
+// SelectionState – plain-data cursor into the song model. Call
+// normaliseSelection() after any mutation to ensure all IDs remain valid.
+// ---------------------------------------------------------------------------
+struct SelectionState
+{
+    juce::String sectionId;
+    juce::String progressionId;
+    juce::String chordId;
+    juce::String noteId;
+};
+
+/// Ensures all IDs in \p sel refer to objects that still exist in \p song.
+/// If an ID is stale (object was removed) or empty (never set) it is snapped
+/// to the first available object. If the relevant collection is empty the ID
+/// is cleared.
+void normaliseSelection(const Song& song, SelectionState& sel);
+
 } // namespace setle::model
 
