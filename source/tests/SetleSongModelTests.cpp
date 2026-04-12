@@ -574,6 +574,208 @@ bool testUndoAfterSaveDoesNotCorruptFile()
     ok &= expect(fromDisk->getTitle() == "PostSave", "U5: file should be unaffected by in-memory undo");
     return ok;
 }
+
+// P1 – section beat widths are proportional to repeatCount × progression.lengthBeats
+bool testSectionBeatWidthProportionality()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("BeatWidthTest", 120.0);
+
+    // Two progressions with known lengths
+    auto progA = Progression::create("A", "C", "ionian");
+    progA.setLengthBeats(8.0);
+    song.addProgression(progA);
+
+    auto progB = Progression::create("B", "C", "ionian");
+    progB.setLengthBeats(16.0);
+    song.addProgression(progB);
+
+    // Verse: 4 repeats of progA → 32 beats
+    auto verse = Section::create("Verse", 4);
+    verse.addProgressionRef(SectionProgressionRef::create(progA.getId(), 0, ""));
+    song.addSection(verse);
+
+    // Chorus: 2 repeats of progB → 32 beats
+    auto chorus = Section::create("Chorus", 2);
+    chorus.addProgressionRef(SectionProgressionRef::create(progB.getId(), 0, ""));
+    song.addSection(chorus);
+
+    // Re-read sections from model (same IDs)
+    const auto sections = song.getSections();
+    const auto progressions = song.getProgressions();
+    bool ok = true;
+    ok &= expect(sections.size() == 2, "P1: should have 2 sections");
+
+    // Mirror the UI beat-width calculation
+    double totalBeats = 0.0;
+    std::vector<double> sectionBeats;
+    for (const auto& section : sections)
+    {
+        double beats = 0.0;
+        for (const auto& ref : section.getProgressionRefs())
+            for (const auto& prog : progressions)
+                if (prog.getId() == ref.getProgressionId())
+                {
+                    double len = prog.getLengthBeats();
+                    if (len <= 0.0) len = 8.0;
+                    beats += len;
+                    break;
+                }
+        if (beats <= 0.0) beats = 8.0;
+        const double withRepeats = beats * static_cast<double>(juce::jmax(1, section.getRepeatCount()));
+        sectionBeats.push_back(withRepeats);
+        totalBeats += withRepeats;
+    }
+
+    ok &= expect(std::abs(totalBeats - 64.0) < 0.001, "P1: total beats should be 64");
+    ok &= expect(std::abs(sectionBeats[0] - 32.0) < 0.001, "P1: Verse should be 32 beats (4 × 8)");
+    ok &= expect(std::abs(sectionBeats[1] - 32.0) < 0.001, "P1: Chorus should be 32 beats (2 × 16)");
+
+    const float verseWidth = static_cast<float>(sectionBeats[0] / totalBeats);
+    const float chorusWidth = static_cast<float>(sectionBeats[1] / totalBeats);
+    ok &= expect(std::abs(verseWidth - 0.5f) < 0.001f, "P1: Verse width fraction should be 0.5");
+    ok &= expect(std::abs(chorusWidth - 0.5f) < 0.001f, "P1: Chorus width fraction should be 0.5");
+    return ok;
+}
+
+// P2 – unequal section durations produce correct relative width fractions
+bool testSectionUnequalWidths()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("UnequalWidths", 120.0);
+
+    auto prog = Progression::create("Loop", "C", "ionian");
+    prog.setLengthBeats(4.0);
+    song.addProgression(prog);
+
+    // Intro: 1 repeat = 4 beats
+    auto intro = Section::create("Intro", 1);
+    intro.addProgressionRef(SectionProgressionRef::create(prog.getId(), 0, ""));
+    song.addSection(intro);
+
+    // Chorus: 3 repeats = 12 beats
+    auto chorus = Section::create("Chorus", 3);
+    chorus.addProgressionRef(SectionProgressionRef::create(prog.getId(), 0, ""));
+    song.addSection(chorus);
+
+    const auto sections = song.getSections();
+    const auto progressions = song.getProgressions();
+    bool ok = true;
+    ok &= expect(sections.size() == 2, "P2: should have 2 sections");
+
+    double totalBeats = 0.0;
+    std::vector<double> sectionBeats;
+    for (const auto& section : sections)
+    {
+        double beats = 0.0;
+        for (const auto& ref : section.getProgressionRefs())
+            for (const auto& prog2 : progressions)
+                if (prog2.getId() == ref.getProgressionId())
+                {
+                    double len = prog2.getLengthBeats();
+                    if (len <= 0.0) len = 8.0;
+                    beats += len;
+                    break;
+                }
+        if (beats <= 0.0) beats = 8.0;
+        const double withRepeats = beats * static_cast<double>(juce::jmax(1, section.getRepeatCount()));
+        sectionBeats.push_back(withRepeats);
+        totalBeats += withRepeats;
+    }
+
+    ok &= expect(std::abs(totalBeats - 16.0) < 0.001, "P2: total should be 16 beats");
+    const float introFraction = static_cast<float>(sectionBeats[0] / totalBeats);
+    const float chorusFraction = static_cast<float>(sectionBeats[1] / totalBeats);
+    ok &= expect(std::abs(introFraction - 0.25f) < 0.001f, "P2: Intro fraction should be 0.25");
+    ok &= expect(std::abs(chorusFraction - 0.75f) < 0.001f, "P2: Chorus fraction should be 0.75");
+    return ok;
+}
+
+// P3 – chord block widths are proportional to durationBeats
+bool testChordBeatWidthProportionality()
+{
+    using namespace setle::model;
+
+    auto progression = Progression::create("Test", "C", "ionian");
+
+    auto c = Chord::create("Cmaj7", "major7", 60);
+    c.setDurationBeats(4.0);
+    progression.addChord(c);
+
+    auto dm = Chord::create("Dm7", "minor7", 62);
+    dm.setDurationBeats(8.0);
+    progression.addChord(dm);
+
+    auto g7 = Chord::create("G7", "dominant7", 67);
+    g7.setDurationBeats(4.0);
+    progression.addChord(g7);
+
+    const auto chords = progression.getChords();
+    bool ok = true;
+    ok &= expect(chords.size() == 3, "P3: should have 3 chords");
+
+    double totalDuration = 0.0;
+    std::vector<double> durations;
+    for (const auto& chord : chords)
+    {
+        double d = chord.getDurationBeats();
+        if (d <= 0.0) d = 1.0;
+        durations.push_back(d);
+        totalDuration += d;
+    }
+
+    ok &= expect(std::abs(totalDuration - 16.0) < 0.001, "P3: total duration should be 16 beats");
+    ok &= expect(std::abs(static_cast<float>(durations[0] / totalDuration) - 0.25f) < 0.001f, "P3: Cmaj7 fraction should be 0.25");
+    ok &= expect(std::abs(static_cast<float>(durations[1] / totalDuration) - 0.50f) < 0.001f, "P3: Dm7 fraction should be 0.50");
+    ok &= expect(std::abs(static_cast<float>(durations[2] / totalDuration) - 0.25f) < 0.001f, "P3: G7 fraction should be 0.25");
+    return ok;
+}
+
+// P4 – zero chord duration falls back to 1.0 beat in width calculation
+bool testChordZeroDurationFallback()
+{
+    using namespace setle::model;
+
+    auto progression = Progression::create("FallbackTest", "C", "ionian");
+
+    // Explicitly set duration to 0 to trigger the fallback guard
+    auto c1 = Chord::create("C", "major", 60);
+    c1.setDurationBeats(0.0);
+    auto c2 = Chord::create("G", "major", 67);
+    c2.setDurationBeats(0.0);
+    progression.addChord(c1);
+    progression.addChord(c2);
+
+    const auto chords = progression.getChords();
+    bool ok = true;
+    ok &= expect(chords.size() == 2, "P4: should have 2 chords");
+
+    // Verify getDurationBeats returns 0.0 (the stored value, not the default)
+    ok &= expect(std::abs(chords[0].getDurationBeats()) < 0.001, "P4: c1 duration should be 0.0");
+    ok &= expect(std::abs(chords[1].getDurationBeats()) < 0.001, "P4: c2 duration should be 0.0");
+
+    double totalDuration = 0.0;
+    for (const auto& chord : chords)
+    {
+        double d = chord.getDurationBeats();
+        if (d <= 0.0) d = 1.0;
+        totalDuration += d;
+    }
+
+    // Both fall back to 1.0 → total = 2.0, each fraction = 0.5
+    ok &= expect(std::abs(totalDuration - 2.0) < 0.001, "P4: fallback total should be 2.0");
+    for (const auto& chord : chords)
+    {
+        double d = chord.getDurationBeats();
+        if (d <= 0.0) d = 1.0;
+        const float fraction = static_cast<float>(d / totalDuration);
+        ok &= expect(std::abs(fraction - 0.5f) < 0.001f, "P4: each fallback chord fraction should be 0.5");
+    }
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -597,6 +799,10 @@ int main()
     ok &= testSnapshotRedoReappliesMutation();       // U2
     ok &= testMultiCycleUndoRedoConsistency();       // U3
     ok &= testUndoAfterSaveDoesNotCorruptFile();     // U5
+    ok &= testSectionBeatWidthProportionality();     // P1
+    ok &= testSectionUnequalWidths();                // P2
+    ok &= testChordBeatWidthProportionality();       // P3
+    ok &= testChordZeroDurationFallback();           // P4
 
     if (!ok)
         return 1;
