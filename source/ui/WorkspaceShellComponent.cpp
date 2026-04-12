@@ -286,6 +286,15 @@ public:
     class ContextLane final : public LabelPanel
     {
     public:
+        struct BlockData
+        {
+            juce::String id;
+            juce::String label;
+            float widthFraction { 1.0f };
+        };
+
+        using SelectionCallback = std::function<void(const juce::String&)>;
+
         ContextLane(juce::String panelName,
                     juce::Colour panelColour,
                     juce::String subtitleText,
@@ -297,10 +306,72 @@ public:
         {
         }
 
+        void setBlocks(std::vector<BlockData> newBlocks,
+                       juce::String currentSelectedId,
+                       SelectionCallback cb)
+        {
+            blocks = std::move(newBlocks);
+            selectedId = std::move(currentSelectedId);
+            onSelect = std::move(cb);
+            repaint();
+        }
+
+        void paint(juce::Graphics& g) override
+        {
+            if (blocks.empty())
+            {
+                LabelPanel::paint(g);
+                return;
+            }
+
+            const auto bounds = getLocalBounds();
+            g.fillAll(juce::Colour(0xff1b2535));
+
+            const float totalWidth = static_cast<float>(bounds.getWidth());
+            const float h = static_cast<float>(bounds.getHeight());
+            float x = 0.0f;
+
+            for (const auto& block : blocks)
+            {
+                const float w = totalWidth * block.widthFraction;
+                const juce::Rectangle<float> blockRect(x + 1.0f, 2.0f, w - 2.0f, h - 4.0f);
+                const bool isSelected = (block.id == selectedId);
+
+                g.setColour(isSelected ? juce::Colour(0xff4a7fa5) : juce::Colour(0xff2c3e50));
+                g.fillRoundedRectangle(blockRect, 3.0f);
+
+                g.setColour(isSelected ? juce::Colours::white : juce::Colours::white.withAlpha(0.70f));
+                g.setFont(juce::FontOptions(12.0f));
+                g.drawText(block.label, blockRect.reduced(4.0f, 0.0f), juce::Justification::centredLeft, true);
+
+                x += w;
+            }
+        }
+
         void mouseUp(const juce::MouseEvent& event) override
         {
             if (!event.mods.isRightButtonDown())
+            {
+                if (!blocks.empty() && onSelect != nullptr)
+                {
+                    const float totalWidth = static_cast<float>(getWidth());
+                    float x = 0.0f;
+                    const float clickX = static_cast<float>(event.x);
+                    for (const auto& block : blocks)
+                    {
+                        const float w = totalWidth * block.widthFraction;
+                        if (clickX >= x && clickX < x + w)
+                        {
+                            selectedId = block.id;
+                            repaint();
+                            onSelect(block.id);
+                            return;
+                        }
+                        x += w;
+                    }
+                }
                 return;
+            }
 
             juce::PopupMenu menu;
             populateMenu(menu);
@@ -431,7 +502,86 @@ public:
 
         TheoryMenuTarget menuTarget;
         ActionCallback onAction;
+        std::vector<BlockData> blocks;
+        juce::String selectedId;
+        SelectionCallback onSelect;
     };
+
+    void updateSections(const std::vector<model::Section>& sections,
+                        const std::vector<model::Progression>& progressions,
+                        const juce::String& currentSectionId,
+                        ContextLane::SelectionCallback cb)
+    {
+        if (sections.empty())
+        {
+            sectionLane.setBlocks({}, {}, nullptr);
+            return;
+        }
+
+        // Compute beat length per section (repeatCount × progression length)
+        struct SectionEntry { juce::String id; juce::String name; double beats; };
+        std::vector<SectionEntry> entries;
+        double totalBeats = 0.0;
+
+        for (const auto& section : sections)
+        {
+            double sectionBeats = 0.0;
+            for (const auto& ref : section.getProgressionRefs())
+            {
+                for (const auto& prog : progressions)
+                {
+                    if (prog.getId() == ref.getProgressionId())
+                    {
+                        double len = prog.getLengthBeats();
+                        if (len <= 0.0) len = 8.0;
+                        sectionBeats += len;
+                        break;
+                    }
+                }
+            }
+            if (sectionBeats <= 0.0) sectionBeats = 8.0;
+            const double withRepeats = sectionBeats * juce::jmax(1, section.getRepeatCount());
+            totalBeats += withRepeats;
+            entries.push_back({ section.getId(), section.getName(), withRepeats });
+        }
+
+        std::vector<ContextLane::BlockData> blockData;
+        for (const auto& e : entries)
+            blockData.push_back({ e.id, e.name, static_cast<float>(e.beats / totalBeats) });
+
+        sectionLane.setBlocks(std::move(blockData), currentSectionId, std::move(cb));
+    }
+
+    void updateChords(const std::vector<model::Chord>& chords,
+                      const juce::String& currentChordId,
+                      ContextLane::SelectionCallback cb)
+    {
+        if (chords.empty())
+        {
+            theoryLane.setBlocks({}, {}, nullptr);
+            return;
+        }
+
+        double totalDuration = 0.0;
+        for (const auto& chord : chords)
+        {
+            double d = chord.getDurationBeats();
+            totalDuration += (d > 0.0 ? d : 1.0);
+        }
+
+        std::vector<ContextLane::BlockData> blockData;
+        for (const auto& chord : chords)
+        {
+            double d = chord.getDurationBeats();
+            if (d <= 0.0) d = 1.0;
+            juce::String label = chord.getSymbol();
+            if (chord.getFunction().isNotEmpty())
+                label += " [" + chord.getFunction() + "]";
+            blockData.push_back({ chord.getId(), label, static_cast<float>(d / totalDuration) });
+        }
+
+        theoryLane.setBlocks(std::move(blockData), currentChordId, std::move(cb));
+    }
 
     explicit TimelineShell(ActionCallback callback)
         : sectionLane(
@@ -1154,6 +1304,7 @@ void WorkspaceShellComponent::commitTheoryEditorAction()
     captureUndoStateIfChanged(beforeSnapshot);
     saveSongState();
     ensureSelectionDefaults();
+    refreshTimelineData();
     populateTheoryObjectSelector();
     populateTheoryFieldsForCurrentSelection();
     updateUndoRedoButtonState();
@@ -1429,12 +1580,66 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
     return "No center-editor action mapped for current context";
 }
 
+void WorkspaceShellComponent::refreshTimelineData()
+{
+    const auto sections = songState.getSections();
+    const auto progressions = songState.getProgressions();
+
+    timelineShell->updateSections(
+        sections,
+        progressions,
+        selectedSectionId,
+        [this](const juce::String& sectionId)
+        {
+            selectedSectionId = sectionId;
+            ensureSelectionDefaults();
+            populateTheoryObjectSelector();
+            populateTheoryFieldsForCurrentSelection();
+            refreshTimelineData(); // refresh chord strip for newly selected section
+            interactionStatus.setText("Selected section: " + sectionId.substring(0, 8), juce::dontSendNotification);
+        });
+
+    // Collect chords from active progressions referenced by the selected section
+    std::vector<model::Chord> visibleChords;
+    for (const auto& section : sections)
+    {
+        if (section.getId() != selectedSectionId)
+            continue;
+        for (const auto& ref : section.getProgressionRefs())
+        {
+            for (const auto& prog : progressions)
+            {
+                if (prog.getId() == ref.getProgressionId())
+                {
+                    for (const auto& chord : prog.getChords())
+                        visibleChords.push_back(chord);
+                    break;
+                }
+            }
+        }
+        break;
+    }
+
+    timelineShell->updateChords(
+        visibleChords,
+        selectedChordId,
+        [this](const juce::String& chordId)
+        {
+            selectedChordId = chordId;
+            ensureSelectionDefaults();
+            populateTheoryObjectSelector();
+            populateTheoryFieldsForCurrentSelection();
+            interactionStatus.setText("Selected chord: " + chordId.substring(0, 8), juce::dontSendNotification);
+        });
+}
+
 void WorkspaceShellComponent::initialiseSongState()
 {
     loadSongState();
     seedSongStateIfNeeded();
     ensureSelectionDefaults();
     saveSongState();
+    refreshTimelineData();
 
     interactionStatus.setText("Theory state ready - " + summarizeSongState(), juce::dontSendNotification);
 }
@@ -1593,6 +1798,7 @@ void WorkspaceShellComponent::performUndo()
             if (redoSnapshots.size() > static_cast<size_t>(maxUndoDepth))
                 redoSnapshots.erase(redoSnapshots.begin());
         }
+        refreshTimelineData();
         populateTheoryObjectSelector();
         populateTheoryFieldsForCurrentSelection();
         interactionStatus.setText("Undid theory action | " + summarizeSongState(), juce::dontSendNotification);
@@ -1626,6 +1832,7 @@ void WorkspaceShellComponent::performRedo()
             if (undoSnapshots.size() > static_cast<size_t>(maxUndoDepth))
                 undoSnapshots.erase(undoSnapshots.begin());
         }
+        refreshTimelineData();
         populateTheoryObjectSelector();
         populateTheoryFieldsForCurrentSelection();
         interactionStatus.setText("Redid theory action | " + summarizeSongState(), juce::dontSendNotification);
@@ -1680,6 +1887,7 @@ void WorkspaceShellComponent::handleTimelineTheoryAction(TheoryMenuTarget target
     captureUndoStateIfChanged(beforeSnapshot);
     saveSongState();
     ensureSelectionDefaults();
+    refreshTimelineData();
     populateTheoryObjectSelector();
     populateTheoryFieldsForCurrentSelection();
     updateUndoRedoButtonState();
