@@ -12,7 +12,8 @@ namespace te = tracktion::engine;
 namespace setle::ui
 {
 
-class WorkspaceShellComponent final : public juce::Component
+class WorkspaceShellComponent final : public juce::Component,
+                                       private juce::Timer
 {
 public:
     explicit WorkspaceShellComponent(te::Engine& engine);
@@ -84,6 +85,7 @@ private:
     void clampLayoutValues(int totalTopWidth, int totalBodyHeight);
     void loadLayoutState();
     void saveLayoutState();
+    void timerCallback() override;
 
     te::Engine& engineRef;
     std::unique_ptr<te::Edit> edit;
@@ -101,7 +103,8 @@ private:
     juce::TextButton playButton   { juce::CharPointer_UTF8("\xe2\x96\xb6") };  // ▶
     juce::TextButton stopButton   { juce::CharPointer_UTF8("\xe2\x96\xa0") };  // ■
     juce::TextButton recordButton { juce::CharPointer_UTF8("\xe2\x97\x8f") };  // ●
-    juce::Label     bpmLabel;
+    juce::Label      positionLabel;
+    juce::Label      bpmLabel;
     juce::TextEditor bpmEditor;
 
     juce::TextButton focusInButton { "Focus IN" };

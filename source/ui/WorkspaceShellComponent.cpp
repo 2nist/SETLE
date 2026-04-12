@@ -337,6 +337,36 @@ public:
         }
         area.removeFromTop(8);
 
+        // ── MIDI Outputs ──────────────────────────────────────────────────────
+        drawSectionLabel(g, area, "MIDI Outputs");
+        {
+            auto& dm = engine.getDeviceManager();
+            const int numOut = dm.getNumMidiOutDevices();
+            if (numOut == 0)
+            {
+                g.setColour(juce::Colours::white.withAlpha(0.40f));
+                g.setFont(juce::FontOptions(12.0f));
+                g.drawText("(no MIDI outputs found)", area.removeFromTop(15), juce::Justification::centredLeft, true);
+            }
+            else
+            {
+                for (int i = 0; i < numOut; ++i)
+                {
+                    if (area.getHeight() < 14)
+                        break;
+                    if (auto* dev = dm.getMidiOutDevice(i))
+                    {
+                        const bool enabled = dev->isEnabled();
+                        g.setColour(enabled ? juce::Colour(0xff6ac87b) : juce::Colours::white.withAlpha(0.45f));
+                        g.setFont(juce::FontOptions(12.0f));
+                        const auto dot = enabled ? juce::String(juce::CharPointer_UTF8("\xe2\x97\x8f "))
+                                                 : juce::String(juce::CharPointer_UTF8("\xe2\x97\x8b "));
+                        g.drawText(dot + dev->getName(), area.removeFromTop(15), juce::Justification::centredLeft, true);
+                    }
+                }
+            }
+        }
+
         // ── MIDI Monitor ──────────────────────────────────────────────────────
         if (area.getHeight() < 36)
             return;
@@ -995,9 +1025,25 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         const double bpm = juce::jlimit(20.0, 300.0, bpmEditor.getText().getDoubleValue());
         songState.setBpm(bpm);
         if (edit != nullptr)
+        {
+            const bool wasPlaying = edit->getTransport().isPlaying();
+            if (wasPlaying)
+                edit->getTransport().stop(false, false);
+
             if (auto* tempo = edit->tempoSequence.getTempo(0))
                 tempo->setBpm(bpm);
+
+            // Force audio graph rebuild so new tempo takes effect immediately
+            edit->getTransport().ensureContextAllocated(true);
+
+            // Reload MIDI clip so beat-to-time mapping reflects the new BPM
+            loadProgressionToEdit();
+
+            if (wasPlaying)
+                edit->getTransport().play(false);
+        }
         bpmEditor.setText(juce::String(bpm, 1), juce::dontSendNotification);
+        saveSongState();
     };
 
     juce::PropertiesFile::Options options;
@@ -1010,14 +1056,36 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     loadLayoutState();
     initialiseSongState();
 
-    // --- Phase 4: create a single-track Tracktion Edit and sync BPM ---
+    // --- Phase 4/5/6: create a single-track Tracktion Edit, activate audio graph, enable MIDI out ---
     edit = te::Edit::createSingleTrackEdit(engineRef);
     if (edit != nullptr)
     {
         if (auto* tempo = edit->tempoSequence.getTempo(0))
             tempo->setBpm(songState.getBpm());
+
+        // Build the audio graph so transport commands produce sound
+        edit->getTransport().ensureContextAllocated();
+
+        // Enable the first available MIDI output device
+        auto& dm = engineRef.getDeviceManager();
+        for (int i = 0; i < dm.getNumMidiOutDevices(); ++i)
+        {
+            if (auto* midiOut = dm.getMidiOutDevice(i))
+            {
+                midiOut->setEnabled(true);
+                break;
+            }
+        }
     }
     bpmEditor.setText(juce::String(songState.getBpm(), 1), juce::dontSendNotification);
+
+    // Position display — updated at 30 Hz by timerCallback()
+    positionLabel.setText("0:00.000", juce::dontSendNotification);
+    positionLabel.setFont(juce::FontOptions(13.0f));
+    positionLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.80f));
+    positionLabel.setJustificationType(juce::Justification::centred);
+    topStrip.addAndMakeVisible(positionLabel);
+    startTimerHz(30);
 
     openTheoryEditor(TheoryMenuTarget::section, sectionEditTheory, "Edit Section Theory");
     updateFocusButtonState();
@@ -2573,6 +2641,28 @@ void WorkspaceShellComponent::saveLayoutState()
     }
 }
 
+void WorkspaceShellComponent::timerCallback()
+{
+    if (edit == nullptr)
+        return;
+
+    const auto& transport = edit->getTransport();
+    const double totalSecs = transport.getPosition().inSeconds();
+    const int mins = static_cast<int>(totalSecs) / 60;
+    const double secs = std::fmod(totalSecs, 60.0);
+
+    positionLabel.setText(
+        juce::String(mins) + ":" + juce::String(secs, 3).paddedLeft('0', 6),
+        juce::dontSendNotification);
+
+    if (transport.isRecording())
+        positionLabel.setColour(juce::Label::textColourId, juce::Colour(0xffdd4444));
+    else if (transport.isPlaying())
+        positionLabel.setColour(juce::Label::textColourId, juce::Colour(0xff6ac87b));
+    else
+        positionLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.80f));
+}
+
 void WorkspaceShellComponent::loadProgressionToEdit()
 {
     if (edit == nullptr)
@@ -2679,6 +2769,7 @@ void WorkspaceShellComponent::resized()
     recordButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
     stopButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
     playButton.setBounds(buttonArea.removeFromRight(52).reduced(4, 6));
+    positionLabel.setBounds(buttonArea.removeFromRight(80).reduced(4, 6));
 
     topTitle.setBounds(topBounds.removeFromLeft(250).reduced(8, 6));
     interactionStatus.setBounds(topBounds.reduced(8, 8));
