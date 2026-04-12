@@ -129,6 +129,12 @@ target_sources(SETLE PRIVATE
     source/capture/HistoryBuffer.h
     source/model/SetleSongModel.cpp
     source/model/SetleSongModel.h
+    source/timeline/TrackManager.cpp
+    source/timeline/TrackManager.h
+    source/timeline/TrackLane.cpp
+    source/timeline/TrackLane.h
+    source/timeline/TimelineTracksComponent.cpp
+    source/timeline/TimelineTracksComponent.h
     source/ui/WorkspaceShellComponent.cpp
     source/ui/WorkspaceShellComponent.h
     source/ui/ProgressionLibraryBrowser.cpp

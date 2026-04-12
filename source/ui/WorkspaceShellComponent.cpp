@@ -1126,12 +1126,6 @@ public:
               "Chord/function overlays aligned to timeline (right-click for chord tools)",
               TheoryMenuTarget::chord,
               callback),
-          trackArea(
-              "Main Timeline / Tracks",
-              juce::Colour(0xff1d2430),
-              "Primary arrangement surface (right-click for note/progression tools)",
-              TheoryMenuTarget::note,
-              callback),
           historyLane(
               "History Buffer Lane",
               juce::Colour(0xff232338),
@@ -1141,8 +1135,22 @@ public:
     {
         addAndMakeVisible(sectionLane);
         addAndMakeVisible(theoryLane);
-        addAndMakeVisible(trackArea);
         addAndMakeVisible(historyLane);
+    }
+
+    void setPlayheadFraction(double fraction)
+    {
+        playheadFraction = juce::jlimit(0.0, 1.0, fraction);
+        repaint();
+    }
+
+    juce::Rectangle<int> getTrackAreaBoundsInParent() const
+    {
+        auto area = getLocalBounds().reduced(0, 1);
+        area.removeFromTop(sectionHeight);
+        area.removeFromTop(theoryHeight);
+        area.removeFromBottom(historyHeight);
+        return area.translated(getX(), getY());
     }
 
     void resized() override
@@ -1152,7 +1160,18 @@ public:
         sectionLane.setBounds(bounds.removeFromTop(sectionHeight));
         theoryLane.setBounds(bounds.removeFromTop(theoryHeight));
         historyLane.setBounds(bounds.removeFromBottom(historyHeight));
-        trackArea.setBounds(bounds);
+    }
+
+    void paintOverChildren(juce::Graphics& g) override
+    {
+        auto trackArea = getLocalBounds().reduced(0, 1);
+        trackArea.removeFromTop(sectionHeight);
+        trackArea.removeFromTop(theoryHeight);
+        trackArea.removeFromBottom(historyHeight);
+
+        const auto x = trackArea.getX() + static_cast<int>(std::round(playheadFraction * trackArea.getWidth()));
+        g.setColour(juce::Colours::white.withAlpha(0.28f));
+        g.drawVerticalLine(x, static_cast<float>(trackArea.getY()), static_cast<float>(trackArea.getBottom()));
     }
 
 private:
@@ -1162,8 +1181,8 @@ private:
 
     ContextLane sectionLane;
     ContextLane theoryLane;
-    ContextLane trackArea;
     ContextLane historyLane;
+    double playheadFraction { 0.0 };
 };
 
 class WorkspaceShellComponent::DragBar final : public juce::Component
@@ -1472,13 +1491,25 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     {
         if (auto* tempo = edit->tempoSequence.getTempo(0))
             tempo->setBpm(songState.getBpm());
+
+        trackManager = std::make_unique<setle::timeline::TrackManager>(*edit);
+        trackManager->ensureDefaultTracks();
+
+        timelineTracks = new setle::timeline::TimelineTracksComponent(*edit, *trackManager);
+        timelineTracks->setVisibleBeatRange(0.0, 32.0);
+        timelineTracks->onStatusMessage = [this](const juce::String& message)
+        {
+            interactionStatus.setText(message, juce::dontSendNotification);
+        };
+        addAndMakeVisible(timelineTracks);
+        timelineTracks->refreshTracks();
     }
     bpmEditor.setText(juce::String(songState.getBpm(), 1), juce::dontSendNotification);
 
     openTheoryEditor(TheoryMenuTarget::section, sectionEditTheory, "Edit Section Theory");
     updateFocusButtonState();
     updateUndoRedoButtonState();
-    startTimerHz(2);
+    startTimerHz(30);
     updateInPanelQueueView();
 }
 
@@ -2286,6 +2317,9 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
 
 void WorkspaceShellComponent::refreshTimelineData()
 {
+    if (timelineTracks != nullptr)
+        timelineTracks->refreshTracks();
+
     const auto sections = songState.getSections();
     const auto progressions = songState.getProgressions();
 
@@ -3473,16 +3507,31 @@ void WorkspaceShellComponent::saveLayoutState()
 void WorkspaceShellComponent::timerCallback()
 {
     const auto signature = buildMidiDeviceSignature();
-    if (signature == midiDeviceSignature)
+    if (signature != midiDeviceSignature)
+    {
+        midiDeviceSignature = signature;
+
+        juce::String preferredSource;
+        if (auto* settings = appProperties.getUserSettings())
+            preferredSource = settings->getValue("capture.source", "");
+
+        refreshCaptureSourceSelector(preferredSource);
+    }
+
+    if (edit == nullptr)
         return;
 
-    midiDeviceSignature = signature;
+    const auto* tempo = edit->tempoSequence.getTempo(0);
+    const auto bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
+    const auto secPerBeat = 60.0 / juce::jmax(1.0, bpm);
+    const auto playheadBeat = edit->getTransport().getPosition().inSeconds() / secPerBeat;
+    const auto fraction = juce::jlimit(0.0, 1.0, playheadBeat / 32.0);
 
-    juce::String preferredSource;
-    if (auto* settings = appProperties.getUserSettings())
-        preferredSource = settings->getValue("capture.source", "");
+    if (timelineShell != nullptr)
+        timelineShell->setPlayheadFraction(fraction);
 
-    refreshCaptureSourceSelector(preferredSource);
+    if (timelineTracks != nullptr)
+        timelineTracks->setPlayheadFraction(fraction);
 }
 
 void WorkspaceShellComponent::updateInPanelQueueView()
@@ -3539,8 +3588,16 @@ void WorkspaceShellComponent::dropQueueSlotToTimeline(int slotIndex)
     if (slot.state == setle::capture::GrabSlot::State::Empty || slot.progressionId.isEmpty())
         return;
 
+    te::Track* targetTrack = nullptr;
+    if (trackManager != nullptr)
+    {
+        const auto userTracks = trackManager->getAllUserTracks();
+        if (!userTracks.isEmpty())
+            targetTrack = userTracks.getFirst();
+    }
+
     const auto playheadSeconds = edit->getTransport().getPosition().inSeconds();
-    loadProgressionToEdit(slot.progressionId, playheadSeconds, true);
+    loadProgressionToEdit(slot.progressionId, playheadSeconds, true, targetTrack);
     interactionStatus.setText("Dropped slot " + juce::String(slotIndex + 1) + " to timeline at playhead", juce::dontSendNotification);
 }
 
@@ -3601,7 +3658,8 @@ void WorkspaceShellComponent::loadProgressionToEdit()
 
 void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progressionId,
                                                     double startTimeSeconds,
-                                                    bool preferNonSystemTrack)
+                                                    bool preferNonSystemTrack,
+                                                    te::Track* preferredTrack)
 {
     if (edit == nullptr)
         return;
@@ -3610,8 +3668,8 @@ void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progress
     if (tracks.isEmpty())
         return;
 
-    te::AudioTrack* track = nullptr;
-    if (preferNonSystemTrack)
+    auto* track = dynamic_cast<te::AudioTrack*>(preferredTrack);
+    if (track == nullptr && preferNonSystemTrack)
     {
         for (auto* t : tracks)
         {
@@ -3743,6 +3801,8 @@ void WorkspaceShellComponent::resized()
     auto timelineSplitterArea = bounds.removeFromBottom(splitterThickness);
     timelineResizeBar->setBounds(timelineSplitterArea);
     timelineShell->setBounds(timelineArea);
+    if (timelineTracks != nullptr)
+        timelineTracks->setBounds(timelineShell->getTrackAreaBoundsInParent());
 
     clampLayoutValues(bounds.getWidth(), bounds.getHeight() + timelineHeight);
 

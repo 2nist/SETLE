@@ -9,6 +9,8 @@
 #include "../capture/GrabSamplerQueue.h"
 #include "../capture/HistoryBuffer.h"
 #include "../model/SetleSongModel.h"
+#include "../timeline/TimelineTracksComponent.h"
+#include "../timeline/TrackManager.h"
 #include "ProgressionLibraryBrowser.h"
 #include "ProgressionChordPalette.h"
 
@@ -78,7 +80,8 @@ private:
     void loadProgressionToEdit();
     void loadProgressionToEdit(const juce::String& progressionId,
                                double startTimeSeconds,
-                               bool preferNonSystemTrack);
+                               bool preferNonSystemTrack,
+                               te::Track* preferredTrack = nullptr);
     juce::File getSongStateFile() const;
     void loadSongState();
     void seedSongStateIfNeeded();
@@ -119,6 +122,7 @@ private:
     LabelPanel* workPanel;
     LabelPanel* outPanel;
     TimelineShell* timelineShell;
+    setle::timeline::TimelineTracksComponent* timelineTracks { nullptr };
 
     DragBar* leftResizeBar;
     DragBar* rightResizeBar;
@@ -151,6 +155,7 @@ private:
     juce::ApplicationProperties appProperties;
     std::unique_ptr<setle::capture::GrabSamplerQueue> grabSamplerQueue;
     std::unique_ptr<setle::capture::HistoryBuffer> historyBuffer;
+    std::unique_ptr<setle::timeline::TrackManager> trackManager;
     model::Song songState;
     std::vector<juce::String> undoSnapshots;
     std::vector<juce::String> redoSnapshots;
@@ -200,7 +205,7 @@ private:
     static constexpr int minSideWidth = 72;
     static constexpr int maxSideWidth = 700;
     static constexpr int minCenterWidth = 360;
-    static constexpr int minTimelineHeight = 160;
+    static constexpr int minTimelineHeight = 248;
     static constexpr int minTopWorkHeight = 220;
     static constexpr int maxUndoDepth = 64;
 };
