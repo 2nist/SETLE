@@ -11,6 +11,7 @@
 #include "../model/SetleSongModel.h"
 #include "../timeline/TimelineTracksComponent.h"
 #include "../timeline/TrackManager.h"
+#include "../gridroll/GridRollComponent.h"
 #include "ProgressionLibraryBrowser.h"
 #include "ProgressionChordPalette.h"
 
@@ -94,6 +95,7 @@ private:
     void updateUndoRedoButtonState();
     void configureTheoryEditorPanel();
     void openTheoryEditor(TheoryMenuTarget target, int actionId, const juce::String& actionName);
+    void switchWorkTab(bool showGridRoll);
     void populateTheoryObjectSelector();
     void populateTheoryFieldsForCurrentSelection();
     void commitTheoryEditorAction();
@@ -189,8 +191,12 @@ private:
     juce::TextEditor theoryFieldEditor5;
     juce::TextButton applyTheoryEditorButton { "Apply Edit" };
     juce::TextButton reloadTheoryEditorButton { "Reload" };
+    juce::TextButton workTabTheoryButton  { "Theory Editor" };
+    juce::TextButton workTabGridRollButton { "GridRoll" };
+    bool workPanelShowGridRoll { false };
     std::unique_ptr<ProgressionLibraryBrowser> libraryBrowser;
     std::unique_ptr<ProgressionChordPalette> chordPalette;
+    std::unique_ptr<setle::gridroll::GridRollComponent> gridRollComponent;
     TheoryMenuTarget activeEditorTarget { TheoryMenuTarget::section };
     int activeEditorActionId = 0;
 

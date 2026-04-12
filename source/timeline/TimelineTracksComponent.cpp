@@ -157,8 +157,10 @@ void TimelineTracksComponent::rebuildLanes()
 
         lane->onClipClicked = [this](te::Clip& clip)
         {
-            if (onStatusMessage)
-                onStatusMessage("Piano roll coming in Phase 14 - clip: " + clip.getName());
+            if (onClipClicked)
+                onClipClicked(clip);
+            else if (onStatusMessage)
+                onStatusMessage("GridRoll: " + clip.getName());
         };
 
         addAndMakeVisible(*lane);

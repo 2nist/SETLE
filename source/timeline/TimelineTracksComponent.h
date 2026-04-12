@@ -21,6 +21,9 @@ public:
 
     std::function<void(const juce::String&)> onStatusMessage;
 
+    /** Fires when the user clicks a clip in any lane. Set from WorkspaceShellComponent. */
+    std::function<void(te::Clip&)> onClipClicked;
+
 private:
     void timerCallback() override;
     void rebuildLanes();

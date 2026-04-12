@@ -127,6 +127,15 @@ target_sources(SETLE PRIVATE
     source/capture/GrabSlot.h
     source/capture/HistoryBuffer.cpp
     source/capture/HistoryBuffer.h
+    source/gridroll/GridRollCell.h
+    source/gridroll/ChordGridView.cpp
+    source/gridroll/ChordGridView.h
+    source/gridroll/NoteDetailView.cpp
+    source/gridroll/NoteDetailView.h
+    source/gridroll/DrumGridView.cpp
+    source/gridroll/DrumGridView.h
+    source/gridroll/GridRollComponent.cpp
+    source/gridroll/GridRollComponent.h
     source/model/SetleSongModel.cpp
     source/model/SetleSongModel.h
     source/timeline/TrackManager.cpp

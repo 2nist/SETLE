@@ -1501,8 +1501,53 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         {
             interactionStatus.setText(message, juce::dontSendNotification);
         };
+        timelineTracks->onClipClicked = [this](te::Clip& clip)
+        {
+            // Find progression linked to this clip by name
+            juce::String targetProgId;
+            const auto progs = songState.getProgressions();
+            for (const auto& prog : progs)
+            {
+                if (prog.getName() == clip.getName())
+                {
+                    targetProgId = prog.getId();
+                    break;
+                }
+            }
+            if (targetProgId.isEmpty() && !progs.empty())
+                targetProgId = progs[0].getId();
+
+            if (gridRollComponent != nullptr && !targetProgId.isEmpty())
+            {
+                gridRollComponent->setTargetProgression(targetProgId);
+                gridRollComponent->setTheorySnap(theorySnap);
+            }
+            switchWorkTab(true);
+            interactionStatus.setText("GridRoll: " + clip.getName(), juce::dontSendNotification);
+        };
         addAndMakeVisible(timelineTracks);
         timelineTracks->refreshTracks();
+
+        // ---- GridRollComponent (needs edit to be valid) ----
+        gridRollComponent = std::make_unique<setle::gridroll::GridRollComponent>(songState, *edit);
+        gridRollComponent->setVisible(false);   // theory tab is default
+        gridRollComponent->setTheorySnap(theorySnap);
+        gridRollComponent->onProgressionEdited = [this](const juce::String& progId)
+        {
+            const auto snapshot = createSongSnapshot();
+            saveSongState();
+            if (!progId.isEmpty())
+                loadProgressionToEdit(progId, 0.0, true, nullptr);
+            refreshTimelineData();
+            captureUndoStateIfChanged(snapshot);
+        };
+        gridRollComponent->onStatusMessage = [this](const juce::String& msg)
+        {
+            interactionStatus.setText(msg, juce::dontSendNotification);
+        };
+        if (!selectedProgressionId.isEmpty())
+            gridRollComponent->setTargetProgression(selectedProgressionId);
+        workPanel->addAndMakeVisible(*gridRollComponent);
     }
     bpmEditor.setText(juce::String(songState.getBpm(), 1), juce::dontSendNotification);
 
@@ -1689,6 +1734,40 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
         populateTheoryFieldsForCurrentSelection();
         interactionStatus.setText("Theory editor reloaded from current selection", juce::dontSendNotification);
     };
+
+    // ---- Tab strip ----
+    for (auto* btn : { &workTabTheoryButton, &workTabGridRollButton })
+    {
+        btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
+        workPanel->addAndMakeVisible(*btn);
+    }
+    workTabTheoryButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c4a67)); // default active
+    workTabGridRollButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
+    workTabTheoryButton.onClick  = [this] { switchWorkTab(false); };
+    workTabGridRollButton.onClick = [this] { switchWorkTab(true); };
+    // gridRollComponent is created later in the constructor after edit is initialised
+}
+
+void WorkspaceShellComponent::switchWorkTab(bool showGridRoll)
+{
+    workPanelShowGridRoll = showGridRoll;
+
+    theoryEditorPanel.setVisible(!showGridRoll);
+    if (gridRollComponent != nullptr)
+    {
+        if (showGridRoll)
+            gridRollComponent->setTheorySnap(theorySnap);
+        gridRollComponent->setVisible(showGridRoll);
+    }
+
+    // Update tab button visual state
+    const auto activeCol   = juce::Colour(0xff2c4a67);
+    const auto inactiveCol = juce::Colour(0xff2a3040);
+    workTabTheoryButton.setColour(juce::TextButton::buttonColourId,
+                                   showGridRoll ? inactiveCol : activeCol);
+    workTabGridRollButton.setColour(juce::TextButton::buttonColourId,
+                                    showGridRoll ? activeCol : inactiveCol);
+    resized();
 }
 
 void WorkspaceShellComponent::openTheoryEditor(TheoryMenuTarget target, int actionId, const juce::String& actionName)
@@ -3532,6 +3611,9 @@ void WorkspaceShellComponent::timerCallback()
 
     if (timelineTracks != nullptr)
         timelineTracks->setPlayheadFraction(fraction);
+
+    if (gridRollComponent != nullptr)
+        gridRollComponent->setPlayheadBeat(playheadBeat);
 }
 
 void WorkspaceShellComponent::updateInPanelQueueView()
@@ -3820,9 +3902,20 @@ void WorkspaceShellComponent::resized()
 
     workPanel->setBounds(bounds);
 
-    auto editorBounds = workPanel->getLocalBounds().reduced(12);
-    editorBounds.removeFromTop(42);
+    // ---- WORK panel tab strip ----
+    auto workLocal = workPanel->getLocalBounds().reduced(12);
+    {
+        auto tabRow = workLocal.removeFromTop(28);
+        workTabTheoryButton.setBounds(tabRow.removeFromLeft(120).reduced(2, 2));
+        workTabGridRollButton.setBounds(tabRow.removeFromLeft(100).reduced(2, 2));
+    }
+    workLocal.removeFromTop(6); // gap between tabs and content
+
+    auto editorBounds = workLocal;
     theoryEditorPanel.setBounds(editorBounds);
+
+    if (gridRollComponent != nullptr)
+        gridRollComponent->setBounds(editorBounds);
 
     auto panelBounds = theoryEditorPanel.getLocalBounds().reduced(10);
 
