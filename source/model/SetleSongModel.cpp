@@ -574,5 +574,86 @@ void Song::ensureSchema()
     state.setProperty(Schema::schemaVersionProp, Schema::version, nullptr);
 }
 
+// ---------------------------------------------------------------------------
+
+void normaliseSelection(const Song& song, SelectionState& sel)
+{
+    // --- Section ----------------------------------------------------------
+    const auto sections = song.getSections();
+    if (sections.empty())
+    {
+        sel.sectionId.clear();
+    }
+    else if (!song.findSectionById(sel.sectionId).has_value())
+    {
+        sel.sectionId = sections.front().getId();
+    }
+
+    // --- Progression ------------------------------------------------------
+    const auto progressions = song.getProgressions();
+    if (progressions.empty())
+    {
+        sel.progressionId.clear();
+    }
+    else if (!song.findProgressionById(sel.progressionId).has_value())
+    {
+        sel.progressionId = progressions.front().getId();
+    }
+
+    // --- Chord & Note (within selected progression) -----------------------
+    if (const auto prog = song.findProgressionById(sel.progressionId))
+    {
+        const auto chords = prog->getChords();
+
+        auto findChord = [&chords](const juce::String& id) -> bool
+        {
+            for (const auto& c : chords)
+                if (c.getId() == id)
+                    return true;
+            return false;
+        };
+
+        if (chords.empty())
+        {
+            sel.chordId.clear();
+            sel.noteId.clear();
+        }
+        else
+        {
+            if (!findChord(sel.chordId))
+                sel.chordId = chords.front().getId();
+
+            // Notes within selected chord
+            for (const auto& chord : chords)
+            {
+                if (chord.getId() != sel.chordId)
+                    continue;
+
+                const auto notes = chord.getNotes();
+
+                auto findNote = [&notes](const juce::String& id) -> bool
+                {
+                    for (const auto& n : notes)
+                        if (n.getId() == id)
+                            return true;
+                    return false;
+                };
+
+                if (notes.empty())
+                    sel.noteId.clear();
+                else if (!findNote(sel.noteId))
+                    sel.noteId = notes.front().getId();
+
+                break;
+            }
+        }
+    }
+    else
+    {
+        sel.chordId.clear();
+        sel.noteId.clear();
+    }
+}
+
 } // namespace setle::model
 

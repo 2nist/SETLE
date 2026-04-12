@@ -1098,76 +1098,12 @@ std::optional<model::Note> WorkspaceShellComponent::getSelectedNote()
 
 void WorkspaceShellComponent::ensureSelectionDefaults()
 {
-    auto sections = songState.getSections();
-    auto hasSection = [sections](const juce::String& id)
-    {
-        for (const auto& section : sections)
-            if (section.getId() == id)
-                return true;
-        return false;
-    };
-
-    if (sections.empty())
-        selectedSectionId.clear();
-    else if (!hasSection(selectedSectionId))
-        selectedSectionId = sections.front().getId();
-
-    auto progressions = songState.getProgressions();
-    auto hasProgression = [progressions](const juce::String& id)
-    {
-        for (const auto& progression : progressions)
-            if (progression.getId() == id)
-                return true;
-        return false;
-    };
-
-    if (progressions.empty())
-        selectedProgressionId.clear();
-    else if (!hasProgression(selectedProgressionId))
-        selectedProgressionId = progressions.front().getId();
-
-    for (const auto& progression : progressions)
-    {
-        if (progression.getId() != selectedProgressionId)
-            continue;
-
-        const auto chords = progression.getChords();
-        auto hasChord = [chords](const juce::String& id)
-        {
-            for (const auto& chord : chords)
-                if (chord.getId() == id)
-                    return true;
-            return false;
-        };
-
-        if (chords.empty())
-            selectedChordId.clear();
-        else if (!hasChord(selectedChordId))
-            selectedChordId = chords.front().getId();
-
-        for (const auto& chord : chords)
-        {
-            if (chord.getId() != selectedChordId)
-                continue;
-
-            const auto notes = chord.getNotes();
-            auto hasNote = [notes](const juce::String& id)
-            {
-                for (const auto& note : notes)
-                    if (note.getId() == id)
-                        return true;
-                return false;
-            };
-
-            if (notes.empty())
-                selectedNoteId.clear();
-            else if (!hasNote(selectedNoteId))
-                selectedNoteId = notes.front().getId();
-            break;
-        }
-
-        break;
-    }
+    setle::model::SelectionState sel { selectedSectionId, selectedProgressionId, selectedChordId, selectedNoteId };
+    setle::model::normaliseSelection(songState, sel);
+    selectedSectionId    = sel.sectionId;
+    selectedProgressionId = sel.progressionId;
+    selectedChordId      = sel.chordId;
+    selectedNoteId       = sel.noteId;
 }
 
 void WorkspaceShellComponent::populateTheoryFieldsForCurrentSelection()

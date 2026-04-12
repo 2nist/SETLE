@@ -776,6 +776,117 @@ bool testChordZeroDurationFallback()
     return ok;
 }
 
+// S1 – fresh song: all selection IDs cleared after normalise
+bool testSelectionDefaultsFreshSong()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("Fresh", 120.0);
+    SelectionState sel;
+    normaliseSelection(song, sel);
+
+    bool ok = true;
+    ok &= expect(sel.sectionId.isEmpty(),    "S1: empty song → sectionId should be empty");
+    ok &= expect(sel.progressionId.isEmpty(),"S1: empty song → progressionId should be empty");
+    ok &= expect(sel.chordId.isEmpty(),      "S1: empty song → chordId should be empty");
+    ok &= expect(sel.noteId.isEmpty(),       "S1: empty song → noteId should be empty");
+    return ok;
+}
+
+// S2 – empty sectionId snaps to first section
+bool testSelectionDefaultsSnapToFirstSection()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("Snap", 120.0);
+    song.addSection(Section::create("Verse", 4));
+    song.addSection(Section::create("Chorus", 2));
+
+    SelectionState sel;
+    normaliseSelection(song, sel);
+
+    const auto sections = song.getSections();
+    bool ok = true;
+    ok &= expect(sel.sectionId == sections.front().getId(),
+                 "S2: empty sectionId should snap to first section");
+    return ok;
+}
+
+// S3 – stale sectionId (points to deleted section) snaps to first
+bool testSelectionDefaultsStaleSection()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("Stale", 120.0);
+    song.addSection(Section::create("Verse", 4));
+
+    SelectionState sel;
+    sel.sectionId = "deleted-section-id-that-no-longer-exists";
+    normaliseSelection(song, sel);
+
+    const auto sections = song.getSections();
+    bool ok = true;
+    ok &= expect(sel.sectionId == sections.front().getId(),
+                 "S3: stale sectionId should snap to first section");
+    return ok;
+}
+
+// S4 – stale chordId snaps to first chord in selected progression
+bool testSelectionDefaultsStaleChord()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("ChordSnap", 120.0);
+    auto prog = Progression::create("Prog", "C", "ionian");
+    prog.addChord(Chord::create("Cmaj7", "major7", 60));
+    prog.addChord(Chord::create("Am7", "minor7", 57));
+    song.addProgression(prog);
+
+    // Use the committed progression's ID
+    const juce::String progId = song.getProgressions().front().getId();
+
+    SelectionState sel;
+    sel.progressionId = progId;
+    sel.chordId = "stale-chord-id";
+    normaliseSelection(song, sel);
+
+    const auto chords = song.getProgressions().front().getChords();
+    bool ok = true;
+    ok &= expect(sel.chordId == chords.front().getId(),
+                 "S4: stale chordId should snap to first chord");
+    return ok;
+}
+
+// S5 – all valid IDs are preserved unchanged by normalise
+bool testSelectionDefaultsPreservesValidIds()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("Preserve", 120.0);
+
+    auto prog = Progression::create("Prog", "C", "ionian");
+    prog.addChord(Chord::create("Cmaj7", "major7", 60));
+    song.addProgression(prog);
+    song.addSection(Section::create("Verse", 4));
+
+    // Read back IDs from the committed copies in the Song value tree
+    const juce::String progId    = song.getProgressions().front().getId();
+    const juce::String chordId   = song.getProgressions().front().getChords().front().getId();
+    const juce::String sectionId = song.getSections().front().getId();
+
+    SelectionState sel;
+    sel.sectionId     = sectionId;
+    sel.progressionId = progId;
+    sel.chordId       = chordId;
+    normaliseSelection(song, sel);
+
+    bool ok = true;
+    ok &= expect(sel.sectionId     == sectionId, "S5: valid sectionId should be preserved");
+    ok &= expect(sel.progressionId == progId,    "S5: valid progressionId should be preserved");
+    ok &= expect(sel.chordId       == chordId,   "S5: valid chordId should be preserved");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -803,6 +914,11 @@ int main()
     ok &= testSectionUnequalWidths();                // P2
     ok &= testChordBeatWidthProportionality();       // P3
     ok &= testChordZeroDurationFallback();           // P4
+    ok &= testSelectionDefaultsFreshSong();          // S1
+    ok &= testSelectionDefaultsSnapToFirstSection(); // S2
+    ok &= testSelectionDefaultsStaleSection();       // S3
+    ok &= testSelectionDefaultsStaleChord();         // S4
+    ok &= testSelectionDefaultsPreservesValidIds();  // S5
 
     if (!ok)
         return 1;
