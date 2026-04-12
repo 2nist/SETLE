@@ -75,6 +75,7 @@ private:
 
     juce::String summarizeSongState() const;
 
+    void refreshTimelineData();
     void clampLayoutValues(int totalTopWidth, int totalBodyHeight);
     void loadLayoutState();
     void saveLayoutState();
