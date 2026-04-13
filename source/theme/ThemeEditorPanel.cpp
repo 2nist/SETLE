@@ -22,25 +22,25 @@ ThemeEditorPanel::ThemeEditorPanel()
 
     saveAsButton.onClick = [this]
     {
-        juce::AlertWindow::showInputBoxAsync(
-            "Save Theme",
-            "Name",
-            ThemeManager::get().theme().presetName,
-            nullptr,
-            [this](const juce::String& value)
-            {
-                const auto trimmed = value.trim();
-                if (trimmed.isEmpty())
-                    return;
+        juce::AlertWindow window("Save Theme", "Name", juce::AlertWindow::NoIcon);
+        window.addTextEditor("name", ThemeManager::get().theme().presetName, "Name");
+        window.addButton("Save", 1);
+        window.addButton("Cancel", 0);
 
-                auto theme = ThemeManager::get().theme();
-                theme.presetName = trimmed;
-                ThemePresets::saveUserPreset(theme);
-                ThemeManager::get().applyTheme(theme);
-                setle::state::AppPreferences::get().setActiveThemeName(theme.presetName);
-                populatePresetCombo();
-                presets.setText(trimmed, juce::dontSendNotification);
-            });
+        if (window.runModalLoop() == 1)
+        {
+            const auto trimmed = window.getTextEditorContents("name").trim();
+            if (trimmed.isEmpty())
+                return;
+
+            auto theme = ThemeManager::get().theme();
+            theme.presetName = trimmed;
+            ThemePresets::saveUserPreset(theme);
+            ThemeManager::get().applyTheme(theme);
+            setle::state::AppPreferences::get().setActiveThemeName(theme.presetName);
+            populatePresetCombo();
+            presets.setText(trimmed, juce::dontSendNotification);
+        }
     };
     addAndMakeVisible(saveAsButton);
 
@@ -91,21 +91,21 @@ void ThemeEditorPanel::addColourControl(const juce::String& name, juce::Colour T
     control->button.onClick = [this, member]
     {
         const auto current = ThemeManager::get().theme().*member;
-        juce::AlertWindow::showInputBoxAsync(
-            "Set Colour",
-            "Hex RGB (e.g. 4A9EFF)",
-            current.toString().substring(2),
-            nullptr,
-            [member](const juce::String& text)
-            {
-                auto cleaned = text.retainCharacters("0123456789aAbBcCdDeEfF");
-                if (cleaned.length() < 6)
-                    return;
-                if (cleaned.length() > 6)
-                    cleaned = cleaned.substring(cleaned.length() - 6);
-                const auto colour = juce::Colour::fromString("FF" + cleaned.toUpperCase());
-                ThemeManager::get().setColour(member, colour);
-            });
+        juce::AlertWindow window("Set Colour", "Hex RGB (e.g. 4A9EFF)", juce::AlertWindow::NoIcon);
+        window.addTextEditor("hex", current.toString().substring(2), "Hex");
+        window.addButton("Set", 1);
+        window.addButton("Cancel", 0);
+
+        if (window.runModalLoop() == 1)
+        {
+            auto cleaned = window.getTextEditorContents("hex").retainCharacters("0123456789aAbBcCdDeEfF");
+            if (cleaned.length() < 6)
+                return;
+            if (cleaned.length() > 6)
+                cleaned = cleaned.substring(cleaned.length() - 6);
+            const auto colour = juce::Colour::fromString("FF" + cleaned.toUpperCase());
+            ThemeManager::get().setColour(member, colour);
+        }
     };
 
     content.addAndMakeVisible(control->button);

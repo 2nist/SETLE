@@ -214,7 +214,7 @@ EffDefinition EffSerializer::deserialize(const juce::String& json)
 bool EffSerializer::saveToFile(const EffDefinition& def, const juce::File& file)
 {
     const auto text = serialize(def);
-    return file.replaceWithText(text, "\n", juce::File::writeText);
+    return file.replaceWithText(text, false, false, "\n");
 }
 
 EffDefinition EffSerializer::loadFromFile(const juce::File& file)

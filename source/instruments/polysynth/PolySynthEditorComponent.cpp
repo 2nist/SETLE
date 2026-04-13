@@ -61,8 +61,10 @@ PolySynthEditorComponent::PolySynthEditorComponent(PolySynthProcessor& processor
     configureLabel(resLabel, "Res");
     configureLabel(volumeLabel, "Vol");
 
-    for (auto* c : { (juce::Component*) &attack, &decay, &sustain, &release, &cutoff, &res, &volume,
-                     &attackLabel, &decayLabel, &sustainLabel, &releaseLabel, &cutoffLabel, &resLabel, &volumeLabel })
+    juce::Component* controls[] = { &attack, &decay, &sustain, &release, &cutoff, &res, &volume,
+                                    &attackLabel, &decayLabel, &sustainLabel, &releaseLabel,
+                                    &cutoffLabel, &resLabel, &volumeLabel };
+    for (auto* c : controls)
         addAndMakeVisible(*c);
 
     attack.onValueChange = [this] { processor.setAttackMs(static_cast<float>(attack.getValue())); };

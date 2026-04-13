@@ -71,6 +71,11 @@ void ProgressionLibraryBrowser::setOnRowClicked(std::function<void(const juce::S
     onRowClicked = callback;
 }
 
+void ProgressionLibraryBrowser::setOnRowContextRequested(std::function<void(const juce::String&, juce::Component&)> callback)
+{
+    onRowContextRequested = std::move(callback);
+}
+
 void ProgressionLibraryBrowser::updateSessionKey(const juce::String& newKey)
 {
     if (currentSessionKey != newKey)
@@ -122,6 +127,11 @@ void ProgressionLibraryBrowser::rebuildBrowserRows()
         {
             if (onRowClicked)
                 onRowClicked(id);
+        });
+        row->setOnContextRequested([this, id = tmpl.templateId](juce::Component& target)
+        {
+            if (onRowContextRequested)
+                onRowContextRequested(id, target);
         });
 
         scrollableContainer.addAndMakeVisible(*row);
@@ -228,8 +238,15 @@ void ProgressionLibraryBrowser::BrowserRow::paint(juce::Graphics& g)
     g.drawText(chordText, bounds, juce::Justification::centredLeft, true);
 }
 
-void ProgressionLibraryBrowser::BrowserRow::mouseDown(const juce::MouseEvent&)
+void ProgressionLibraryBrowser::BrowserRow::mouseDown(const juce::MouseEvent& event)
 {
+    if (event.mods.isRightButtonDown())
+    {
+        if (onContextRequested)
+            onContextRequested(*this);
+        return;
+    }
+
     if (onClicked)
         onClicked();
 }

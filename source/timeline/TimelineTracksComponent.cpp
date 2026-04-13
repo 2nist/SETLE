@@ -155,6 +155,46 @@ void TimelineTracksComponent::rebuildLanes()
             refreshTracks();
         };
 
+        lane->onDuplicateTrack = [this](te::Track& t)
+        {
+            const auto next = static_cast<int>(trackManager.getAudioTracks().size()) + 1;
+            const auto name = t.getName().isNotEmpty() ? (t.getName() + " Copy") : ("Track " + juce::String(next));
+            trackManager.addAudioTrack(name);
+            refreshTracks();
+            if (onStatusMessage)
+                onStatusMessage("Duplicated track: " + t.getName());
+        };
+
+        lane->onMoveTrackUp = [this](te::Track& t)
+        {
+            if (onStatusMessage)
+                onStatusMessage("Move Up requested for " + t.getName() + " (ordering hook pending)");
+        };
+
+        lane->onMoveTrackDown = [this](te::Track& t)
+        {
+            if (onStatusMessage)
+                onStatusMessage("Move Down requested for " + t.getName() + " (ordering hook pending)");
+        };
+
+        lane->onOpenFx = [this](te::Track& t)
+        {
+            if (onStatusMessage)
+                onStatusMessage("Open FX requested for " + t.getName());
+        };
+
+        lane->onArmToggle = [this](te::Track& t)
+        {
+            if (onStatusMessage)
+                onStatusMessage("Arm toggle requested for " + t.getName() + " (record-arm hook pending)");
+        };
+
+        lane->onBounceToAudio = [this](te::Track& t)
+        {
+            if (onStatusMessage)
+                onStatusMessage("Bounce to audio requested for " + t.getName() + " (bounce hook pending)");
+        };
+
         lane->onClipClicked = [this](te::Clip& clip)
         {
             if (onClipClicked)

@@ -70,16 +70,15 @@ void TracktionPolySynthPlugin::applyToBuffer(const te::PluginRenderContext& fc)
 
 void TracktionPolySynthPlugin::restorePluginStateFromValueTree(const juce::ValueTree& v)
 {
-    copyPropertiesToCachedValues(v,
-                                 attackMs,
-                                 decayMs,
-                                 sustain,
-                                 releaseMs,
-                                 cutoffHz,
-                                 resonance,
-                                 outputGain,
-                                 mono,
-                                 patchName);
+    attackMs = static_cast<float>(static_cast<double>(v.getProperty("attackMs", attackMs.get())));
+    decayMs = static_cast<float>(static_cast<double>(v.getProperty("decayMs", decayMs.get())));
+    sustain = static_cast<float>(static_cast<double>(v.getProperty("sustain", sustain.get())));
+    releaseMs = static_cast<float>(static_cast<double>(v.getProperty("releaseMs", releaseMs.get())));
+    cutoffHz = static_cast<float>(static_cast<double>(v.getProperty("cutoffHz", cutoffHz.get())));
+    resonance = static_cast<float>(static_cast<double>(v.getProperty("resonance", resonance.get())));
+    outputGain = static_cast<float>(static_cast<double>(v.getProperty("outputGain", outputGain.get())));
+    mono = static_cast<bool>(v.getProperty("mono", mono.get()));
+    patchName = v.getProperty("patchName", patchName.get()).toString();
     syncProcessorParameters();
 }
 

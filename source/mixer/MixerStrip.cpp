@@ -115,12 +115,34 @@ MixerStrip::MixerStrip(te::AudioTrack& t,
     }
 
     startTimerHz(30);
+
+    // Register for tool changes so we can update cursor
+    setle::ui::EditToolManager::get().addListener(this);
 }
 
 MixerStrip::~MixerStrip()
 {
     if (meterPlugin != nullptr)
         meterPlugin->measurer.removeClient(meterClient);
+
+    setle::ui::EditToolManager::get().removeListener(this);
+}
+
+void MixerStrip::mouseEnter(const juce::MouseEvent&)
+{
+    setMouseCursor(setle::ui::EditToolManager::get().getCursorFor(setle::ui::EditToolManager::Surface::MixerStrip));
+}
+
+void MixerStrip::mouseExit(const juce::MouseEvent&)
+{
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+}
+
+void MixerStrip::activeToolChanged(setle::ui::EditTool newTool)
+{
+    // update cursor when active tool changes while mouse is over
+    if (isMouseOver(true))
+        setMouseCursor(setle::ui::EditToolManager::get().getCursorFor(setle::ui::EditToolManager::Surface::MixerStrip));
 }
 
 void MixerStrip::resized()
@@ -163,7 +185,7 @@ void MixerStrip::paint(juce::Graphics& g)
     juce::Rectangle<int> leftBar(meterBounds.getCentreX() - (kMeterWidth + barGap / 2), meterBounds.getY(), kMeterWidth, meterBounds.getHeight());
     juce::Rectangle<int> rightBar(meterBounds.getCentreX() + (barGap / 2), meterBounds.getY(), kMeterWidth, meterBounds.getHeight());
 
-    auto drawMeter = [&g](juce::Rectangle<int> area, float level, float hold)
+    auto drawMeter = [&g, &theme](juce::Rectangle<int> area, float level, float hold)
     {
         g.setColour(theme.surface2);
         g.fillRect(area);

@@ -19,6 +19,22 @@ static juce::Colour gmDrumColour(int midiNote)
     return juce::Colour(0xff557799);                      // Other — slate
 }
 
+static bool promptTextInput(const juce::String& title,
+                            const juce::String& prompt,
+                            const juce::String& initialValue,
+                            juce::String& outValue)
+{
+    juce::AlertWindow window(title, prompt, juce::AlertWindow::NoIcon);
+    window.addTextEditor("value", initialValue, {});
+    window.addButton("OK", 1);
+    window.addButton("Cancel", 0);
+    if (window.runModalLoop() != 1)
+        return false;
+
+    outValue = window.getTextEditorContents("value");
+    return true;
+}
+
 // ---------------------------------------------------------------
 DrumGridView::DrumGridView()
 {
@@ -33,13 +49,13 @@ DrumGridView::DrumGridView()
     };
 
     addAndMakeVisible(subdivSelector);
-    subdivSelector.addItem("8 steps",  8);
-    subdivSelector.addItem("16 steps", 16);
-    subdivSelector.addItem("32 steps", 32);
-    subdivSelector.setSelectedId(16, juce::dontSendNotification);
     subdivSelector.onChange = [this]
     {
         const int newSubdiv = subdivSelector.getSelectedId();
+        if (newSubdiv <= 0)
+            return;
+
+        currentStepCount = newSubdiv;
         for (auto& row : rows)
         {
             row.steps = newSubdiv;
@@ -47,6 +63,8 @@ DrumGridView::DrumGridView()
         }
         repaint();
     };
+
+    updateStepOptions(currentMeter);
 
     addAndMakeVisible(patternsButton);
     patternsButton.onClick = [this]
@@ -80,6 +98,53 @@ DrumGridView::DrumGridView()
     auto patternsRoot = appDir.getChildFile("assets").getChildFile("patterns");
     auto manifest = patternsRoot.getChildFile("pattern_manifest_batch.json");
     patternLibrary.loadFromManifest(manifest, patternsRoot);
+}
+
+void DrumGridView::setMeterContext(const setle::theory::MeterContext& meter)
+{
+    if (meter.numerator == currentMeter.numerator && meter.denominator == currentMeter.denominator)
+        return;
+
+    currentMeter = meter;
+    updateStepOptions(currentMeter);
+}
+
+void DrumGridView::updateStepOptions(const setle::theory::MeterContext& meter)
+{
+    subdivSelector.clear(juce::dontSendNotification);
+
+    // Keep 4/4 behavior close to previous defaults while supporting odd meters.
+    const int primarySteps = meter.denominator <= 4
+                                 ? meter.stepsPerBarSixteenths()
+                                 : meter.stepsPerBarEighths();
+
+    subdivSelector.addItem(
+        juce::String(primarySteps) + " steps (" + meter.toString() + ")",
+        primarySteps);
+
+    const int doubleSteps = primarySteps * 2;
+    subdivSelector.addItem(
+        juce::String(doubleSteps) + " steps (double)",
+        doubleSteps);
+
+    if (meter.isSimple() && meter.numerator % 2 == 0 && primarySteps > 2)
+    {
+        const int halfSteps = juce::jmax(1, primarySteps / 2);
+        subdivSelector.addItem(
+            juce::String(halfSteps) + " steps (half)",
+            halfSteps);
+    }
+
+    currentStepCount = primarySteps;
+    subdivSelector.setSelectedId(primarySteps, juce::dontSendNotification);
+
+    for (auto& row : rows)
+    {
+        row.steps = currentStepCount;
+        ensureSteps(row);
+    }
+
+    repaint();
 }
 
 // ---------------------------------------------------------------
@@ -524,6 +589,15 @@ void DrumGridView::showRowContextMenu(int rowIndex, juce::Point<int> screenPos)
     menu.addItem(1, "Add Row");
     menu.addItem(2, "Remove Row");
     menu.addItem(3, "Assign MIDI Note...");
+    menu.addItem(4, "Rename Row...");
+    menu.addItem(5, "Duplicate Row");
+    menu.addItem(6, "Move Row Up");
+    menu.addItem(7, "Move Row Down");
+    menu.addItem(9, "Fill All Steps");
+    menu.addItem(14, "Clear All Steps");
+    menu.addItem(15, "Randomize Steps");
+    menu.addItem(16, "Set Color...");
+    menu.addItem(17, "Set Bus...");
     menu.addItem(8, "Set Groove...");
     menu.addSeparator();
     menu.addItem(10, "Set Pattern Length → 1 bar",  true,
@@ -535,22 +609,18 @@ void DrumGridView::showRowContextMenu(int rowIndex, juce::Point<int> screenPos)
     menu.addItem(13, "Set Pattern Length → 4 bars", true,
                  rows[static_cast<size_t>(rowIndex)].patternBars == 4);
 
-    const int result = menu.showAt(juce::Rectangle<int>(screenPos.getX(), screenPos.getY(), 1, 1));
+    const int result = menu.show();
 
     if (result == 1)
     {
-        juce::AlertWindow::showInputBoxAsync(
-            "Add Row", "Instrument name:", "New Drum", nullptr,
-            [this](const juce::String& name)
-            {
-                if (name.isNotEmpty())
-                {
-                    addRow(name, 60);
-                    resized();
-                    repaint();
-                    if (onCellsChanged) onCellsChanged();
-                }
-            });
+        juce::String name;
+        if (promptTextInput("Add Row", "Instrument name:", "New Drum", name) && name.isNotEmpty())
+        {
+            addRow(name, 60);
+            resized();
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
     }
     else if (result == 2)
     {
@@ -559,21 +629,18 @@ void DrumGridView::showRowContextMenu(int rowIndex, juce::Point<int> screenPos)
     }
     else if (result == 3)
     {
-        juce::AlertWindow::showInputBoxAsync(
-            "Assign MIDI Note",
-            "Enter MIDI note number (0–127):",
-            juce::String(rows[static_cast<size_t>(rowIndex)].midiNote),
-            nullptr,
-            [this, rowIndex](const juce::String& text)
-            {
-                if (text.isNotEmpty())
-                {
-                    rows[static_cast<size_t>(rowIndex)].midiNote =
-                        juce::jlimit(0, 127, text.getIntValue());
-                    repaint();
-                    if (onCellsChanged) onCellsChanged();
-                }
-            });
+        juce::String text;
+        if (promptTextInput("Assign MIDI Note",
+                            "Enter MIDI note number (0-127):",
+                            juce::String(rows[static_cast<size_t>(rowIndex)].midiNote),
+                            text)
+            && text.isNotEmpty())
+        {
+            rows[static_cast<size_t>(rowIndex)].midiNote =
+                juce::jlimit(0, 127, text.getIntValue());
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
     }
     else if (result == 8)
     {
@@ -581,6 +648,85 @@ void DrumGridView::showRowContextMenu(int rowIndex, juce::Point<int> screenPos)
         groovePanel.setVisible(true);
         resized();
         groovePanel.grabKeyboardFocus();
+    }
+    else if (result == 4)
+    {
+        juce::String text;
+        if (promptTextInput("Rename Row", "Row name:", rows[static_cast<size_t>(rowIndex)].name, text))
+        {
+            const auto name = text.trim();
+            if (name.isNotEmpty())
+            {
+                rows[static_cast<size_t>(rowIndex)].name = name;
+                repaint();
+                if (onCellsChanged) onCellsChanged();
+            }
+        }
+    }
+    else if (result == 5)
+    {
+        auto copy = rows[static_cast<size_t>(rowIndex)];
+        copy.name += " Copy";
+        rows.insert(rows.begin() + rowIndex + 1, std::move(copy));
+        resized();
+        repaint();
+        if (onCellsChanged) onCellsChanged();
+    }
+    else if (result == 6 && rowIndex > 0)
+    {
+        std::swap(rows[static_cast<size_t>(rowIndex)], rows[static_cast<size_t>(rowIndex - 1)]);
+        repaint();
+        if (onCellsChanged) onCellsChanged();
+    }
+    else if (result == 7 && rowIndex + 1 < static_cast<int>(rows.size()))
+    {
+        std::swap(rows[static_cast<size_t>(rowIndex)], rows[static_cast<size_t>(rowIndex + 1)]);
+        repaint();
+        if (onCellsChanged) onCellsChanged();
+    }
+    else if (result == 9)
+    {
+        auto& row = rows[static_cast<size_t>(rowIndex)];
+        ensureSteps(row);
+        auto& cells = fillModeActive ? row.fillCells : row.cells;
+        for (auto& c : cells)
+            c.muted = false;
+        repaint();
+        if (onCellsChanged) onCellsChanged();
+    }
+    else if (result == 14)
+    {
+        auto& row = rows[static_cast<size_t>(rowIndex)];
+        ensureSteps(row);
+        auto& cells = fillModeActive ? row.fillCells : row.cells;
+        for (auto& c : cells)
+            c.muted = true;
+        repaint();
+        if (onCellsChanged) onCellsChanged();
+    }
+    else if (result == 15)
+    {
+        auto& row = rows[static_cast<size_t>(rowIndex)];
+        ensureSteps(row);
+        auto& cells = fillModeActive ? row.fillCells : row.cells;
+        juce::Random rng;
+        for (auto& c : cells)
+        {
+            c.muted = rng.nextFloat() > 0.35f;
+            c.velocity = juce::jlimit(0.2f, 1.0f, rng.nextFloat());
+        }
+        repaint();
+        if (onCellsChanged) onCellsChanged();
+    }
+    else if (result == 16)
+    {
+        if (onStatusMessage)
+            onStatusMessage("Row color is currently derived from MIDI note mapping.");
+    }
+    else if (result == 17)
+    {
+        if (onStatusMessage)
+            onStatusMessage("Bus routing is available in Track/OUT routing panel.");
     }
     else if (result >= 10 && result <= 13)
     {
@@ -627,6 +773,9 @@ void DrumGridView::applyPattern(const DrumPattern& pattern)
 // ---------------------------------------------------------------
 void DrumGridView::showStepContextMenu(int rowIndex, int stepIndex, juce::Point<int> screenPos)
 {
+    static GridRollCell copiedStep;
+    static bool hasCopiedStep = false;
+
     auto& row   = rows[static_cast<size_t>(rowIndex)];
     auto& cells = fillModeActive ? row.fillCells : row.cells;
     if (stepIndex >= static_cast<int>(cells.size())) return;
@@ -645,47 +794,52 @@ void DrumGridView::showStepContextMenu(int rowIndex, int stepIndex, juce::Point<
 
     menu.addItem(3, "Roll (32nd fill)");
     menu.addItem(4, "Flam");
+    menu.addItem(6, "Set Swing Offset...");
+    menu.addItem(7, "Override Pitch...");
+    menu.addItem(8, "Ghost Note", true, cell.probability < 0.5f);
+    menu.addItem(9, "Copy Step");
+    menu.addItem(10, "Paste Step");
+    menu.addItem(11, "Fill to End");
+    menu.addItem(12, "Clear from Here");
     menu.addSeparator();
     menu.addItem(500, "Mute",   true, cell.muted);
     menu.addItem(501, "Accent", true, cell.accented);
 
-    const int result = menu.showAt(juce::Rectangle<int>(screenPos.getX(), screenPos.getY(), 1, 1));
+    const int result = menu.show();
 
     if (result == 1)
     {
-        juce::AlertWindow::showInputBoxAsync(
-            "Set Velocity", "Enter velocity (0.0 – 1.0):",
-            juce::String(cell.velocity), nullptr,
-            [this, rowIndex, stepIndex](const juce::String& text)
-            {
-                if (text.isNotEmpty())
-                {
-                    auto& r2 = rows[static_cast<size_t>(rowIndex)];
-                    auto& c2 = fillModeActive ? r2.fillCells : r2.cells;
-                    c2[static_cast<size_t>(stepIndex)].velocity =
-                        juce::jlimit(0.0f, 1.0f, text.getFloatValue());
-                    repaint();
-                    if (onCellsChanged) onCellsChanged();
-                }
-            });
+        juce::String text;
+        if (promptTextInput("Set Velocity",
+                            "Enter velocity (0.0 - 1.0):",
+                            juce::String(cell.velocity),
+                            text)
+            && text.isNotEmpty())
+        {
+            auto& r2 = rows[static_cast<size_t>(rowIndex)];
+            auto& c2 = fillModeActive ? r2.fillCells : r2.cells;
+            c2[static_cast<size_t>(stepIndex)].velocity =
+                juce::jlimit(0.0f, 1.0f, text.getFloatValue());
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
     }
     else if (result == 2)
     {
-        juce::AlertWindow::showInputBoxAsync(
-            "Set Probability", "Enter probability (0.0 – 1.0):",
-            juce::String(cell.probability), nullptr,
-            [this, rowIndex, stepIndex](const juce::String& text)
-            {
-                if (text.isNotEmpty())
-                {
-                    auto& r2 = rows[static_cast<size_t>(rowIndex)];
-                    auto& c2 = fillModeActive ? r2.fillCells : r2.cells;
-                    c2[static_cast<size_t>(stepIndex)].probability =
-                        juce::jlimit(0.0f, 1.0f, text.getFloatValue());
-                    repaint();
-                    if (onCellsChanged) onCellsChanged();
-                }
-            });
+        juce::String text;
+        if (promptTextInput("Set Probability",
+                            "Enter probability (0.0 - 1.0):",
+                            juce::String(cell.probability),
+                            text)
+            && text.isNotEmpty())
+        {
+            auto& r2 = rows[static_cast<size_t>(rowIndex)];
+            auto& c2 = fillModeActive ? r2.fillCells : r2.cells;
+            c2[static_cast<size_t>(stepIndex)].probability =
+                juce::jlimit(0.0f, 1.0f, text.getFloatValue());
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
     }
     else if (result >= 101 && result <= 108)
     {
@@ -705,6 +859,76 @@ void DrumGridView::showStepContextMenu(int rowIndex, int stepIndex, juce::Point<
     {
         // Flam: just mark accented and keep existing
         cell.accented = true;
+        repaint();
+        if (onCellsChanged) onCellsChanged();
+    }
+    else if (result == 6)
+    {
+        juce::String text;
+        if (promptTextInput("Set Swing Offset",
+                            "Swing (-1.0 to 1.0):",
+                            juce::String(cell.swing),
+                            text)
+            && text.isNotEmpty())
+        {
+            auto& r2 = rows[static_cast<size_t>(rowIndex)];
+            auto& c2 = fillModeActive ? r2.fillCells : r2.cells;
+            c2[static_cast<size_t>(stepIndex)].swing = juce::jlimit(-1.0f, 1.0f, text.getFloatValue());
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
+    }
+    else if (result == 7)
+    {
+        juce::String text;
+        if (promptTextInput("Override Pitch",
+                            "MIDI note (0-127):",
+                            juce::String(cell.midiNote),
+                            text)
+            && text.isNotEmpty())
+        {
+            auto& r2 = rows[static_cast<size_t>(rowIndex)];
+            auto& c2 = fillModeActive ? r2.fillCells : r2.cells;
+            c2[static_cast<size_t>(stepIndex)].midiNote = juce::jlimit(0, 127, text.getIntValue());
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
+    }
+    else if (result == 8)
+    {
+        cell.probability = (cell.probability < 0.5f) ? 1.0f : 0.3f;
+        repaint();
+        if (onCellsChanged) onCellsChanged();
+    }
+    else if (result == 9)
+    {
+        copiedStep = cell;
+        hasCopiedStep = true;
+        if (onStatusMessage)
+            onStatusMessage("Step copied");
+    }
+    else if (result == 10)
+    {
+        if (hasCopiedStep)
+        {
+            auto pasted = copiedStep;
+            pasted.cellId = juce::Uuid().toString();
+            cells[static_cast<size_t>(stepIndex)] = pasted;
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
+    }
+    else if (result == 11)
+    {
+        for (int i = stepIndex; i < static_cast<int>(cells.size()); ++i)
+            cells[static_cast<size_t>(i)].muted = false;
+        repaint();
+        if (onCellsChanged) onCellsChanged();
+    }
+    else if (result == 12)
+    {
+        for (int i = stepIndex; i < static_cast<int>(cells.size()); ++i)
+            cells[static_cast<size_t>(i)].muted = true;
         repaint();
         if (onCellsChanged) onCellsChanged();
     }

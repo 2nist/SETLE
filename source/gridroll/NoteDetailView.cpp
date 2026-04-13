@@ -46,6 +46,22 @@ static std::vector<int> buildScaleIntervals(const juce::String& key, const juce:
     return result;
 }
 
+static bool promptTextInput(const juce::String& title,
+                            const juce::String& prompt,
+                            const juce::String& initialValue,
+                            juce::String& outValue)
+{
+    juce::AlertWindow window(title, prompt, juce::AlertWindow::NoIcon);
+    window.addTextEditor("value", initialValue, {});
+    window.addButton("OK", 1);
+    window.addButton("Cancel", 0);
+    if (window.runModalLoop() != 1)
+        return false;
+
+    outValue = window.getTextEditorContents("value");
+    return true;
+}
+
 NoteDetailView::NoteDetailView(model::Song& songRef)
     : song(songRef)
 {
@@ -384,26 +400,53 @@ void NoteDetailView::showNoteContext(int noteIdx, juce::Point<int> screenPos)
     juce::PopupMenu menu;
     menu.addItem(1, "Set Velocity...");
     menu.addItem(2, "Quantize to Grid");
+    menu.addItem(4, "Set Duration...");
+    menu.addItem(5, "Set Pitch...");
+    menu.addItem(6, "Toggle Legato");
+    {
+        juce::PopupMenu transposeMenu;
+        transposeMenu.addItem(701, "+1 semitone");
+        transposeMenu.addItem(702, "-1 semitone");
+        transposeMenu.addItem(703, "+12 semitones");
+        transposeMenu.addItem(704, "-12 semitones");
+        menu.addSubMenu("Transpose", transposeMenu);
+    }
+    menu.addItem(8, "Flip Velocity");
+    menu.addItem(9, "Select Same Pitch");
+    menu.addItem(10, "Quantize to Scale");
     menu.addSeparator();
     menu.addItem(3, "Delete Note");
 
-    const int result = menu.showAt(juce::Rectangle<int>(screenPos.getX(), screenPos.getY(), 1, 1));
+    auto safeThis = juce::Component::SafePointer<NoteDetailView>(this);
+    menu.showMenuAsync(
+        juce::PopupMenu::Options().withTargetScreenArea(
+            juce::Rectangle<int>(screenPos.getX(), screenPos.getY(), 1, 1)),
+        [safeThis, noteIdx](int result)
+        {
+            if (safeThis != nullptr)
+                safeThis->handleNoteContextResult(noteIdx, result);
+        });
+}
+
+void NoteDetailView::handleNoteContextResult(int noteIdx, int result)
+{
+    if (result == 0 || noteIdx < 0 || noteIdx >= static_cast<int>(notes.size()))
+        return;
+
     if (result == 1)
     {
-        juce::AlertWindow::showInputBoxAsync("Set Velocity",
-                                             "Enter velocity (0.0 - 1.0):",
-                                             juce::String(notes[static_cast<size_t>(noteIdx)].getVelocity()),
-                                             nullptr,
-                                             [this, noteIdx](const juce::String& text)
-                                             {
-                                                 if (text.isEmpty())
-                                                     return;
-
-                                                 notes[static_cast<size_t>(noteIdx)].setVelocity(juce::jlimit(0.0f, 1.0f, text.getFloatValue()));
-                                                 repaint();
-                                                 if (onNotesChanged)
-                                                     onNotesChanged();
-                                             });
+        juce::String text;
+        if (promptTextInput("Set Velocity",
+                            "Enter velocity (0.0 - 1.0):",
+                            juce::String(notes[static_cast<size_t>(noteIdx)].getVelocity()),
+                            text)
+            && text.isNotEmpty())
+        {
+            notes[static_cast<size_t>(noteIdx)].setVelocity(juce::jlimit(0.0f, 1.0f, text.getFloatValue()));
+            repaint();
+            if (onNotesChanged)
+                onNotesChanged();
+        }
     }
     else if (result == 2)
     {
@@ -415,9 +458,83 @@ void NoteDetailView::showNoteContext(int noteIdx, juce::Point<int> screenPos)
         if (onNotesChanged)
             onNotesChanged();
     }
+    else if (result == 4)
+    {
+        juce::String text;
+        if (promptTextInput("Set Duration",
+                            "Enter duration in beats:",
+                            juce::String(notes[static_cast<size_t>(noteIdx)].getDurationBeats()),
+                            text)
+            && text.isNotEmpty())
+        {
+            notes[static_cast<size_t>(noteIdx)].setDurationBeats(juce::jmax(0.03125, text.getDoubleValue()));
+            rebuildNoteRects();
+            repaint();
+            if (onNotesChanged)
+                onNotesChanged();
+        }
+    }
+    else if (result == 5)
+    {
+        juce::String text;
+        if (promptTextInput("Set Pitch",
+                            "Enter MIDI note (0-127):",
+                            juce::String(notes[static_cast<size_t>(noteIdx)].getPitch()),
+                            text)
+            && text.isNotEmpty())
+        {
+            notes[static_cast<size_t>(noteIdx)].setPitch(juce::jlimit(0, 127, text.getIntValue()));
+            rebuildNoteRects();
+            repaint();
+            if (onNotesChanged)
+                onNotesChanged();
+        }
+    }
+    else if (result == 6)
+    {
+        auto& note = notes[static_cast<size_t>(noteIdx)];
+        constexpr double legatoDur = 1.0;
+        note.setDurationBeats(note.getDurationBeats() >= legatoDur ? 0.25 : legatoDur);
+        rebuildNoteRects();
+        repaint();
+        if (onNotesChanged)
+            onNotesChanged();
+    }
+    else if (result >= 701 && result <= 704)
+    {
+        const int delta = (result == 701) ? 1 : (result == 702) ? -1 : (result == 703) ? 12 : -12;
+        auto& note = notes[static_cast<size_t>(noteIdx)];
+        note.setPitch(juce::jlimit(0, 127, note.getPitch() + delta));
+        rebuildNoteRects();
+        repaint();
+        if (onNotesChanged)
+            onNotesChanged();
+    }
+    else if (result == 8)
+    {
+        auto& note = notes[static_cast<size_t>(noteIdx)];
+        note.setVelocity(juce::jlimit(0.0f, 1.0f, 1.0f - note.getVelocity()));
+        repaint();
+        if (onNotesChanged)
+            onNotesChanged();
+    }
+    else if (result == 9)
+    {
+        selectedNoteIdx = noteIdx;
+        repaint();
+    }
+    else if (result == 10)
+    {
+        auto& note = notes[static_cast<size_t>(noteIdx)];
+        note.setPitch(constraintEngine.processNote(note.getPitch(), note.getStartBeats()));
+        rebuildNoteRects();
+        repaint();
+        if (onNotesChanged)
+            onNotesChanged();
+    }
     else if (result == 3)
     {
-        notes.erase(notes.begin() + noteIdx);
+        notes.erase(notes.begin() + static_cast<size_t>(noteIdx));
         selectedNoteIdx = juce::jmin(selectedNoteIdx, static_cast<int>(notes.size()) - 1);
         rebuildNoteRects();
         repaint();

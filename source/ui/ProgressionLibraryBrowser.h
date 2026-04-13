@@ -15,6 +15,7 @@ public:
     void resized() override;
     
     void setOnRowClicked(std::function<void(const juce::String&)> callback);
+    void setOnRowContextRequested(std::function<void(const juce::String&, juce::Component&)> callback);
     void updateSessionKey(const juce::String& newKey);
     void updateSessionMode(const juce::String& newMode);
 
@@ -41,11 +42,13 @@ private:
         void mouseExit(const juce::MouseEvent& event) override;
         
         void setOnClicked(std::function<void()> callback) { onClicked = callback; }
+        void setOnContextRequested(std::function<void(juce::Component&)> callback) { onContextRequested = callback; }
         const juce::String& getTemplateId() const { return template_.templateId; }
         
     private:
         ProgressionTemplate template_;
         std::function<void()> onClicked;
+        std::function<void(juce::Component&)> onContextRequested;
         bool isHovering { false };
     };
 
@@ -61,6 +64,7 @@ private:
     juce::Component scrollableContainer;
     std::vector<std::unique_ptr<BrowserRow>> browserRows;
     std::function<void(const juce::String&)> onRowClicked;
+    std::function<void(const juce::String&, juce::Component&)> onRowContextRequested;
     
     juce::String currentSessionKey { "C" };
     juce::String currentSessionMode { "ionian" };

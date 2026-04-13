@@ -83,6 +83,7 @@ private:
     NoteRect hitTestGrid(juce::Point<int> pos) const;
     void rebuildNoteRects();
     void showNoteContext(int noteIdx, juce::Point<int> screenPos);
+    void handleNoteContextResult(int noteIdx, int result);
 
     // ---------------------------------------------------------------
     // State

@@ -278,7 +278,7 @@ void EffProcessor::loadDefinition(const EffDefinition& def)
             audioBlocks.push_back(&block);
 
         // Allocate state
-        blockStates.emplace(block.blockId, BlockState{});
+        blockStates.try_emplace(block.blockId);
     }
 
     // Re-prepare if already prepared

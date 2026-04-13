@@ -70,7 +70,8 @@ void DrumMachineProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
                               || (transportBeat < previousBeat && (cellStart >= previousBeat || cellStart < transportBeat));
             if (crossed)
             {
-                auto random = juce::Random(static_cast<int64>(loopSeed + static_cast<uint32_t>(cellStart * 1000.0f)));
+                const juce::int64 seed = static_cast<juce::int64>(loopSeed + static_cast<uint32_t>(cellStart * 1000.0f));
+                auto random = juce::Random(seed);
                 if (cell.probability >= 1.0f || random.nextFloat() <= cell.probability)
                     triggerVoice(cell.midiNote, cell.velocity, juce::jmax(1, cell.ratchetCount));
             }

@@ -137,6 +137,14 @@ void TrackLane::mouseUp(const juce::MouseEvent& e)
         menu.addSeparator();
         menu.addItem(3, "Add MIDI Track Below");
         menu.addItem(4, "Add Audio Track Below");
+        menu.addSeparator();
+        menu.addItem(5, "Duplicate Track");
+        menu.addItem(6, "Move Up");
+        menu.addItem(7, "Move Down");
+        menu.addSeparator();
+        menu.addItem(8, "Open FX Chain");
+        menu.addItem(9, "Arm for Recording");
+        menu.addItem(10, "Bounce to Audio");
 
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
                            [this](int selected)
@@ -149,6 +157,18 @@ void TrackLane::mouseUp(const juce::MouseEvent& e)
                                    onAddMidiTrackBelow(trackRef);
                                else if (selected == 4 && onAddAudioTrackBelow)
                                    onAddAudioTrackBelow(trackRef);
+                               else if (selected == 5 && onDuplicateTrack)
+                                   onDuplicateTrack(trackRef);
+                               else if (selected == 6 && onMoveTrackUp)
+                                   onMoveTrackUp(trackRef);
+                               else if (selected == 7 && onMoveTrackDown)
+                                   onMoveTrackDown(trackRef);
+                               else if (selected == 8 && onOpenFx)
+                                   onOpenFx(trackRef);
+                               else if (selected == 9 && onArmToggle)
+                                   onArmToggle(trackRef);
+                               else if (selected == 10 && onBounceToAudio)
+                                   onBounceToAudio(trackRef);
                            });
         return;
     }
@@ -167,6 +187,12 @@ void TrackLane::mouseUp(const juce::MouseEvent& e)
     menu.addItem(103, "Delete Clip");
     menu.addSeparator();
     menu.addItem(104, "Copy to Sampler Queue");
+    menu.addItem(105, "Duplicate Clip");
+    menu.addSeparator();
+    menu.addItem(106, "Toggle Loop");
+    menu.addItem(107, "Quantize Start to Bar");
+    menu.addItem(108, "Transpose...");
+    menu.addItem(109, "Detach from Progression");
 
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
                        [this, clip](int selected)
@@ -206,7 +232,74 @@ void TrackLane::mouseUp(const juce::MouseEvent& e)
                            }
 
                            if (selected == 104 && onClipClicked)
+                           {
                                onClipClicked(*clip);
+                               return;
+                           }
+
+                           if (selected == 105)
+                           {
+                               // Duplicate: clone the clip state and append
+                               auto newClipState = clip->state.createCopy();
+                               newClipState.setProperty("id", juce::Uuid().toString(), nullptr);
+                               auto* track = clip->getTrack();
+                               if (track != nullptr)
+                               {
+                                   track->state.appendChild(newClipState, nullptr);
+                                   refreshClips();
+                               }
+                               return;
+                           }
+
+                           if (selected == 106)
+                           {
+                               const bool looping = static_cast<bool>(clip->state.getProperty("looping", false));
+                               clip->state.setProperty("looping", !looping, nullptr);
+                               refreshClips();
+                               return;
+                           }
+
+                           if (selected == 107)
+                           {
+                               // Quantize start to nearest bar (4 beats)
+                               auto pos = clip->getPosition();
+                               const auto startSec = pos.getStart().inSeconds();
+                               const auto* tempo = clip->edit.tempoSequence.getTempo(0);
+                               const double bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
+                               const double secPerBeat = 60.0 / juce::jmax(1.0, bpm);
+                               const double beatPos = startSec / secPerBeat;
+                               const double snapped = std::round(beatPos / 4.0) * 4.0;
+                                                             clip->setPosition(te::ClipPosition { { tracktion::TimePosition::fromSeconds(snapped * secPerBeat),
+                                                                                                                                             pos.getLength() },
+                                                                                                                                         pos.getOffset() });
+                               refreshClips();
+                               return;
+                           }
+
+                           if (selected == 108)
+                           {
+                               juce::AlertWindow transposeWindow("Transpose Clip", "Semitones (+/-):", juce::AlertWindow::NoIcon);
+                               transposeWindow.addTextEditor("semi", "0", "Semitones");
+                               transposeWindow.addButton("Apply", 1);
+                               transposeWindow.addButton("Cancel", 0);
+                               if (transposeWindow.runModalLoop() == 1)
+                               {
+                                   const int semi = juce::jlimit(-48, 48, transposeWindow.getTextEditorContents("semi").trim().getIntValue());
+                                   if (auto* midiClip = dynamic_cast<te::MidiClip*>(clip))
+                                   {
+                                       for (auto* note : midiClip->getSequence().getNotes())
+                                           note->setNoteNumber(note->getNoteNumber() + semi, nullptr);
+                                       refreshClips();
+                                   }
+                               }
+                               return;
+                           }
+
+                           if (selected == 109)
+                           {
+                               clip->state.removeProperty(juce::Identifier("progressionId"), nullptr);
+                               refreshClips();
+                           }
                        });
 }
 
@@ -219,7 +312,11 @@ void TrackLane::rebuildPaintedClips(const juce::Rectangle<int>& clipArea)
     const auto secPerBeat = 60.0 / juce::jmax(1.0, bpm);
     const auto beatSpan = juce::jmax(1.0, visibleEndBeat - visibleStartBeat);
 
-    for (auto* clip : trackRef.getClips())
+    auto* clipTrack = dynamic_cast<te::ClipTrack*>(&trackRef);
+    if (clipTrack == nullptr)
+        return;
+
+    for (auto* clip : clipTrack->getClips())
     {
         if (clip == nullptr)
             continue;

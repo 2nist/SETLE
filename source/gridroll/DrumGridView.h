@@ -6,6 +6,7 @@
 #include "GroovePanel.h"
 #include "DrumPatternBrowser.h"
 #include "DrumPatternLibrary.h"
+#include "../theory/MeterContext.h"
 
 namespace setle::gridroll
 {
@@ -71,6 +72,9 @@ public:
     /** Beat range for horizontal scroll. */
     void setVisibleBeatRange(double start, double end);
 
+    void setMeterContext(const setle::theory::MeterContext& meter);
+    void updateStepOptions(const setle::theory::MeterContext& meter);
+
     void paint(juce::Graphics& g) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent& e) override;
@@ -123,6 +127,8 @@ private:
     juce::TextButton fillButton { "Fill" };
     juce::TextButton patternsButton { "Patterns" };
     juce::ComboBox subdivSelector;
+    setle::theory::MeterContext currentMeter;
+    int currentStepCount { kDefaultSteps };
 
     GroovePanel groovePanel;
     DrumPatternLibrary patternLibrary;

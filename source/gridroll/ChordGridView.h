@@ -4,6 +4,7 @@
 
 #include "GridRollCell.h"
 #include "../model/SetleSongModel.h"
+#include "../theory/MeterContext.h"
 
 namespace setle::gridroll
 {
@@ -27,6 +28,9 @@ public:
     /** Called when a cell is double-clicked — expand into note detail. */
     std::function<void(int cellIndex)> onCellDoubleClicked;
 
+    /** Called when context menu requests opening note detail for a cell. */
+    std::function<void(int cellIndex)> onOpenNoteDetail;
+
     /** Called after any structural change (resize, reorder, divide, delete). */
     std::function<void()> onCellsChanged;
 
@@ -49,6 +53,7 @@ public:
 
     /** Snap grid setting inherited from workspace. */
     void setTheorySnap(const juce::String& snap) { theorySnap = snap; }
+    void setMeterContext(const setle::theory::MeterContext& meter);
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -74,7 +79,9 @@ private:
     double totalBeats() const;
     void   rebuildLayoutCache();
     void   showCellContextMenu(int cellIndex, juce::Point<int> screenPos);
+    void   handleCellContextMenuResult(int cellIndex, int result);
     void   showAddChordPopover(juce::Point<int> screenPos);
+    void   handleAddChordPopoverResult(int result, int rootSemitone);
     void   divideCells(int cellIndex, int n);
     juce::Colour functionColour(const juce::String& fn) const;
     void   paintCell(juce::Graphics& g, const GridRollCell& cell,
@@ -91,6 +98,7 @@ private:
     int  selectedCellIndex { -1 };
     double playheadBeat    { 0.0 };
     juce::String theorySnap { "1/16" };
+    setle::theory::MeterContext meterContext;
 
     // Drag state
     enum class DragKind { None, ResizeRight, MoveCell };

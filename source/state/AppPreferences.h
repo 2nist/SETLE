@@ -27,6 +27,8 @@ public:
 
     juce::String getPatternLibraryPath() const;
     juce::String getEffectsLibraryPath() const;
+    int getHistoryBufferMaxBeats(int fallback) const;
+    void setHistoryBufferMaxBeats(int beats);
 
     int getUiLeftWidth(int fallback) const;
     int getUiRightWidth(int fallback) const;
@@ -37,12 +39,24 @@ public:
     void setUiTimelineHeight(int value);
     void setUiFocusMode(int value);
 
+    // MIDI learn state
+    int getMidiLearnCC() const;         // -1 = unassigned
+    int getMidiLearnChannel() const;    // 0 = any
+    void setMidiLearnCC(int cc);
+    void setMidiLearnChannel(int channel);
+    bool getMidiLearnActive() const;
+    void setMidiLearnActive(bool active);
+
+    // Auto-grab after stop
+    bool getAutoGrabEnabled() const;
+    void setAutoGrabEnabled(bool enabled);
+
 private:
     AppPreferences();
 
     juce::PropertiesFile* settings() const;
 
-    juce::ApplicationProperties appProps;
+    mutable juce::ApplicationProperties appProps;
 };
 
 } // namespace setle::state

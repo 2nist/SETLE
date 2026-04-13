@@ -125,6 +125,23 @@ juce::String AppPreferences::getEffectsLibraryPath() const
         .getFullPathName();
 }
 
+int AppPreferences::getHistoryBufferMaxBeats(int fallback) const
+{
+    if (auto* s = settings())
+        return s->getIntValue("setle.capture.historyMaxBeats", fallback);
+
+    return fallback;
+}
+
+void AppPreferences::setHistoryBufferMaxBeats(int beats)
+{
+    if (auto* s = settings())
+    {
+        s->setValue("setle.capture.historyMaxBeats", juce::jlimit(1, 128, beats));
+        s->saveIfNeeded();
+    }
+}
+
 int AppPreferences::getUiLeftWidth(int fallback) const
 {
     if (auto* s = settings())
@@ -180,6 +197,70 @@ void AppPreferences::setUiFocusMode(int value)
     if (auto* s = settings())
     {
         s->setValue("setle.ui.focusMode", value);
+        s->saveIfNeeded();
+    }
+}
+
+int AppPreferences::getMidiLearnCC() const
+{
+    if (auto* s = settings())
+        return s->getIntValue("setle.midiLearn.cc", -1);
+    return -1;
+}
+
+int AppPreferences::getMidiLearnChannel() const
+{
+    if (auto* s = settings())
+        return s->getIntValue("setle.midiLearn.channel", 0);
+    return 0;
+}
+
+void AppPreferences::setMidiLearnCC(int cc)
+{
+    if (auto* s = settings())
+    {
+        s->setValue("setle.midiLearn.cc", cc);
+        s->saveIfNeeded();
+    }
+}
+
+void AppPreferences::setMidiLearnChannel(int channel)
+{
+    if (auto* s = settings())
+    {
+        s->setValue("setle.midiLearn.channel", channel);
+        s->saveIfNeeded();
+    }
+}
+
+bool AppPreferences::getMidiLearnActive() const
+{
+    if (auto* s = settings())
+        return s->getBoolValue("setle.midiLearn.active", false);
+    return false;
+}
+
+void AppPreferences::setMidiLearnActive(bool active)
+{
+    if (auto* s = settings())
+    {
+        s->setValue("setle.midiLearn.active", active);
+        s->saveIfNeeded();
+    }
+}
+
+bool AppPreferences::getAutoGrabEnabled() const
+{
+    if (auto* s = settings())
+        return s->getBoolValue("setle.capture.autoGrab", false);
+    return false;
+}
+
+void AppPreferences::setAutoGrabEnabled(bool enabled)
+{
+    if (auto* s = settings())
+    {
+        s->setValue("setle.capture.autoGrab", enabled);
         s->saveIfNeeded();
     }
 }

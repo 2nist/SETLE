@@ -145,6 +145,7 @@ void GridRollComponent::setTargetProgression(const juce::String& id)
     }
 
     chordGrid->loadProgression(id);
+    setMeterContext(setle::theory::MeterContext::forBeat(playheadBeat, song));
 }
 
 // ---------------------------------------------------------------
@@ -161,6 +162,10 @@ void GridRollComponent::setMode(Mode mode)
 void GridRollComponent::setPlayheadBeat(double beat)
 {
     playheadBeat = beat;
+
+    const auto meterAtBeat = setle::theory::MeterContext::forBeat(playheadBeat, song);
+    setMeterContext(meterAtBeat);
+
     chordGrid->setPlayheadBeat(beat);
     drumGrid->setPlayheadBeat(beat);
 }
@@ -169,6 +174,17 @@ void GridRollComponent::setPlayheadBeat(double beat)
 void GridRollComponent::setTheorySnap(const juce::String& snap)
 {
     chordGrid->setTheorySnap(snap);
+}
+
+void GridRollComponent::setMeterContext(const setle::theory::MeterContext& meter)
+{
+    if (currentMeter.numerator == meter.numerator
+        && currentMeter.denominator == meter.denominator)
+        return;
+
+    currentMeter = meter;
+    chordGrid->setMeterContext(currentMeter);
+    drumGrid->setMeterContext(currentMeter);
 }
 
 // ---------------------------------------------------------------
@@ -292,7 +308,7 @@ void GridRollComponent::syncChordCellsToModel()
     if (!progOpt.has_value())
         return;
 
-    Progression& prog = *progOpt;
+    model::Progression& prog = *progOpt;
     // Clear existing chords and rebuild from cell list
     // (ValueTree-backed: create new Chord objects for each updated cell)
     const auto& cells = chordGrid->getCells();

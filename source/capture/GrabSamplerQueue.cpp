@@ -216,9 +216,9 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
         totalSeconds = (60.0 / bpm) * totalBeats;
     }
 
-    edit.getTransport().setLoopRange({ te::TimePosition::fromSeconds(0.0), te::TimeDuration::fromSeconds(totalSeconds) });
+    edit.getTransport().setLoopRange({ tracktion::TimePosition::fromSeconds(0.0), tracktion::TimeDuration::fromSeconds(totalSeconds) });
     edit.getTransport().looping = slot.looping;
-    edit.getTransport().setPosition(te::TimePosition::fromSeconds(0.0));
+    edit.getTransport().setPosition(tracktion::TimePosition::fromSeconds(0.0));
     edit.getTransport().play(false);
 
     slot.state = GrabSlot::State::Playing;
@@ -229,7 +229,7 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
 void GrabSamplerQueue::stopPlayback(te::Edit& edit)
 {
     edit.getTransport().stop(false, false);
-    edit.getTransport().setPosition(te::TimePosition::fromSeconds(prePlayheadSeconds));
+    edit.getTransport().setPosition(tracktion::TimePosition::fromSeconds(prePlayheadSeconds));
 
     auto tracks = te::getAudioTracks(edit);
     for (auto* track : tracks)

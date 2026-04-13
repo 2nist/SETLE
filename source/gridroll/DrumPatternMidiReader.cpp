@@ -41,7 +41,8 @@ DrumPatternMidiReader::Result DrumPatternMidiReader::readFile(const juce::File& 
                 maxTick = juce::jmax(maxTick, tick + 1);
                 const int step = juce::jlimit(0, stepCount - 1,
                     static_cast<int>(std::floor((double)tick / (double)maxTick * stepCount)));
-                const auto velocity = static_cast<uint8_t>(juce::jlimit(1, 127, msg.getVelocity()));
+                const auto velocityInt = juce::jlimit(1, 127, static_cast<int>(msg.getVelocity()));
+                const auto velocity = static_cast<juce::uint8>(velocityInt);
                 if (velocity > result.velocities[step])
                     result.velocities.set(step, velocity);
                 result.stepEvents.emplace_back(step, velocity);

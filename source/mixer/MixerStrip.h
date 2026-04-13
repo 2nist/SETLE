@@ -6,6 +6,7 @@
 #include <functional>
 
 #include "BusManager.h"
+#include "../ui/EditToolManager.h"
 
 namespace te = tracktion::engine;
 
@@ -13,7 +14,8 @@ namespace setle::mixer
 {
 
 class MixerStrip : public juce::Component,
-                   private juce::Timer
+                   private juce::Timer,
+                   private setle::ui::EditToolManager::Listener
 {
 public:
     explicit MixerStrip(te::AudioTrack& track,
@@ -33,6 +35,9 @@ public:
 private:
     void timerCallback() override;
     float getPeakLevel(int channel);
+    void mouseEnter(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
+    void activeToolChanged(setle::ui::EditTool newTool) override;
 
     te::AudioTrack& track;
     te::Edit& edit;

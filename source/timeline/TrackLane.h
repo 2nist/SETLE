@@ -35,6 +35,12 @@ public:
     std::function<void(te::Track&)> onAddMidiTrackBelow;
     std::function<void(te::Track&)> onAddAudioTrackBelow;
     std::function<void(te::Clip&)> onClipClicked;
+    std::function<void(te::Track&)> onDuplicateTrack;
+    std::function<void(te::Track&)> onMoveTrackUp;
+    std::function<void(te::Track&)> onMoveTrackDown;
+    std::function<void(te::Track&)> onOpenFx;
+    std::function<void(te::Track&)> onArmToggle;
+    std::function<void(te::Track&)> onBounceToAudio;
 
     void paint(juce::Graphics& g) override;
     void resized() override;

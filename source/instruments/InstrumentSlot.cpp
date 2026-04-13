@@ -146,7 +146,9 @@ void InstrumentSlot::loadVST3(const juce::PluginDescription& desc)
     const auto name = desc.name.isNotEmpty() ? desc.name : "VST3 Plugin";
     if (!desc.fileOrIdentifier.isEmpty())
     {
-        auto plugin = edit.engine.getPluginManager().createPlugin(edit, desc, false);
+        auto plugin = edit.getPluginCache().createNewPlugin(desc.createIdentifierString(), {});
+        if (plugin == nullptr)
+            plugin = edit.getPluginCache().createNewPlugin(desc.fileOrIdentifier, {});
         if (plugin != nullptr)
         {
             track.pluginList.insertPlugin(plugin, 0, nullptr);

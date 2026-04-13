@@ -7,6 +7,7 @@
 #include "DrumGridView.h"
 #include "NoteDetailView.h"
 #include "../model/SetleSongModel.h"
+#include "../theory/MeterContext.h"
 #include "../theme/ThemeManager.h"
 
 namespace te = tracktion::engine;
@@ -43,6 +44,7 @@ public:
 
     /** Propagate the theory snap setting from the workspace. */
     void setTheorySnap(const juce::String& snap);
+    void setMeterContext(const setle::theory::MeterContext& meter);
 
     /** Called when a chord edit should be persisted back to the model. */
     std::function<void(const juce::String& progressionId)> onProgressionEdited;
@@ -80,6 +82,7 @@ private:
     int    expandedCellIdx { -1 };   // -1 = no detail open
     double playheadBeat    { 0.0 };
     double zoomBeatsPerPx  { 1.0 };
+    setle::theory::MeterContext currentMeter;
 
     juce::String progressionId;
 

@@ -5,6 +5,10 @@ project(SETLE VERSION 0.0.1)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+if(MSVC)
+    add_compile_options(/FS)
+endif()
+
 
 # Third-party module paths
 set(SETLE_FONTAUDIO_MODULE_PATH modules/fontaudio/wrappers/juce/module/fontaudio)
@@ -189,6 +193,8 @@ target_sources(SETLE PRIVATE
     source/midi/MidiConstraintEngine.h
     source/theory/DiatonicHarmony.cpp
     source/theory/DiatonicHarmony.h
+    source/theory/MeterContext.cpp
+    source/theory/MeterContext.h
     source/theory/TheoryAdapter.cpp
     source/theory/TheoryAdapter.h
     source/theory/BachTheory.cpp
@@ -221,6 +227,10 @@ target_sources(SETLE PRIVATE
     source/timeline/TimelineTracksComponent.h
     source/ui/WorkspaceShellComponent.cpp
     source/ui/WorkspaceShellComponent.h
+    source/ui/EditToolManager.cpp
+    source/ui/EditToolManager.h
+    source/ui/ToolPaletteComponent.cpp
+    source/ui/ToolPaletteComponent.h
     source/ui/ProgressionLibraryBrowser.cpp
     source/ui/ProgressionLibraryBrowser.h
     source/ui/ProgressionChordPalette.cpp
@@ -242,6 +252,7 @@ target_sources(SETLE PRIVATE
 target_compile_definitions(SETLE PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
+    JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SETLE,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SETLE,JUCE_VERSION>"
 )

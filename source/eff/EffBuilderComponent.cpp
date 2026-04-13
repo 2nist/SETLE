@@ -1,5 +1,7 @@
 #include "EffBuilderComponent.h"
 
+#include "../state/AppPreferences.h"
+
 namespace setle::eff
 {
 
@@ -54,6 +56,7 @@ EffBuilderComponent::EffBuilderComponent()
     // Chain list
     addAndMakeVisible(chainListArea);
     chainListArea.setInterceptsMouseClicks(true, false);
+    chainListArea.addMouseListener(this, false);
 
     addAndMakeVisible(addBlockButton);
     addBlockButton.onClick = [this]
@@ -289,7 +292,7 @@ void EffBuilderComponent::resized()
     {
         if (pc.widget == nullptr) continue;
 
-        const auto box = juce::Rectangle<int>(cx, cy, controlW, controlH);
+        auto box = juce::Rectangle<int>(cx, cy, controlW, controlH);
         pc.widget->setBounds(box.withTrimmedBottom(16));
         if (pc.label != nullptr)
             pc.label->setBounds(box.removeFromBottom(16));
@@ -661,6 +664,110 @@ void EffBuilderComponent::saveToFile()
     EffSerializer::saveToFile(definition, saveFile);
 }
 
+void EffBuilderComponent::mouseUp(const juce::MouseEvent& e)
+{
+    auto* src = e.eventComponent;
+
+    if (src == &bypassButton && e.mods.isLeftButtonDown())
+    {
+        toggleBypass();
+        return;
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        if (src == &macroKnobs[static_cast<size_t>(i)] && e.mods.isRightButtonDown())
+        {
+            handleMacroRightClick(i);
+            return;
+        }
+    }
+
+    if ((src == &inStripLabel || src == &outStripLabel) && e.mods.isRightButtonDown())
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Jump to Previous Block", activeBlockIndex > 0);
+        menu.addItem(2, "Jump to Next Block", activeBlockIndex + 1 < static_cast<int>(definition.blocks.size()));
+        menu.addItem(3, "Go to First Block", !definition.blocks.empty());
+        menu.addItem(4, "Go to Last Block", !definition.blocks.empty());
+
+        const int selected = menu.show();
+        if (selected == 1 && activeBlockIndex > 0)
+            navigateTo(activeBlockIndex - 1);
+        else if (selected == 2 && activeBlockIndex + 1 < static_cast<int>(definition.blocks.size()))
+            navigateTo(activeBlockIndex + 1);
+        else if (selected == 3 && !definition.blocks.empty())
+            navigateTo(0);
+        else if (selected == 4 && !definition.blocks.empty())
+            navigateTo(static_cast<int>(definition.blocks.size()) - 1);
+        return;
+    }
+
+    if (src != &chainListArea)
+        return;
+
+    const auto chainArea = getChainListBounds();
+    const int blockH = 38;
+    const int idx = (e.getPosition().y - (chainArea.getY() + 4)) / blockH;
+    if (idx < 0 || idx >= static_cast<int>(definition.blocks.size()))
+        return;
+
+    if (!e.mods.isRightButtonDown())
+    {
+        navigateTo(idx);
+        return;
+    }
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader(definition.blocks[static_cast<size_t>(idx)].label);
+    menu.addItem(1, "Bypass", true, definition.blocks[static_cast<size_t>(idx)].bypassed);
+    menu.addItem(2, "Remove Block");
+    menu.addItem(3, "Move Up", idx > 0);
+    menu.addItem(4, "Move Down", idx + 1 < static_cast<int>(definition.blocks.size()));
+    menu.addItem(5, "Duplicate Block");
+
+    const int selected = menu.show();
+    if (selected <= 0)
+        return;
+
+    if (selected == 1)
+    {
+        definition.blocks[static_cast<size_t>(idx)].bypassed = !definition.blocks[static_cast<size_t>(idx)].bypassed;
+    }
+    else if (selected == 2)
+    {
+        definition.blocks.erase(definition.blocks.begin() + idx);
+        activeBlockIndex = juce::jlimit(0, juce::jmax(0, static_cast<int>(definition.blocks.size()) - 1), activeBlockIndex);
+    }
+    else if (selected == 3 && idx > 0)
+    {
+        std::swap(definition.blocks[static_cast<size_t>(idx)], definition.blocks[static_cast<size_t>(idx - 1)]);
+        activeBlockIndex = idx - 1;
+    }
+    else if (selected == 4 && idx + 1 < static_cast<int>(definition.blocks.size()))
+    {
+        std::swap(definition.blocks[static_cast<size_t>(idx)], definition.blocks[static_cast<size_t>(idx + 1)]);
+        activeBlockIndex = idx + 1;
+    }
+    else if (selected == 5)
+    {
+        auto copy = definition.blocks[static_cast<size_t>(idx)];
+        copy.blockId = juce::Uuid().toString();
+        copy.label += " Copy";
+        definition.blocks.insert(definition.blocks.begin() + idx + 1, copy);
+        activeBlockIndex = idx + 1;
+    }
+
+    if (effProcessor)
+        effProcessor->loadDefinition(definition);
+
+    rebuildParamControls();
+    rebuildChainList();
+    updateInOutStrips();
+    updateMacroStrip();
+    scheduleAutoSave();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // handleMacroRightClick — show popup to assign param
 // ─────────────────────────────────────────────────────────────────────────────
@@ -668,7 +775,15 @@ void EffBuilderComponent::saveToFile()
 void EffBuilderComponent::handleMacroRightClick(int macroIndex)
 {
     juce::PopupMenu menu;
-    menu.addSectionHeader("Assign Macro " + juce::String(macroIndex + 1));
+    menu.addSectionHeader("Macro " + juce::String(macroIndex + 1));
+
+    menu.addItem(900, "Rename Macro...");
+    menu.addItem(901, "Set Range...");
+    menu.addItem(902, "MIDI Learn",
+                 true, setle::state::AppPreferences::get().getMidiLearnActive());
+    menu.addItem(903, "Reset to Default");
+    menu.addSeparator();
+    menu.addSectionHeader("Assign Parameter");
 
     int itemId = 1;
     struct Item { juce::String blockId; juce::String paramId; juce::String label; };
@@ -683,12 +798,114 @@ void EffBuilderComponent::handleMacroRightClick(int macroIndex)
         }
 
     menu.addSeparator();
-    menu.addItem(itemId, "Clear");
+    menu.addItem(itemId, "Clear Assignment");
 
     menu.showMenuAsync(juce::PopupMenu::Options{},
         [this, macroIndex, items, itemId](int result)
         {
             if (result <= 0) return;
+
+            auto findMacro = [this, macroIndex]() -> EffDefinition::MacroAssignment*
+            {
+                for (auto& m : definition.macros)
+                    if (m.macroIndex == macroIndex)
+                        return &m;
+                return nullptr;
+            };
+
+            if (result == 900)
+            {
+                const auto current = macroLabels[static_cast<size_t>(macroIndex)].getText();
+                juce::AlertWindow w("Rename Macro", "Enter macro label:", juce::AlertWindow::NoIcon);
+                w.addTextEditor("name", current, "Label");
+                w.addButton("Set", 1);
+                w.addButton("Cancel", 0);
+                if (w.runModalLoop() == 1)
+                {
+                    const auto name = w.getTextEditorContents("name").trim();
+                    if (auto* m = findMacro())
+                        m->macroLabel = name;
+                    else
+                    {
+                        EffDefinition::MacroAssignment ma;
+                        ma.macroIndex = macroIndex;
+                        ma.macroLabel = name;
+                        definition.macros.push_back(ma);
+                    }
+                }
+                updateMacroStrip();
+                scheduleAutoSave();
+                return;
+            }
+
+            if (result == 901)
+            {
+                float minVal = 0.0f, maxVal = 1.0f;
+                if (auto* m = findMacro())
+                {
+                    minVal = m->rangeMin;
+                    maxVal = m->rangeMax;
+                }
+
+                juce::AlertWindow w("Set Macro Range", "Enter min/max (0..1):", juce::AlertWindow::NoIcon);
+                w.addTextEditor("min", juce::String(minVal), "Min");
+                w.addTextEditor("max", juce::String(maxVal), "Max");
+                w.addButton("Set", 1);
+                w.addButton("Cancel", 0);
+                if (w.runModalLoop() == 1)
+                {
+                    minVal = juce::jlimit(0.0f, 1.0f, w.getTextEditorContents("min").getFloatValue());
+                    maxVal = juce::jlimit(0.0f, 1.0f, w.getTextEditorContents("max").getFloatValue());
+                    if (maxVal < minVal)
+                        std::swap(minVal, maxVal);
+
+                    if (auto* m = findMacro())
+                    {
+                        m->rangeMin = minVal;
+                        m->rangeMax = maxVal;
+                    }
+                    else
+                    {
+                        EffDefinition::MacroAssignment ma;
+                        ma.macroIndex = macroIndex;
+                        ma.rangeMin = minVal;
+                        ma.rangeMax = maxVal;
+                        definition.macros.push_back(ma);
+                    }
+                }
+                updateMacroStrip();
+                scheduleAutoSave();
+                return;
+            }
+
+            if (result == 902)
+            {
+                const bool active = !setle::state::AppPreferences::get().getMidiLearnActive();
+                setle::state::AppPreferences::get().setMidiLearnActive(active);
+                if (!active)
+                {
+                    if (auto* m = findMacro())
+                    {
+                        m->midiCC = -1;
+                        m->midiChannel = 0;
+                    }
+                }
+                scheduleAutoSave();
+                return;
+            }
+
+            if (result == 903)
+            {
+                macroKnobs[static_cast<size_t>(macroIndex)].setValue(0.0, juce::sendNotificationSync);
+                if (auto* m = findMacro())
+                {
+                    m->rangeMin = 0.0f;
+                    m->rangeMax = 1.0f;
+                }
+                updateMacroStrip();
+                scheduleAutoSave();
+                return;
+            }
 
             // Remove existing assignment for this macro
             definition.macros.erase(

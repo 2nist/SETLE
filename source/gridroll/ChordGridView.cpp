@@ -13,6 +13,22 @@ namespace setle::gridroll
 static constexpr int kResizeHandleWidth = 8;
 static constexpr int kMinCellPixelWidth = 20;
 
+static bool promptTextInput(const juce::String& title,
+                            const juce::String& prompt,
+                            const juce::String& initialValue,
+                            juce::String& outValue)
+{
+    juce::AlertWindow window(title, prompt, juce::AlertWindow::NoIcon);
+    window.addTextEditor("value", initialValue, {});
+    window.addButton("OK", 1);
+    window.addButton("Cancel", 0);
+    if (window.runModalLoop() != 1)
+        return false;
+
+    outValue = window.getTextEditorContents("value");
+    return true;
+}
+
 // ---------------------------------------------------------------
 ChordGridView::ChordGridView(model::Song& songRef)
     : song(songRef)
@@ -75,6 +91,16 @@ void ChordGridView::setPlayheadBeat(double beat)
     }
 }
 
+void ChordGridView::setMeterContext(const setle::theory::MeterContext& meter)
+{
+    if (meterContext.numerator == meter.numerator
+        && meterContext.denominator == meter.denominator)
+        return;
+
+    meterContext = meter;
+    repaint();
+}
+
 // ---------------------------------------------------------------
 double ChordGridView::totalBeats() const
 {
@@ -92,14 +118,15 @@ double ChordGridView::beatsPerPixel() const
 
 double ChordGridView::snapBeat(double rawBeat) const
 {
-    double subdivisions = 16.0;
-    if      (theorySnap == "1/1")  subdivisions =  1.0;
-    else if (theorySnap == "1/2")  subdivisions =  2.0;
-    else if (theorySnap == "1/4")  subdivisions =  4.0;
-    else if (theorySnap == "1/8")  subdivisions =  8.0;
-    else if (theorySnap == "1/16") subdivisions = 16.0;
-    else if (theorySnap == "1/32") subdivisions = 32.0;
-    const double gridSize = 1.0 / subdivisions;
+    double gridSize = 0.25;
+    if      (theorySnap == "bar" || theorySnap == "1/1") gridSize = meterContext.beatsPerBar();
+    else if (theorySnap == "1/2")                          gridSize = meterContext.beatsPerBar() / 2.0;
+    else if (theorySnap == "1/4")                          gridSize = meterContext.beatUnit();
+    else if (theorySnap == "halfBeat")                     gridSize = meterContext.beatUnit() / 2.0;
+    else if (theorySnap == "1/8")                          gridSize = 0.5;
+    else if (theorySnap == "1/16")                         gridSize = 0.25;
+    else if (theorySnap == "1/32")                         gridSize = 0.125;
+
     return std::round(rawBeat / gridSize) * gridSize;
 }
 
@@ -199,7 +226,7 @@ void ChordGridView::paintCell(juce::Graphics& g,
     }
 
     // Text area
-    const auto inner = bounds.reduced(4, 2);
+    auto inner = bounds.reduced(4, 2);
     if (inner.getWidth() >= 14)
     {
         const juce::String roman = cell.romanNumeral.isNotEmpty() ? cell.romanNumeral : "-";
@@ -239,11 +266,21 @@ void ChordGridView::paint(juce::Graphics& g)
     const auto& theme = ThemeManager::get().theme();
     g.fillAll(theme.surface2);
 
-    // Beat grid lines
+    // Beat grid lines (denominator unit spacing)
     const double bpp = beatsPerPixel();
     const double total = totalBeats();
-    g.setColour(theme.inkLight.withAlpha(0.05f));
-    for (double beat = 0.0; beat <= total; beat += 1.0)
+    const double beatUnit = meterContext.beatUnit();
+    const double barSize  = meterContext.beatsPerBar();
+
+    g.setColour(theme.inkLight.withAlpha(0.14f));
+    for (double beat = 0.0; beat <= total + 0.0001; beat += beatUnit)
+    {
+        const int x = static_cast<int>(beat / bpp);
+        g.fillRect(x, 0, 1, getHeight());
+    }
+
+    g.setColour(theme.inkLight.withAlpha(0.30f));
+    for (double beat = 0.0; beat <= total + 0.0001; beat += barSize)
     {
         const int x = static_cast<int>(beat / bpp);
         g.fillRect(x, 0, 1, getHeight());
@@ -261,6 +298,20 @@ void ChordGridView::paint(juce::Graphics& g)
         g.setColour(theme.playheadColor.withAlpha(0.9f));
         g.fillRect(px, 0, 2, getHeight());
     }
+
+    // Snap unit readout in header area.
+    juce::String snapLabel = theorySnap;
+    if (theorySnap == "1/4")
+        snapLabel = (std::abs(meterContext.beatUnit() - 0.5) < 0.001) ? "1/8" : "1 beat";
+    else if (theorySnap == "halfBeat")
+        snapLabel = (std::abs(meterContext.beatUnit() - 0.5) < 0.001) ? "1/16" : "1/8";
+
+    g.setColour(theme.inkMuted.withAlpha(0.85f));
+    g.setFont(juce::FontOptions(11.0f));
+    g.drawText("Snap: " + snapLabel,
+               6, 4, 96, 14,
+               juce::Justification::centredLeft,
+               false);
 }
 
 // ---------------------------------------------------------------
@@ -446,46 +497,64 @@ void ChordGridView::showCellContextMenu(int cellIndex, juce::Point<int> screenPo
     menu.addItem(500, "Mute Cell",   true, cell.muted);
     menu.addItem(501, "Accent Cell", true, cell.accented);
     menu.addSeparator();
+    menu.addItem(700, "Duplicate Cell");
+    menu.addItem(701, "Transpose...");
+    menu.addItem(702, "Set Swing...");
+    menu.addItem(703, "Humanize", true, std::abs(cell.swing) > 0.0001f);
+    menu.addItem(704, "Open Note Detail");
+    menu.addItem(705, "Assign FX Block...");
+    menu.addSeparator();
     menu.addItem(600, "Delete Cell");
 
-    const int result = menu.showAt(juce::Rectangle<int>(screenPos.getX(), screenPos.getY(), 1, 1));
+    auto safeThis = juce::Component::SafePointer<ChordGridView>(this);
+    menu.showMenuAsync(
+        juce::PopupMenu::Options().withTargetScreenArea(
+            juce::Rectangle<int>(screenPos.getX(), screenPos.getY(), 1, 1)),
+        [safeThis, cellIndex](int result)
+        {
+            if (safeThis != nullptr)
+                safeThis->handleCellContextMenuResult(cellIndex, result);
+        });
+}
 
-    if (result == 0)
+void ChordGridView::handleCellContextMenuResult(int cellIndex, int result)
+{
+    if (result == 0 || cellIndex < 0 || cellIndex >= static_cast<int>(cells.size()))
         return;
+
+    auto& cell = cells[static_cast<size_t>(cellIndex)];
 
     if (result == 1)
     {
-        juce::AlertWindow::showInputBoxAsync(
-            "Set Velocity", "Enter velocity (0.0 – 1.0):",
-            juce::String(cell.velocity), nullptr,
-            [this, cellIndex](const juce::String& text)
-            {
-                if (text.isNotEmpty())
-                {
-                    cells[static_cast<size_t>(cellIndex)].velocity =
-                        juce::jlimit(0.0f, 1.0f, text.getFloatValue());
-                    repaint();
-                    if (onCellsChanged) onCellsChanged();
-                }
-            });
+        juce::String text;
+        if (promptTextInput("Set Velocity",
+                            "Enter velocity (0.0 - 1.0):",
+                            juce::String(cell.velocity),
+                            text)
+            && text.isNotEmpty())
+        {
+            cells[static_cast<size_t>(cellIndex)].velocity =
+                juce::jlimit(0.0f, 1.0f, text.getFloatValue());
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
         return;
     }
 
     if (result == 2)
     {
-        juce::AlertWindow::showInputBoxAsync(
-            "Set Probability", "Enter probability (0.0 – 1.0):",
-            juce::String(cell.probability), nullptr,
-            [this, cellIndex](const juce::String& text)
-            {
-                if (text.isNotEmpty())
-                {
-                    cells[static_cast<size_t>(cellIndex)].probability =
-                        juce::jlimit(0.0f, 1.0f, text.getFloatValue());
-                    repaint();
-                    if (onCellsChanged) onCellsChanged();
-                }
-            });
+        juce::String text;
+        if (promptTextInput("Set Probability",
+                            "Enter probability (0.0 - 1.0):",
+                            juce::String(cell.probability),
+                            text)
+            && text.isNotEmpty())
+        {
+            cells[static_cast<size_t>(cellIndex)].probability =
+                juce::jlimit(0.0f, 1.0f, text.getFloatValue());
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
         return;
     }
 
@@ -510,9 +579,63 @@ void ChordGridView::showCellContextMenu(int cellIndex, juce::Point<int> screenPo
     else if (result == 403) divideCells(cellIndex, 4);
     else if (result == 500) cell.muted    = !cell.muted;
     else if (result == 501) cell.accented = !cell.accented;
+    else if (result == 700)
+    {
+        auto copy = cell;
+        copy.cellId = juce::Uuid().toString();
+        cells.insert(cells.begin() + cellIndex + 1, copy);
+    }
+    else if (result == 701)
+    {
+        juce::String text;
+        if (promptTextInput("Transpose Cell",
+                            "Enter semitone offset (+/-):",
+                            "0",
+                            text)
+            && text.isNotEmpty())
+        {
+            auto& c = cells[static_cast<size_t>(cellIndex)];
+            c.midiNote = juce::jlimit(0, 127, c.midiNote + juce::jlimit(-48, 48, text.getIntValue()));
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
+        return;
+    }
+    else if (result == 702)
+    {
+        juce::String text;
+        if (promptTextInput("Set Swing",
+                            "Enter swing amount (-1.0 to 1.0):",
+                            juce::String(cell.swing),
+                            text)
+            && text.isNotEmpty())
+        {
+            cells[static_cast<size_t>(cellIndex)].swing =
+                juce::jlimit(-1.0f, 1.0f, text.getFloatValue());
+            repaint();
+            if (onCellsChanged) onCellsChanged();
+        }
+        return;
+    }
+    else if (result == 703)
+    {
+        cell.swing = (std::abs(cell.swing) < 0.0001f) ? 0.15f : 0.0f;
+    }
+    else if (result == 704)
+    {
+        if (onOpenNoteDetail)
+            onOpenNoteDetail(cellIndex);
+        return;
+    }
+    else if (result == 705)
+    {
+        if (onStatusMessage)
+            onStatusMessage("Assign FX Block is available in the FX tab workflow.");
+        return;
+    }
     else if (result == 600)
     {
-        cells.erase(cells.begin() + cellIndex);
+        cells.erase(cells.begin() + static_cast<size_t>(cellIndex));
         if (selectedCellIndex >= static_cast<int>(cells.size()))
             selectedCellIndex = static_cast<int>(cells.size()) - 1;
     }
@@ -584,7 +707,26 @@ void ChordGridView::showAddChordPopover(juce::Point<int> screenPos)
     menu.addSeparator();
     menu.addItem(20, "Type chord symbol...");
 
-    const int result = menu.showAt(juce::Rectangle<int>(screenPos.getX(), screenPos.getY(), 1, 1));
+    auto safeThis = juce::Component::SafePointer<ChordGridView>(this);
+    menu.showMenuAsync(
+        juce::PopupMenu::Options().withTargetScreenArea(
+            juce::Rectangle<int>(screenPos.getX(), screenPos.getY(), 1, 1)),
+        [safeThis, rootSemitone](int result)
+        {
+            if (safeThis != nullptr)
+                safeThis->handleAddChordPopoverResult(result, rootSemitone);
+        });
+}
+
+void ChordGridView::handleAddChordPopoverResult(int result, int rootSemitone)
+{
+    if (result == 0)
+        return;
+
+    static const juce::String degrees[]    = { "I", "ii", "iii", "IV", "V", "vi", "vii°" };
+    static const int          semitones[]  = {  0,   2,    4,    5,   7,   9,    11 };
+    static const juce::String qualities[]  = { "maj", "min", "min", "maj", "maj", "min", "dim" };
+    static const juce::String noteNames[]  = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
 
     if (result >= 1 && result <= 7)
     {
@@ -615,31 +757,30 @@ void ChordGridView::showAddChordPopover(juce::Point<int> screenPos)
     }
     else if (result == 20)
     {
-        juce::AlertWindow::showInputBoxAsync(
-            "Add Chord", "Enter chord symbol (e.g. Dm7, G#maj9):", "",
-            nullptr,
-            [this](const juce::String& sym)
-            {
-                if (sym.isNotEmpty())
-                {
-                    GridRollCell cell;
-                    cell.cellId        = juce::Uuid().toString();
-                    cell.sourceId      = progressionId;
-                    cell.startBeat     = totalBeats();
-                    cell.durationBeats = 1.0;
-                    cell.type          = GridRollCell::CellType::Chord;
-                    cell.chordSymbol   = sym;
-                    cells.push_back(std::move(cell));
+        juce::String sym;
+        if (promptTextInput("Add Chord",
+                            "Enter chord symbol (e.g. Dm7, G#maj9):",
+                            {},
+                            sym)
+            && sym.isNotEmpty())
+        {
+            GridRollCell cell;
+            cell.cellId        = juce::Uuid().toString();
+            cell.sourceId      = progressionId;
+            cell.startBeat     = totalBeats();
+            cell.durationBeats = 1.0;
+            cell.type          = GridRollCell::CellType::Chord;
+            cell.chordSymbol   = sym;
+            cells.push_back(std::move(cell));
 
-                    rebuildLayoutCache();
-                    repaint();
+            rebuildLayoutCache();
+            repaint();
 
-                    if (onAddChordRequested)
-                        onAddChordRequested(sym);
-                    if (onCellsChanged)
-                        onCellsChanged();
-                }
-            });
+            if (onAddChordRequested)
+                onAddChordRequested(sym);
+            if (onCellsChanged)
+                onCellsChanged();
+        }
     }
 }
 

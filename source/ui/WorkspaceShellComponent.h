@@ -22,6 +22,7 @@
 #include "../theme/ThemeManager.h"
 #include "ProgressionLibraryBrowser.h"
 #include "ProgressionChordPalette.h"
+#include "ToolPaletteComponent.h"
 
 namespace te = tracktion::engine;
 
@@ -29,6 +30,7 @@ namespace setle::ui
 {
 
 class WorkspaceShellComponent final : public juce::Component,
+                                      public juce::DragAndDropContainer,
                                       private juce::Timer,
                                       public ThemeManager::Listener
 {
@@ -123,7 +125,12 @@ private:
 
     juce::String summarizeSongState() const;
 
+    // Meter-aware snap calculation helper
+    double getSnapBeats(double atBeat) const;
+
     void refreshTimelineData();
+    void refreshTheoryLanes() { refreshTimelineData(); }
+    void syncTimeSignaturesToEdit();
     void ensureInstrumentSlots();
     void applyPersistedInstrumentSlotAssignments();
     void persistInstrumentSlotAssignments();
@@ -153,6 +160,7 @@ private:
     std::unique_ptr<OutPanelHost> outPanelHost;
     TimelineShell* timelineShell;
     setle::timeline::TimelineTracksComponent* timelineTracks { nullptr };
+    std::unique_ptr<ToolPaletteComponent> toolPalette;
 
     DragBar* leftResizeBar;
     DragBar* rightResizeBar;
@@ -162,6 +170,7 @@ private:
     juce::TextButton stopButton   { juce::CharPointer_UTF8("\xe2\x96\xa0") };  // ■
     juce::TextButton recordButton { juce::CharPointer_UTF8("\xe2\x97\x8f") };  // ●
     juce::Label     bpmLabel;
+    juce::Label     transportPositionLabel;
     juce::TextEditor bpmEditor;
     juce::Label captureSourceLabel;
     juce::ComboBox captureSourceSelector;

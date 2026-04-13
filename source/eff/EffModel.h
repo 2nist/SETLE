@@ -71,6 +71,10 @@ struct EffDefinition
         juce::String blockId;
         juce::String paramId;
         juce::String macroLabel;
+        int midiCC { -1 };      // -1 = unassigned
+        int midiChannel { 0 };  // 0 = any channel
+        float rangeMin { 0.0f };
+        float rangeMax { 1.0f };
     };
 
     std::vector<MacroAssignment> macros;
