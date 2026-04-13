@@ -2405,6 +2405,10 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
             refreshTimelineData();
             captureUndoStateIfChanged(snapshot);
         };
+        gridRollComponent->onPrepareProgressionForNoteMode = [this](const juce::String& progId)
+        {
+            ensureProgressionLoadedForNoteMode(progId);
+        };
         gridRollComponent->onStatusMessage = [this](const juce::String& msg)
         {
             interactionStatus.setText(msg, juce::dontSendNotification);
@@ -2913,7 +2917,11 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
     if (gridRollComponent != nullptr)
     {
         if (tabIndex == 1)
+        {
             gridRollComponent->setTheorySnap(theorySnap);
+            ensureProgressionLoadedForNoteMode(selectedProgressionId);
+            gridRollComponent->refreshNoteModeCache();
+        }
         gridRollComponent->setVisible(tabIndex == 1);
     }
 
@@ -5954,6 +5962,42 @@ void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progress
     {
         gridRollComponent->refreshNoteModeCache();
     }
+}
+
+void WorkspaceShellComponent::ensureProgressionLoadedForNoteMode(const juce::String& progressionId)
+{
+    if (progressionId.isEmpty() || edit == nullptr)
+        return;
+
+    bool hasClipWithNotes = false;
+    for (auto* track : te::getAudioTracks(*edit))
+    {
+        if (track == nullptr)
+            continue;
+
+        for (auto* clipBase : track->getClips())
+        {
+            auto* midiClip = dynamic_cast<te::MidiClip*>(clipBase);
+            if (midiClip == nullptr)
+                continue;
+
+            const auto clipPropId = midiClip->state.getProperty("progressionId").toString();
+            if (clipPropId != progressionId && midiClip->getName() != progressionId)
+                continue;
+
+            if (!midiClip->getSequence().getNotes().isEmpty())
+            {
+                hasClipWithNotes = true;
+                break;
+            }
+        }
+
+        if (hasClipWithNotes)
+            break;
+    }
+
+    if (!hasClipWithNotes)
+        loadProgressionToEdit(progressionId, 0.0, true, nullptr);
 }
 
 void WorkspaceShellComponent::resized()

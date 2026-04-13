@@ -47,6 +47,9 @@ public:
     /** Called when a chord edit should be persisted back to the model. */
     std::function<void(const juce::String& progressionId)> onProgressionEdited;
 
+    /** Called before Note Mode cache binding, so host can ensure TE clip data exists. */
+    std::function<void(const juce::String& progressionId)> onPrepareProgressionForNoteMode;
+
     /** Called when a status message should be shown. */
     std::function<void(const juce::String&)> onStatusMessage;
 

@@ -1,6 +1,7 @@
 #include "ChordGridView.h"
 #include "../theme/ThemeManager.h"
 #include "../theme/ThemeStyleHelpers.h"
+#include "../theory/DiatonicHarmony.h"
 
 #include <algorithm>
 #include <cmath>
@@ -779,11 +780,9 @@ void ChordGridView::showAddChordPopover(juce::Point<int> screenPos)
     static const int          semitones[]  = {  0,   2,    4,    5,   7,   9,    11 };
     static const juce::String qualities[]  = { "maj", "min", "min", "maj", "maj", "min", "dim" };
 
-    // Root semitone from note name
+    // Root semitone from session key (supports sharps/flats).
     static const juce::String noteNames[] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
-    int rootSemitone = 0;
-    for (int i = 0; i < 12; ++i)
-        if (noteNames[i].equalsIgnoreCase(key)) { rootSemitone = i; break; }
+    const int rootSemitone = setle::theory::DiatonicHarmony::pitchClassForRoot(key);
 
     for (int deg = 0; deg < 7; ++deg)
     {
@@ -835,6 +834,7 @@ void ChordGridView::handleAddChordPopoverResult(int result, int rootSemitone)
         cell.chordFunction = (deg == 0 || deg == 5) ? "T" :
                              (deg == 1 || deg == 3) ? "PD" : "D";
         cell.romanNumeral  = degrees[deg];
+        cell.midiNote      = 60 + noteIdx;
         cells.push_back(std::move(cell));
 
         rebuildLayoutCache();

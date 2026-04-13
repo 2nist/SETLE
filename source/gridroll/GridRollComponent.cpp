@@ -145,6 +145,9 @@ void GridRollComponent::setTargetProgression(const juce::String& id)
 {
     progressionId = id;
 
+    if (onPrepareProgressionForNoteMode != nullptr && id.isNotEmpty())
+        onPrepareProgressionForNoteMode(id);
+
     auto progOpt = song.findProgressionById(id);
     if (progOpt.has_value())
     {

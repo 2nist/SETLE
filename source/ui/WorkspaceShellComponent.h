@@ -98,6 +98,7 @@ private:
                                double startTimeSeconds,
                                bool preferNonSystemTrack,
                                te::Track* preferredTrack = nullptr);
+    void ensureProgressionLoadedForNoteMode(const juce::String& progressionId);
     juce::File getSongStateFile() const;
     void loadSongState();
     void seedSongStateIfNeeded();
