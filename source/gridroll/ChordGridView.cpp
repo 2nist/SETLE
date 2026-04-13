@@ -1,5 +1,6 @@
 #include "ChordGridView.h"
 #include "../theme/ThemeManager.h"
+#include "../theme/ThemeStyleHelpers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -35,8 +36,10 @@ ChordGridView::ChordGridView(model::Song& songRef)
 {
     addAndMakeVisible(addChordButton);
     const auto& theme = ThemeManager::get().theme();
-    addChordButton.setColour(juce::TextButton::buttonColourId, theme.controlBg);
-    addChordButton.setColour(juce::TextButton::textColourOffId, theme.controlText.withAlpha(0.9f));
+    const auto addBtnStyle = setle::theme::chipStyle(theme, setle::theme::SurfaceState::normal, theme.zoneB);
+    addChordButton.setColour(juce::TextButton::buttonColourId, addBtnStyle.fill);
+    addChordButton.setColour(juce::TextButton::textColourOffId, addBtnStyle.text.withAlpha(0.95f));
+    addChordButton.setColour(juce::TextButton::buttonOnColourId, addBtnStyle.fill.brighter(0.12f));
     addChordButton.onClick = [this]
     {
         showAddChordPopover(addChordButton.getScreenBounds().getBottomLeft());
@@ -192,11 +195,9 @@ void ChordGridView::paintCell(juce::Graphics& g,
     const auto base = functionColour(cell.chordFunction);
     const auto body = bounds.toFloat().reduced(1.0f);
     const float pulse = 0.5f + 0.5f * std::sin(pulsePhase);
+    const auto blockStyle = setle::theme::progressionBlockStyle(theme, selected, active, base);
 
-    juce::Colour bg = theme.surface3.interpolatedWith(base, 0.38f);
-    if (active)
-        bg = bg.brighter(0.20f);
-    g.setColour(bg);
+    g.setColour(blockStyle.fill);
     g.fillRoundedRectangle(body, 4.0f);
 
     // Keep function tint behavior from the existing implementation.
@@ -211,13 +212,13 @@ void ChordGridView::paintCell(juce::Graphics& g,
 
     if (selected)
     {
-        g.setColour(theme.accent);
+        g.setColour(blockStyle.outline);
         g.drawRoundedRectangle(body, 4.0f, 2.0f);
     }
     else
     {
-        g.setColour(theme.surfaceEdge.withAlpha(0.55f));
-        g.drawRoundedRectangle(body, 4.0f, 1.0f);
+        g.setColour(blockStyle.outline.withAlpha(0.75f));
+        g.drawRoundedRectangle(body, 4.0f, setle::theme::stroke(theme, setle::theme::StrokeRole::subtle));
     }
 
     if (active)
@@ -236,7 +237,7 @@ void ChordGridView::paintCell(juce::Graphics& g,
     juce::String leftText = cell.romanNumeral.isNotEmpty() ? cell.romanNumeral : "-";
     if (fn.isNotEmpty())
         leftText << "  [" << fn << "]";
-    g.setColour(theme.inkLight.withAlpha(0.92f));
+    g.setColour(blockStyle.label.withAlpha(0.95f));
     g.setFont(juce::FontOptions(11.0f).withStyle("Bold"));
     g.drawText(leftText, topRow.removeFromLeft(juce::jmax(36, topRow.getWidth() - 72)),
                juce::Justification::centredLeft, true);
@@ -250,11 +251,11 @@ void ChordGridView::paintCell(juce::Graphics& g,
             rightText << "  ";
         rightText << juce::String(juce::roundToInt(cell.probability * 100.0f)) << "%";
     }
-    g.setColour(theme.inkLight.withAlpha(0.78f));
+    g.setColour(blockStyle.subtitle.withAlpha(0.95f));
     g.setFont(juce::FontOptions(10.0f));
     g.drawText(rightText, topRow, juce::Justification::centredRight, false);
 
-    g.setColour(theme.inkLight.withAlpha(0.96f));
+    g.setColour(blockStyle.label.withAlpha(0.98f));
     g.setFont(juce::FontOptions(std::min(22.0f, static_cast<float>(symbolArea.getHeight()) * 0.75f)).withStyle("Bold"));
     g.drawText(cell.chordSymbol, symbolArea, juce::Justification::centred, true);
 
@@ -269,12 +270,12 @@ void ChordGridView::paintCell(juce::Graphics& g,
             case GridRollCell::ArpMode::Random: arpText += "Random"; break;
             case GridRollCell::ArpMode::Off: break;
         }
-        g.setColour(theme.inkMid.withAlpha(0.92f));
+        g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::muted).withAlpha(0.96f));
         g.setFont(juce::FontOptions(10.5f));
         g.drawText(arpText, arpRow, juce::Justification::centredLeft, true);
     }
 
-    g.setColour(theme.surfaceEdge.withAlpha(0.45f));
+    g.setColour(setle::theme::timelineGridLine(theme, false).withAlpha(0.70f));
     g.fillRect(velocityStrip);
     auto filledVelocity = velocityStrip.withWidth(static_cast<int>(velocityStrip.getWidth() * juce::jlimit(0.0f, 1.0f, cell.velocity)));
     g.setColour(base.brighter(0.35f).withAlpha(0.9f));
@@ -321,7 +322,7 @@ void ChordGridView::paintCell(juce::Graphics& g,
 void ChordGridView::paint(juce::Graphics& g)
 {
     const auto& theme = ThemeManager::get().theme();
-    g.fillAll(theme.surface2);
+    g.fillAll(setle::theme::panelBackground(theme, setle::theme::ZoneRole::timeline));
 
     // Beat grid lines (denominator unit spacing)
     const double bpp = beatsPerPixel();
@@ -329,14 +330,14 @@ void ChordGridView::paint(juce::Graphics& g)
     const double beatUnit = meterContext.beatUnit();
     const double barSize  = meterContext.beatsPerBar();
 
-    g.setColour(theme.inkLight.withAlpha(0.14f));
+    g.setColour(setle::theme::timelineGridLine(theme, false));
     for (double beat = 0.0; beat <= total + 0.0001; beat += beatUnit)
     {
         const int x = static_cast<int>(beat / bpp);
         g.fillRect(x, 0, 1, getHeight());
     }
 
-    g.setColour(theme.inkLight.withAlpha(0.30f));
+    g.setColour(setle::theme::timelineGridLine(theme, true));
     for (double beat = 0.0; beat <= total + 0.0001; beat += barSize)
     {
         const int x = static_cast<int>(beat / bpp);
@@ -359,7 +360,7 @@ void ChordGridView::paint(juce::Graphics& g)
 
         if (i + 1 < cellBounds.size())
         {
-            g.setColour(theme.surfaceEdge.withAlpha(0.85f));
+            g.setColour(setle::theme::timelineGridLine(theme, true).withAlpha(0.90f));
             g.fillRect(cellBounds[i].getRight() - 1, 0, 1, getHeight());
         }
 
@@ -381,7 +382,7 @@ void ChordGridView::paint(juce::Graphics& g)
     else if (theorySnap == "halfBeat")
         snapLabel = (std::abs(meterContext.beatUnit() - 0.5) < 0.001) ? "1/16" : "1/8";
 
-    g.setColour(theme.inkMuted.withAlpha(0.85f));
+    g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::muted).withAlpha(0.96f));
     g.setFont(juce::FontOptions(11.0f));
     g.drawText("Snap: " + snapLabel,
                6, 4, 96, 14,

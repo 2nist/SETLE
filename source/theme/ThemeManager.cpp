@@ -271,6 +271,16 @@ juce::File ThemeManager::getCurrentThemeFile() const
     return getUserThemeDir().getChildFile("current-theme.setle-theme");
 }
 
+void ThemeManager::setPreviewHighlightToken(const juce::String& token)
+{
+    const auto trimmed = token.trim();
+    if (previewHighlightToken == trimmed)
+        return;
+
+    previewHighlightToken = trimmed;
+    listeners.call(&Listener::themePreviewTargetChanged, previewHighlightToken);
+}
+
 void ThemeManager::timerCallback()
 {
     stopTimer();

@@ -42,6 +42,7 @@ public:
     void mouseDown(const juce::MouseEvent& event) override;
     void resized() override;
     void themeChanged() override;
+    void themePreviewTargetChanged(const juce::String& token) override;
 
 private:
     class LabelPanel;
@@ -144,6 +145,8 @@ private:
     void timerCallback() override;
     void repaintEntireTree();
     void showThemeEditor(bool shouldShow);
+    juce::Rectangle<int> highlightBoundsForThemeToken(const juce::String& token) const;
+    void drawThemePreviewHighlight(juce::Graphics& g) const;
 
     // FX chain persistence
     juce::File getEffectsFolder() const;

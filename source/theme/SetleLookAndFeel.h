@@ -92,29 +92,87 @@ public:
     {
         const auto& t = ThemeManager::get().theme();
         const auto bounds = button.getLocalBounds();
+        const bool enabled = button.isEnabled();
+        const bool toggled = button.getToggleState();
 
-        const int boxSize = juce::jlimit(12, 20, bounds.getHeight() - 6);
-        const auto boxBounds = bounds.withSizeKeepingCentre(boxSize, boxSize).withX(3);
+        const int preferredSwitchWidth = juce::roundToInt(t.switchWidth);
+        const int preferredSwitchHeight = juce::roundToInt(t.switchHeight);
+        const int switchWidth = juce::jlimit(12, juce::jmax(12, bounds.getWidth() / 2), preferredSwitchWidth);
+        const int switchHeight = juce::jlimit(8, juce::jmax(8, bounds.getHeight() - 4), preferredSwitchHeight);
+        const bool canUseSwitch = switchWidth >= 12 && switchHeight >= 8;
 
-        drawTickBox(g,
-                    button,
-                    static_cast<float>(boxBounds.getX()),
-                    static_cast<float>(boxBounds.getY()),
-                    static_cast<float>(boxBounds.getWidth()),
-                    static_cast<float>(boxBounds.getHeight()),
-                    button.getToggleState(),
-                    button.isEnabled(),
-                    highlighted,
-                    down);
+        const auto switchBounds = juce::Rectangle<float>(3.0f,
+                                                         (bounds.getHeight() - static_cast<float>(switchHeight)) * 0.5f,
+                                                         static_cast<float>(switchWidth),
+                                                         static_cast<float>(switchHeight));
+
+        if (canUseSwitch)
+        {
+            auto trackColour = toggled ? t.controlOnBg : t.controlBg;
+            if (highlighted)
+                trackColour = trackColour.brighter(0.06f);
+            if (down)
+                trackColour = trackColour.brighter(0.1f);
+            if (!enabled)
+                trackColour = trackColour.withMultipliedSaturation(0.35f).withAlpha(0.68f);
+
+            const auto corner = juce::jlimit(1.0f,
+                                             switchBounds.getHeight() * 0.5f,
+                                             t.switchCornerRadius);
+            g.setColour(trackColour);
+            g.fillRoundedRectangle(switchBounds, corner);
+
+            auto border = t.surfaceEdge.withAlpha(juce::jlimit(0.08f, 1.0f, t.btnBorderStrength));
+            if (toggled)
+                border = border.interpolatedWith(t.accent, 0.45f);
+            if (!enabled)
+                border = border.withAlpha(0.35f);
+            g.setColour(border);
+            g.drawRoundedRectangle(switchBounds, corner, juce::jmax(0.6f, t.strokeNormal));
+
+            const auto inset = juce::jlimit(0.0f, switchBounds.getHeight() * 0.35f, t.switchThumbInset);
+            const auto thumbDiameter = juce::jmax(4.0f, switchBounds.getHeight() - inset * 2.0f);
+            const auto minX = switchBounds.getX() + inset + thumbDiameter * 0.5f;
+            const auto maxX = switchBounds.getRight() - inset - thumbDiameter * 0.5f;
+            const auto thumbX = toggled ? maxX : minX;
+            const auto thumbCenter = juce::Point<float>(thumbX, switchBounds.getCentreY());
+
+            auto thumb = t.sliderThumb;
+            if (highlighted)
+                thumb = thumb.brighter(0.07f);
+            if (!enabled)
+                thumb = thumb.withAlpha(0.52f);
+
+            g.setColour(thumb);
+            g.fillEllipse(juce::Rectangle<float>(thumbDiameter, thumbDiameter).withCentre(thumbCenter));
+            g.setColour(t.surfaceEdge.withAlpha(enabled ? 0.85f : 0.35f));
+            g.drawEllipse(juce::Rectangle<float>(thumbDiameter, thumbDiameter).withCentre(thumbCenter),
+                          juce::jmax(0.6f, t.strokeSubtle));
+        }
+        else
+        {
+            const int boxSize = juce::jlimit(12, 20, bounds.getHeight() - 6);
+            const auto boxBounds = bounds.withSizeKeepingCentre(boxSize, boxSize).withX(3);
+            drawTickBox(g,
+                        button,
+                        static_cast<float>(boxBounds.getX()),
+                        static_cast<float>(boxBounds.getY()),
+                        static_cast<float>(boxBounds.getWidth()),
+                        static_cast<float>(boxBounds.getHeight()),
+                        toggled,
+                        enabled,
+                        highlighted,
+                        down);
+        }
 
         g.setFont(juce::FontOptions(t.sizeLabel));
-        auto textColour = button.getToggleState() ? t.controlTextOn : t.controlText;
-        if (!button.isEnabled())
+        auto textColour = toggled ? t.controlTextOn : t.controlText;
+        if (!enabled)
             textColour = t.inkGhost.withAlpha(0.62f);
 
         g.setColour(textColour);
         g.drawText(button.getButtonText(),
-                   bounds.withTrimmedLeft(boxBounds.getRight() + 6),
+                   bounds.withTrimmedLeft(static_cast<int>(switchBounds.getRight()) + 6),
                    juce::Justification::centredLeft,
                    true);
 

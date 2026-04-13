@@ -1,6 +1,7 @@
 #include "DrumGridView.h"
 #include "DrumPatternMidiReader.h"
 #include "../theme/ThemeManager.h"
+#include "../theme/ThemeStyleHelpers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -40,13 +41,15 @@ static bool promptTextInput(const juce::String& title,
 DrumGridView::DrumGridView()
 {
     addAndMakeVisible(fillButton);
-    fillButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
-    fillButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.8f));
+    const auto& theme = ThemeManager::get().theme();
+    const auto fillChip = setle::theme::chipStyle(theme, setle::theme::SurfaceState::normal, theme.zoneD);
+    fillButton.setColour(juce::TextButton::buttonColourId, fillChip.fill);
+    fillButton.setColour(juce::TextButton::textColourOffId, fillChip.text.withAlpha(0.92f));
+    fillButton.setColour(juce::TextButton::buttonOnColourId,
+                         setle::theme::chipStyle(theme, setle::theme::SurfaceState::selected, theme.zoneD).fill);
     fillButton.onClick = [this]
     {
         setFillMode(!fillModeActive);
-        fillButton.setColour(juce::TextButton::buttonColourId,
-                             fillModeActive ? juce::Colour(0xff6633aa) : juce::Colour(0xff2a3040));
     };
 
     addAndMakeVisible(subdivSelector);
@@ -241,6 +244,13 @@ void DrumGridView::ensureSteps(DrumRow& row)
 void DrumGridView::setFillMode(bool active)
 {
     fillModeActive = active;
+    const auto& theme = ThemeManager::get().theme();
+    const auto chip = setle::theme::chipStyle(theme,
+                                               fillModeActive ? setle::theme::SurfaceState::selected
+                                                              : setle::theme::SurfaceState::normal,
+                                               theme.zoneD);
+    fillButton.setColour(juce::TextButton::buttonColourId, chip.fill);
+    fillButton.setColour(juce::TextButton::textColourOffId, chip.text.withAlpha(0.95f));
     repaint();
 }
 
@@ -440,13 +450,17 @@ void DrumGridView::paintHeader(juce::Graphics& g, int rowIndex, juce::Rectangle<
     const auto& row = rows[static_cast<size_t>(rowIndex)];
     const auto& theme = ThemeManager::get().theme();
     const juce::Colour col = rowColour(row.midiNote);
+    const auto headerStyle = setle::theme::rowStyle(theme,
+                                                     row.muted ? setle::theme::SurfaceState::muted
+                                                               : setle::theme::SurfaceState::normal);
 
-    g.setColour(theme.surface2);
-    g.fillRect(bounds);
+    g.setColour(headerStyle.fill);
+    g.fillRoundedRectangle(bounds.toFloat().reduced(0.5f),
+                           setle::theme::radius(theme, setle::theme::RadiusRole::xs));
     g.setColour(col.withAlpha(0.92f));
     g.fillRect(bounds.removeFromLeft(3));
 
-    g.setColour(theme.inkMid.withAlpha(0.95f));
+    g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::muted).withAlpha(0.98f));
     g.setFont(juce::FontOptions(12.0f));
     g.drawText(row.name,
                bounds.getX() + 6, bounds.getY(), 72, bounds.getHeight(),
@@ -456,12 +470,20 @@ void DrumGridView::paintHeader(juce::Graphics& g, int rowIndex, juce::Rectangle<
     juce::Rectangle<int> mBtn(bounds.getRight() - 38, bounds.getCentreY() - 8, 16, 16);
     juce::Rectangle<int> sBtn(bounds.getRight() - 20, bounds.getCentreY() - 8, 16, 16);
 
-    g.setColour(row.muted ? theme.accentWarm.withAlpha(0.9f) : theme.surface3);
-    g.fillRect(mBtn);
-    g.setColour(row.soloed ? theme.zoneD.withAlpha(0.95f) : theme.surface3);
-    g.fillRect(sBtn);
+    const auto muteChip = setle::theme::chipStyle(theme,
+                                                   row.muted ? setle::theme::SurfaceState::warning
+                                                             : setle::theme::SurfaceState::normal,
+                                                   theme.accentWarm);
+    g.setColour(muteChip.fill);
+    g.fillRoundedRectangle(mBtn.toFloat(), 2.5f);
+    const auto soloChip = setle::theme::chipStyle(theme,
+                                                   row.soloed ? setle::theme::SurfaceState::selected
+                                                              : setle::theme::SurfaceState::normal,
+                                                   theme.zoneD);
+    g.setColour(soloChip.fill);
+    g.fillRoundedRectangle(sBtn.toFloat(), 2.5f);
 
-    g.setColour(theme.inkLight.withAlpha(0.90f));
+    g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::primary).withAlpha(0.94f));
     g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
     g.drawText("M", mBtn, juce::Justification::centred, false);
     g.drawText("S", sBtn, juce::Justification::centred, false);
@@ -475,7 +497,10 @@ void DrumGridView::paintRow(juce::Graphics& g, int rowIndex)
     const int total = row.steps * row.patternBars;
 
     // Background
-    g.setColour(theme.surface1);
+    const auto rowStyle = setle::theme::rowStyle(theme,
+                                                  row.muted ? setle::theme::SurfaceState::muted
+                                                            : setle::theme::SurfaceState::normal);
+    g.setColour(rowStyle.fill);
     g.fillRect(grid);
 
     // Beat separator lines + meter-group emphasis.
@@ -488,7 +513,7 @@ void DrumGridView::paintRow(juce::Graphics& g, int rowIndex)
         else if (isBeatGroupStart(row, i))
             alpha = 0.16f;
 
-        g.setColour(theme.surfaceEdge.withAlpha(alpha));
+        g.setColour(setle::theme::timelineGridLine(theme, i % juce::jmax(1, row.steps) == 0).withAlpha(alpha + 0.08f));
         g.fillRect(x, grid.getY(), 1, kRowHeight);
     }
 
@@ -499,7 +524,7 @@ void DrumGridView::paintRow(juce::Graphics& g, int rowIndex)
         const auto bounds = stepCellBounds(rowIndex, s);
         if (isBeatGroupStart(row, s))
         {
-            g.setColour(theme.surface3.withAlpha(0.22f));
+            g.setColour(setle::theme::stateOverlay(theme, setle::theme::SurfaceState::hovered).withAlpha(0.65f));
             g.fillRect(bounds);
         }
 
@@ -537,10 +562,10 @@ void DrumGridView::paintRow(juce::Graphics& g, int rowIndex)
 void DrumGridView::paint(juce::Graphics& g)
 {
     const auto& theme = ThemeManager::get().theme();
-    g.fillAll(theme.surface0);
+    g.fillAll(setle::theme::panelBackground(theme, setle::theme::ZoneRole::timeline));
 
     // Top controls area
-    g.setColour(theme.surface2);
+    g.setColour(setle::theme::panelHeaderBackground(theme, setle::theme::ZoneRole::timeline));
     g.fillRect(0, 0, getWidth(), kHeaderControlH);
 
     // LCM cycle indicator
@@ -553,7 +578,7 @@ void DrumGridView::paint(juce::Graphics& g)
             const int n = row.steps * row.patternBars;
             lcm = std::lcm(lcm, n);
         }
-        g.setColour(theme.inkMuted.withAlpha(0.7f));
+        g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::muted).withAlpha(0.94f));
         g.setFont(juce::FontOptions(11.0f));
         g.drawText("Cycle: " + juce::String(lcm) + " steps",
                    getWidth() - 120, 4, 116, 16,

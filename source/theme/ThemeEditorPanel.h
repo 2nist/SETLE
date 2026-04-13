@@ -17,11 +17,14 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+    void mouseMove(const juce::MouseEvent& event) override;
+    void mouseExit(const juce::MouseEvent&) override;
 
     void refreshControls();
 
 private:
     class PreviewArea;
+    class PreviewWindow;
 
     void themeChanged() override;
 
@@ -45,6 +48,9 @@ private:
     void revertUnsavedChanges();
     void exportThemeToFile();
     void importThemeFromFile();
+    void showPreviewWindow(bool shouldShow);
+    void setPreviewTargetToken(const juce::String& token);
+    void clearPreviewTargetToken();
 
     static juce::String colourToHexRgb(juce::Colour colour);
     static std::optional<juce::Colour> parseHexColour(const juce::String& text);
@@ -88,11 +94,13 @@ private:
     juce::TextButton revertButton { "Revert" };
     juce::TextButton exportButton { "Export" };
     juce::TextButton importButton { "Import" };
+    juce::TextButton previewWindowButton { "Live Preview" };
     juce::TextButton resetThemeButton { "Reset" };
 
     juce::Viewport viewport;
     juce::Component content;
     std::unique_ptr<PreviewArea> previewArea;
+    std::unique_ptr<PreviewWindow> previewWindow;
 
     ThemeData baselineTheme;
     bool suppressCallbacks { false };

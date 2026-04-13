@@ -3,17 +3,176 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include <cmath>
+#include <functional>
 
 #include "ThemePresets.h"
 #include "ThemeStyleHelpers.h"
 #include "../state/AppPreferences.h"
 
+namespace
+{
+juce::String toHexRgb(juce::Colour colour)
+{
+    return "#" + juce::String::toHexString(colour.getRed()).paddedLeft('0', 2).toUpperCase()
+         + juce::String::toHexString(colour.getGreen()).paddedLeft('0', 2).toUpperCase()
+         + juce::String::toHexString(colour.getBlue()).paddedLeft('0', 2).toUpperCase();
+}
+
+std::optional<juce::Colour> tryParseRgbHex(const juce::String& text)
+{
+    auto hex = text.trim().retainCharacters("0123456789abcdefABCDEF");
+    if (hex.length() == 3)
+    {
+        juce::String expanded;
+        for (auto ch : hex)
+            expanded << juce::String::charToString(ch) << juce::String::charToString(ch);
+        hex = expanded;
+    }
+
+    if (hex.length() != 6)
+        return std::nullopt;
+
+    return juce::Colour::fromString("FF" + hex.toUpperCase());
+}
+
+juce::String colourTokenName(juce::Colour ThemeData::* member)
+{
+    if (member == &ThemeData::surface0) return "surface0";
+    if (member == &ThemeData::surface1) return "surface1";
+    if (member == &ThemeData::surface2) return "surface2";
+    if (member == &ThemeData::surface3) return "surface3";
+    if (member == &ThemeData::surface4) return "surface4";
+    if (member == &ThemeData::surfaceEdge) return "surfaceEdge";
+    if (member == &ThemeData::inkLight) return "inkLight";
+    if (member == &ThemeData::inkMid) return "inkMid";
+    if (member == &ThemeData::inkMuted) return "inkMuted";
+    if (member == &ThemeData::inkGhost) return "inkGhost";
+    if (member == &ThemeData::inkDark) return "inkDark";
+    if (member == &ThemeData::accent) return "accent";
+    if (member == &ThemeData::accentWarm) return "accentWarm";
+    if (member == &ThemeData::accentDim) return "accentDim";
+    if (member == &ThemeData::headerBg) return "headerBg";
+    if (member == &ThemeData::cardBg) return "cardBg";
+    if (member == &ThemeData::rowBg) return "rowBg";
+    if (member == &ThemeData::rowHover) return "rowHover";
+    if (member == &ThemeData::rowSelected) return "rowSelected";
+    if (member == &ThemeData::badgeBg) return "badgeBg";
+    if (member == &ThemeData::controlBg) return "controlBg";
+    if (member == &ThemeData::controlOnBg) return "controlOnBg";
+    if (member == &ThemeData::controlText) return "controlText";
+    if (member == &ThemeData::controlTextOn) return "controlTextOn";
+    if (member == &ThemeData::focusOutline) return "focusOutline";
+    if (member == &ThemeData::sliderTrack) return "sliderTrack";
+    if (member == &ThemeData::sliderThumb) return "sliderThumb";
+    if (member == &ThemeData::zoneA) return "zoneA";
+    if (member == &ThemeData::zoneB) return "zoneB";
+    if (member == &ThemeData::zoneC) return "zoneC";
+    if (member == &ThemeData::zoneD) return "zoneD";
+    if (member == &ThemeData::zoneMenu) return "zoneMenu";
+    if (member == &ThemeData::zoneBgA) return "zoneBgA";
+    if (member == &ThemeData::zoneBgB) return "zoneBgB";
+    if (member == &ThemeData::zoneBgC) return "zoneBgC";
+    if (member == &ThemeData::zoneBgD) return "zoneBgD";
+    if (member == &ThemeData::signalAudio) return "signalAudio";
+    if (member == &ThemeData::signalMidi) return "signalMidi";
+    if (member == &ThemeData::signalCv) return "signalCv";
+    if (member == &ThemeData::signalGate) return "signalGate";
+    if (member == &ThemeData::tapeBase) return "tapeBase";
+    if (member == &ThemeData::tapeClipBg) return "tapeClipBg";
+    if (member == &ThemeData::tapeClipBorder) return "tapeClipBorder";
+    if (member == &ThemeData::tapeSeam) return "tapeSeam";
+    if (member == &ThemeData::tapeBeatTick) return "tapeBeatTick";
+    if (member == &ThemeData::playheadColor) return "playheadColor";
+    if (member == &ThemeData::housingEdge) return "housingEdge";
+    return {};
+}
+
+juce::String floatTokenName(float ThemeData::* member)
+{
+    if (member == &ThemeData::sizeDisplay) return "sizeDisplay";
+    if (member == &ThemeData::sizeHeading) return "sizeHeading";
+    if (member == &ThemeData::sizeLabel) return "sizeLabel";
+    if (member == &ThemeData::sizeBody) return "sizeBody";
+    if (member == &ThemeData::sizeMicro) return "sizeMicro";
+    if (member == &ThemeData::sizeValue) return "sizeValue";
+    if (member == &ThemeData::sizeTransport) return "sizeTransport";
+    if (member == &ThemeData::spaceXs) return "spaceXs";
+    if (member == &ThemeData::spaceSm) return "spaceSm";
+    if (member == &ThemeData::spaceMd) return "spaceMd";
+    if (member == &ThemeData::spaceLg) return "spaceLg";
+    if (member == &ThemeData::spaceXl) return "spaceXl";
+    if (member == &ThemeData::spaceXxl) return "spaceXxl";
+    if (member == &ThemeData::menuBarHeight) return "menuBarHeight";
+    if (member == &ThemeData::zoneAWidth) return "zoneAWidth";
+    if (member == &ThemeData::zoneCWidth) return "zoneCWidth";
+    if (member == &ThemeData::zoneDNormHeight) return "zoneDNormHeight";
+    if (member == &ThemeData::moduleSlotHeight) return "moduleSlotHeight";
+    if (member == &ThemeData::stepHeight) return "stepHeight";
+    if (member == &ThemeData::stepWidth) return "stepWidth";
+    if (member == &ThemeData::knobSize) return "knobSize";
+    if (member == &ThemeData::radiusXs) return "radiusXs";
+    if (member == &ThemeData::radiusChip) return "radiusChip";
+    if (member == &ThemeData::radiusSm) return "radiusSm";
+    if (member == &ThemeData::radiusMd) return "radiusMd";
+    if (member == &ThemeData::radiusLg) return "radiusLg";
+    if (member == &ThemeData::strokeSubtle) return "strokeSubtle";
+    if (member == &ThemeData::strokeNormal) return "strokeNormal";
+    if (member == &ThemeData::strokeAccent) return "strokeAccent";
+    if (member == &ThemeData::strokeThick) return "strokeThick";
+    if (member == &ThemeData::btnCornerRadius) return "btnCornerRadius";
+    if (member == &ThemeData::btnBorderStrength) return "btnBorderStrength";
+    if (member == &ThemeData::btnFillStrength) return "btnFillStrength";
+    if (member == &ThemeData::btnOnFillStrength) return "btnOnFillStrength";
+    if (member == &ThemeData::sliderTrackThickness) return "sliderTrackThickness";
+    if (member == &ThemeData::sliderCornerRadius) return "sliderCornerRadius";
+    if (member == &ThemeData::sliderThumbSize) return "sliderThumbSize";
+    if (member == &ThemeData::knobRingThickness) return "knobRingThickness";
+    if (member == &ThemeData::knobCapSize) return "knobCapSize";
+    if (member == &ThemeData::knobDotSize) return "knobDotSize";
+    if (member == &ThemeData::switchWidth) return "switchWidth";
+    if (member == &ThemeData::switchHeight) return "switchHeight";
+    if (member == &ThemeData::switchCornerRadius) return "switchCornerRadius";
+    if (member == &ThemeData::switchThumbInset) return "switchThumbInset";
+    return {};
+}
+} // namespace
+
 class ThemeEditorPanel::PreviewArea final : public juce::Component
 {
 public:
+    class ScrollContent final : public juce::Component
+    {
+    public:
+        void paint(juce::Graphics& g) override
+        {
+            const auto& t = ThemeManager::get().theme();
+            g.fillAll(t.surface2.withAlpha(0.92f));
+
+            auto b = getLocalBounds();
+            for (int y = 0; y < b.getHeight(); y += 20)
+            {
+                g.setColour((y % 40 == 0 ? t.surfaceEdge : t.surfaceEdge.withAlpha(0.5f)).withAlpha(0.55f));
+                g.drawHorizontalLine(y, static_cast<float>(b.getX()), static_cast<float>(b.getRight()));
+            }
+
+            for (int x = 0; x < b.getWidth(); x += 28)
+            {
+                g.setColour((x % 112 == 0 ? t.surfaceEdge.withAlpha(0.85f) : t.surfaceEdge.withAlpha(0.38f)));
+                g.drawVerticalLine(x, static_cast<float>(b.getY()), static_cast<float>(b.getBottom()));
+            }
+
+            g.setColour(t.inkGhost.withAlpha(0.9f));
+            g.setFont(juce::FontOptions(9.0f));
+            g.drawText("Scrollable content area", b.reduced(8, 6), juce::Justification::topLeft, false);
+        }
+    };
+
     PreviewArea()
     {
         normalButton.setButtonText("Button");
+        armedButton.setButtonText("Armed");
+        armedButton.setClickingTogglesState(true);
+        armedButton.setToggleState(true, juce::dontSendNotification);
 
         disabledButton.setButtonText("Disabled");
         disabledButton.setEnabled(false);
@@ -37,12 +196,74 @@ public:
         combo.addItem("Option C", 3);
         combo.setSelectedId(2, juce::dontSendNotification);
 
+        disabledCombo.addItem("Offline", 1);
+        disabledCombo.addItem("Bypassed", 2);
+        disabledCombo.setSelectedId(1, juce::dontSendNotification);
+        disabledCombo.setEnabled(false);
+
+        verticalSlider.setSliderStyle(juce::Slider::LinearVertical);
+        verticalSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        verticalSlider.setRange(0.0, 1.0, 0.01);
+        verticalSlider.setValue(0.72, juce::dontSendNotification);
+
+        disabledSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+        disabledSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 50, 18);
+        disabledSlider.setRange(0.0, 1.0, 0.01);
+        disabledSlider.setValue(0.28, juce::dontSendNotification);
+        disabledSlider.setEnabled(false);
+
+        checkToggle.setButtonText("Snap");
+        checkToggle.setToggleState(true, juce::dontSendNotification);
+
+        modeToggle.setButtonText("Latch");
+        modeToggle.setToggleState(false, juce::dontSendNotification);
+
+        textEditor.setText("Clip Name", juce::dontSendNotification);
+        textEditor.setJustification(juce::Justification::centredLeft);
+
+        infoLabel.setText("Label Preview", juce::dontSendNotification);
+        infoLabel.setJustificationType(juce::Justification::centredLeft);
+        infoLabel.setColour(juce::Label::backgroundColourId, ThemeManager::get().theme().surface2.withAlpha(0.8f));
+        infoLabel.setColour(juce::Label::outlineColourId, ThemeManager::get().theme().surfaceEdge.withAlpha(0.75f));
+
+        tabbed.addTab("Clip", ThemeManager::get().theme().surface2, new juce::Component(), true);
+        tabbed.addTab("Mixer", ThemeManager::get().theme().surface2, new juce::Component(), true);
+        tabbed.addTab("Routing", ThemeManager::get().theme().surface2, new juce::Component(), true);
+        tabbed.setCurrentTabIndex(0);
+
+        menuPreviewButton.setButtonText("Menu Preview");
+        menuPreviewButton.onClick = [this]
+        {
+            juce::PopupMenu menu;
+            menu.addItem(1, "Add Note");
+            menu.addItem(2, "Quantize");
+            menu.addSeparator();
+            menu.addItem(3, "Freeze Track");
+            menu.addItem(4, "Delete", false, false);
+            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&menuPreviewButton));
+        };
+
+        viewportContent.setSize(720, 220);
+        viewport.setViewedComponent(&viewportContent, false);
+        viewport.setScrollBarsShown(true, true);
+
         addAndMakeVisible(normalButton);
+        addAndMakeVisible(armedButton);
         addAndMakeVisible(disabledButton);
         addAndMakeVisible(toggledButton);
         addAndMakeVisible(horizontalSlider);
+        addAndMakeVisible(disabledSlider);
         addAndMakeVisible(rotaryKnob);
+        addAndMakeVisible(verticalSlider);
         addAndMakeVisible(combo);
+        addAndMakeVisible(disabledCombo);
+        addAndMakeVisible(checkToggle);
+        addAndMakeVisible(modeToggle);
+        addAndMakeVisible(textEditor);
+        addAndMakeVisible(infoLabel);
+        addAndMakeVisible(tabbed);
+        addAndMakeVisible(menuPreviewButton);
+        addAndMakeVisible(viewport);
     }
 
     void refreshFromTheme()
@@ -50,12 +271,26 @@ public:
         const auto& t = ThemeManager::get().theme();
         normalButton.setColour(juce::TextButton::buttonColourId, t.controlBg);
         normalButton.setColour(juce::TextButton::textColourOffId, t.controlText);
+        armedButton.setColour(juce::TextButton::buttonColourId, t.accentWarm.withAlpha(0.75f));
+        armedButton.setColour(juce::TextButton::textColourOffId, t.inkLight);
         disabledButton.setColour(juce::TextButton::buttonColourId, t.controlBg);
         disabledButton.setColour(juce::TextButton::textColourOffId, t.controlText);
         toggledButton.setColour(juce::TextButton::buttonColourId, t.controlOnBg);
         toggledButton.setColour(juce::TextButton::textColourOnId, t.controlTextOn);
         combo.setColour(juce::ComboBox::backgroundColourId, t.controlBg);
         combo.setColour(juce::ComboBox::textColourId, t.controlText);
+        disabledCombo.setColour(juce::ComboBox::backgroundColourId, t.controlBg);
+        disabledCombo.setColour(juce::ComboBox::textColourId, t.controlText);
+        textEditor.setColour(juce::TextEditor::backgroundColourId, t.controlBg);
+        textEditor.setColour(juce::TextEditor::outlineColourId, t.surfaceEdge.withAlpha(0.7f));
+        textEditor.setColour(juce::TextEditor::focusedOutlineColourId, t.focusOutline.withAlpha(0.8f));
+        textEditor.setColour(juce::TextEditor::textColourId, t.inkLight.withAlpha(0.95f));
+        infoLabel.setColour(juce::Label::backgroundColourId, t.surface2.withAlpha(0.8f));
+        infoLabel.setColour(juce::Label::outlineColourId, t.surfaceEdge.withAlpha(0.75f));
+        infoLabel.setColour(juce::Label::textColourId, t.inkMid.withAlpha(0.95f));
+        for (int i = 0; i < tabbed.getNumTabs(); ++i)
+            tabbed.setTabBackgroundColour(i, t.surface2.withAlpha(0.85f));
+        viewportContent.repaint();
         repaint();
     }
 
@@ -77,6 +312,7 @@ public:
         auto bottomArea = contentBounds.removeFromBottom(80);
         auto rowCardArea = bottomArea.removeFromTop(34);
         auto sectionArea = bottomArea;
+        auto scrollerArea = contentBounds.removeFromBottom(68);
 
         const auto rowNormal = setle::theme::rowStyle(t, setle::theme::SurfaceState::normal);
         const auto rowSelected = setle::theme::rowStyle(t, setle::theme::SurfaceState::selected);
@@ -156,6 +392,15 @@ public:
         g.fillRoundedRectangle(zOut.toFloat(), 2.0f);
         g.setColour(setle::theme::textForRole(t, setle::theme::TextRole::primary));
         g.drawText("OUT", zOut, juce::Justification::centred, false);
+
+        auto scrollFrame = scrollerArea.reduced(0, 4);
+        g.setColour(t.surface1.withAlpha(0.95f));
+        g.fillRoundedRectangle(scrollFrame.toFloat(), t.radiusSm);
+        g.setColour(t.surfaceEdge.withAlpha(0.75f));
+        g.drawRoundedRectangle(scrollFrame.toFloat(), t.radiusSm, juce::jmax(0.8f, t.strokeNormal));
+        g.setFont(juce::FontOptions(9.0f));
+        g.setColour(t.inkMuted.withAlpha(0.9f));
+        g.drawText("Scrollbar / Viewport Preview", scrollFrame.removeFromTop(14).reduced(4, 1), juce::Justification::centredLeft, false);
     }
 
     void resized() override
@@ -164,28 +409,181 @@ public:
         area.removeFromTop(22);
 
         auto topRow = area.removeFromTop(26);
-        normalButton.setBounds(topRow.removeFromLeft(72));
+        normalButton.setBounds(topRow.removeFromLeft(66));
+        topRow.removeFromLeft(4);
+        armedButton.setBounds(topRow.removeFromLeft(66));
+        topRow.removeFromLeft(4);
+        menuPreviewButton.setBounds(topRow.removeFromLeft(92));
         topRow.removeFromLeft(6);
-        disabledButton.setBounds(topRow.removeFromLeft(78));
+        disabledButton.setBounds(topRow.removeFromLeft(74));
         topRow.removeFromLeft(6);
-        toggledButton.setBounds(topRow.removeFromLeft(78));
+        toggledButton.setBounds(topRow.removeFromLeft(74));
         topRow.removeFromLeft(6);
         combo.setBounds(topRow.removeFromLeft(110));
+        topRow.removeFromLeft(6);
+        disabledCombo.setBounds(topRow.removeFromLeft(106));
 
         area.removeFromTop(6);
-        auto controlRow = area.removeFromTop(54);
-        horizontalSlider.setBounds(controlRow.removeFromLeft(200));
-        controlRow.removeFromLeft(8);
-        rotaryKnob.setBounds(controlRow.removeFromLeft(70));
+        auto controlBlock = area.removeFromTop(92);
+        auto sliderCol = controlBlock.removeFromLeft(340);
+        horizontalSlider.setBounds(sliderCol.removeFromTop(28));
+        sliderCol.removeFromTop(6);
+        disabledSlider.setBounds(sliderCol.removeFromTop(26));
+        controlBlock.removeFromLeft(10);
+        rotaryKnob.setBounds(controlBlock.removeFromLeft(74));
+        controlBlock.removeFromLeft(8);
+        verticalSlider.setBounds(controlBlock.removeFromLeft(20).withTrimmedTop(4).withTrimmedBottom(8));
+
+        area.removeFromTop(4);
+        auto toggleRow = area.removeFromTop(26);
+        checkToggle.setBounds(toggleRow.removeFromLeft(70));
+        toggleRow.removeFromLeft(6);
+        modeToggle.setBounds(toggleRow.removeFromLeft(78));
+        toggleRow.removeFromLeft(6);
+        infoLabel.setBounds(toggleRow.removeFromLeft(130));
+        toggleRow.removeFromLeft(6);
+        textEditor.setBounds(toggleRow.removeFromLeft(140));
+
+        area.removeFromTop(6);
+        tabbed.setBounds(area.removeFromTop(26));
+
+        area.removeFromTop(6);
+        viewport.setBounds(area.removeFromBottom(58));
+        viewportContent.setSize(juce::jmax(680, viewport.getWidth() + 260),
+                                juce::jmax(200, viewport.getHeight() + 100));
     }
 
 private:
     juce::TextButton normalButton;
+    juce::TextButton armedButton;
     juce::TextButton disabledButton;
     juce::TextButton toggledButton;
+    juce::TextButton menuPreviewButton;
     juce::Slider horizontalSlider;
+    juce::Slider disabledSlider;
     juce::Slider rotaryKnob;
+    juce::Slider verticalSlider;
     juce::ComboBox combo;
+    juce::ComboBox disabledCombo;
+    juce::ToggleButton checkToggle;
+    juce::ToggleButton modeToggle;
+    juce::TextEditor textEditor;
+    juce::Label infoLabel;
+    juce::TabbedComponent tabbed { juce::TabbedButtonBar::TabsAtTop };
+    juce::Viewport viewport;
+    ScrollContent viewportContent;
+};
+
+class ThemeEditorPanel::PreviewWindow final : public juce::DocumentWindow,
+                                              private ThemeManager::Listener
+{
+public:
+    explicit PreviewWindow(std::function<void()> onCloseIn)
+        : juce::DocumentWindow("SETLE Live Preview",
+                               juce::Colours::black,
+                               juce::DocumentWindow::closeButton,
+                               true),
+          onClose(std::move(onCloseIn))
+    {
+        setUsingNativeTitleBar(true);
+        setResizable(true, true);
+        setResizeLimits(640, 400, 1800, 1400);
+
+        preview = new PreviewArea();
+        setContentOwned(preview, true);
+        preview->refreshFromTheme();
+
+        ThemeManager::get().addListener(this);
+    }
+
+    ~PreviewWindow() override
+    {
+        ThemeManager::get().removeListener(this);
+    }
+
+    void closeButtonPressed() override
+    {
+        setVisible(false);
+        if (onClose != nullptr)
+            onClose();
+    }
+
+private:
+    void themeChanged() override
+    {
+        if (preview != nullptr)
+            preview->refreshFromTheme();
+    }
+
+    PreviewArea* preview { nullptr };
+    std::function<void()> onClose;
+};
+
+class ThemeColourWheelPopup final : public juce::Component,
+                                    private juce::ChangeListener
+{
+public:
+    ThemeColourWheelPopup(juce::Colour initial,
+                          std::function<void(juce::Colour)> onColourChangedIn)
+        : selector(juce::ColourSelector::showColourAtTop
+                   | juce::ColourSelector::editableColour
+                   | juce::ColourSelector::showSliders
+                   | juce::ColourSelector::showColourspace),
+          onColourChanged(std::move(onColourChangedIn))
+    {
+        addAndMakeVisible(selector);
+        selector.addChangeListener(this);
+        selector.setCurrentColour(initial, juce::dontSendNotification);
+        selector.setColour(juce::ColourSelector::backgroundColourId, ThemeManager::get().theme().surface1);
+        selector.setColour(juce::ColourSelector::labelTextColourId, ThemeManager::get().theme().inkMid);
+
+        hexEditor.setText(toHexRgb(initial), juce::dontSendNotification);
+        hexEditor.setInputRestrictions(7, "#0123456789abcdefABCDEF");
+        hexEditor.onReturnKey = [this] { applyHexEditor(); };
+        hexEditor.onFocusLost = [this] { applyHexEditor(); };
+        addAndMakeVisible(hexEditor);
+
+        setSize(320, 370);
+    }
+
+    ~ThemeColourWheelPopup() override
+    {
+        selector.removeChangeListener(this);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(8);
+        selector.setBounds(area.removeFromTop(getHeight() - 54));
+        area.removeFromTop(4);
+        hexEditor.setBounds(area.removeFromTop(24));
+    }
+
+private:
+    void changeListenerCallback(juce::ChangeBroadcaster*) override
+    {
+        const auto colour = selector.getCurrentColour();
+        hexEditor.setText(toHexRgb(colour), juce::dontSendNotification);
+        if (onColourChanged != nullptr)
+            onColourChanged(colour);
+    }
+
+    void applyHexEditor()
+    {
+        if (auto parsed = tryParseRgbHex(hexEditor.getText()))
+        {
+            selector.setCurrentColour(*parsed, juce::dontSendNotification);
+            if (onColourChanged != nullptr)
+                onColourChanged(*parsed);
+            return;
+        }
+
+        hexEditor.setText(toHexRgb(selector.getCurrentColour()), juce::dontSendNotification);
+    }
+
+    juce::ColourSelector selector;
+    juce::TextEditor hexEditor;
+    std::function<void(juce::Colour)> onColourChanged;
 };
 
 ThemeEditorPanel::ThemeEditorPanel()
@@ -234,6 +632,10 @@ ThemeEditorPanel::ThemeEditorPanel()
     revertButton.onClick = [this] { revertUnsavedChanges(); };
     exportButton.onClick = [this] { exportThemeToFile(); };
     importButton.onClick = [this] { importThemeFromFile(); };
+    previewWindowButton.onClick = [this]
+    {
+        showPreviewWindow(previewWindow == nullptr);
+    };
     resetThemeButton.onClick = [this] { resetThemeToDefault(); };
 
     addAndMakeVisible(saveAsButton);
@@ -241,6 +643,7 @@ ThemeEditorPanel::ThemeEditorPanel()
     addAndMakeVisible(revertButton);
     addAndMakeVisible(exportButton);
     addAndMakeVisible(importButton);
+    addAndMakeVisible(previewWindowButton);
     addAndMakeVisible(resetThemeButton);
 
     viewport.setViewedComponent(&content, false);
@@ -248,7 +651,7 @@ ThemeEditorPanel::ThemeEditorPanel()
     addAndMakeVisible(viewport);
 
     previewArea = std::make_unique<PreviewArea>();
-    content.addAndMakeVisible(*previewArea);
+    addAndMakeVisible(*previewArea);
 
     const int surfaces = addSection("Surfaces / Ink");
     addColourControl(surfaces, "surface0", &ThemeData::surface0);
@@ -364,6 +767,8 @@ ThemeEditorPanel::ThemeEditorPanel()
 
 ThemeEditorPanel::~ThemeEditorPanel()
 {
+    showPreviewWindow(false);
+    clearPreviewTargetToken();
     ThemeManager::get().removeListener(this);
 }
 
@@ -391,10 +796,11 @@ void ThemeEditorPanel::addColourControl(int sectionIndex,
                                         juce::Colour ThemeData::* member)
 {
     auto control = std::make_unique<ColourControl>();
+    const auto canonicalName = colourTokenName(member);
     control->member = member;
-    control->name = name;
+    control->name = canonicalName.isNotEmpty() ? canonicalName : name;
     control->sectionIndex = sectionIndex;
-    control->label.setText(name, juce::dontSendNotification);
+    control->label.setText(control->name, juce::dontSendNotification);
     control->label.setJustificationType(juce::Justification::centredLeft);
 
     control->hexEditor.setInputRestrictions(7, "#0123456789abcdefABCDEF");
@@ -408,36 +814,46 @@ void ThemeEditorPanel::addColourControl(int sectionIndex,
         if (c == nullptr)
             return;
 
+        setPreviewTargetToken(c->name);
         if (auto parsed = parseHexColour(c->hexEditor.getText()))
             ThemeManager::get().setColour(c->member, *parsed);
         else
             refreshControls();
     };
 
-    control->swatchButton.onClick = [c]
+    control->swatchButton.onClick = [this, c]
     {
         if (c == nullptr)
             return;
 
-        juce::AlertWindow window("Set Colour", "Hex RGB (RRGGBB)", juce::AlertWindow::NoIcon);
-        window.addTextEditor("hex", ThemeEditorPanel::colourToHexRgb(ThemeManager::get().theme().*(c->member)).removeCharacters("#"), "Hex");
-        window.addButton("Set", 1);
-        window.addButton("Cancel", 0);
+        setPreviewTargetToken(c->name);
 
-        if (window.runModalLoop() == 1)
-        {
-            if (auto parsed = ThemeEditorPanel::parseHexColour(window.getTextEditorContents("hex")))
-                ThemeManager::get().setColour(c->member, *parsed);
-        }
+        auto popup = std::make_unique<ThemeColourWheelPopup>(ThemeManager::get().theme().*(c->member),
+                                                             [c](juce::Colour colour)
+                                                             {
+                                                                 if (c != nullptr)
+                                                                     ThemeManager::get().setColour(c->member, colour);
+                                                             });
+        juce::CallOutBox::launchAsynchronously(std::move(popup),
+                                               c->swatchButton.getScreenBounds(),
+                                               nullptr);
     };
 
     control->hexEditor.onReturnKey = applyHex;
     control->hexEditor.onFocusLost = applyHex;
-
-    control->copyButton.onClick = [c]
+    control->hexEditor.onTextChange = [this, c]
     {
         if (c != nullptr)
+            setPreviewTargetToken(c->name);
+    };
+
+    control->copyButton.onClick = [this, c]
+    {
+        if (c != nullptr)
+        {
+            setPreviewTargetToken(c->name);
             juce::SystemClipboard::copyTextToClipboard(c->hexEditor.getText());
+        }
     };
 
     control->pasteButton.onClick = [this, c]
@@ -445,6 +861,7 @@ void ThemeEditorPanel::addColourControl(int sectionIndex,
         if (c == nullptr)
             return;
 
+        setPreviewTargetToken(c->name);
         c->hexEditor.setText(juce::SystemClipboard::getTextFromClipboard(), juce::dontSendNotification);
         if (auto parsed = parseHexColour(c->hexEditor.getText()))
             ThemeManager::get().setColour(c->member, *parsed);
@@ -455,7 +872,10 @@ void ThemeEditorPanel::addColourControl(int sectionIndex,
     control->resetButton.onClick = [this, c]
     {
         if (c != nullptr)
+        {
+            setPreviewTargetToken(c->name);
             ThemeManager::get().setColour(c->member, baselineTheme.*(c->member));
+        }
     };
 
     content.addAndMakeVisible(control->label);
@@ -477,10 +897,11 @@ void ThemeEditorPanel::addFloatControl(int sectionIndex,
                                        float step)
 {
     auto control = std::make_unique<FloatControl>();
+    const auto canonicalName = floatTokenName(member);
     control->member = member;
-    control->name = name;
+    control->name = canonicalName.isNotEmpty() ? canonicalName : name;
     control->sectionIndex = sectionIndex;
-    control->label.setText(name, juce::dontSendNotification);
+    control->label.setText(control->name, juce::dontSendNotification);
     control->label.setJustificationType(juce::Justification::centredLeft);
 
     control->slider.setSliderStyle(juce::Slider::LinearHorizontal);
@@ -493,13 +914,22 @@ void ThemeEditorPanel::addFloatControl(int sectionIndex,
         if (suppressCallbacks || c == nullptr)
             return;
 
+        setPreviewTargetToken(c->name);
         ThemeManager::get().setFloat(c->member, static_cast<float>(c->slider.getValue()));
+    };
+    control->slider.onDragStart = [this, c]
+    {
+        if (c != nullptr)
+            setPreviewTargetToken(c->name);
     };
 
     control->resetButton.onClick = [this, c]
     {
         if (c != nullptr)
+        {
+            setPreviewTargetToken(c->name);
             ThemeManager::get().setFloat(c->member, baselineTheme.*(c->member));
+        }
     };
 
     content.addAndMakeVisible(control->label);
@@ -638,26 +1068,58 @@ void ThemeEditorPanel::importThemeFromFile()
 
 juce::String ThemeEditorPanel::colourToHexRgb(juce::Colour colour)
 {
-    return "#" + juce::String::toHexString(colour.getRed()).paddedLeft('0', 2).toUpperCase()
-         + juce::String::toHexString(colour.getGreen()).paddedLeft('0', 2).toUpperCase()
-         + juce::String::toHexString(colour.getBlue()).paddedLeft('0', 2).toUpperCase();
+    return toHexRgb(colour);
 }
 
 std::optional<juce::Colour> ThemeEditorPanel::parseHexColour(const juce::String& text)
 {
-    auto hex = text.trim().retainCharacters("0123456789abcdefABCDEF");
-    if (hex.length() == 3)
+    return tryParseRgbHex(text);
+}
+
+void ThemeEditorPanel::showPreviewWindow(bool shouldShow)
+{
+    if (!shouldShow)
     {
-        juce::String expanded;
-        for (auto ch : hex)
-            expanded << juce::String::charToString(ch) << juce::String::charToString(ch);
-        hex = expanded;
+        if (previewWindow != nullptr)
+        {
+            previewWindow->setVisible(false);
+            previewWindow.reset();
+        }
+
+        previewWindowButton.setButtonText("Live Preview");
+        return;
     }
 
-    if (hex.length() != 6)
-        return std::nullopt;
+    if (previewWindow == nullptr)
+    {
+        previewWindow = std::make_unique<PreviewWindow>([this]
+        {
+            previewWindow.reset();
+            previewWindowButton.setButtonText("Live Preview");
+        });
+    }
 
-    return juce::Colour::fromString("FF" + hex.toUpperCase());
+    previewWindowButton.setButtonText("Close Preview");
+    auto target = getScreenBounds().translated(getWidth() + 8, 0);
+    target.setSize(juce::jmax(720, getWidth()), juce::jmax(460, getHeight() - 40));
+    previewWindow->setBounds(target);
+    previewWindow->setVisible(true);
+    previewWindow->toFront(true);
+}
+
+void ThemeEditorPanel::setPreviewTargetToken(const juce::String& token)
+{
+    ThemeManager::get().setPreviewHighlightToken(token);
+}
+
+void ThemeEditorPanel::clearPreviewTargetToken()
+{
+    ThemeManager::get().setPreviewHighlightToken({});
+}
+
+void ThemeEditorPanel::mouseExit(const juce::MouseEvent&)
+{
+    clearPreviewTargetToken();
 }
 
 void ThemeEditorPanel::paint(juce::Graphics& g)
@@ -694,8 +1156,13 @@ void ThemeEditorPanel::resized()
     row2.removeFromLeft(4);
     exportButton.setBounds(row2.removeFromLeft(70));
     row2.removeFromLeft(4);
+    previewWindowButton.setBounds(row2.removeFromLeft(92));
+    row2.removeFromLeft(4);
     resetThemeButton.setBounds(row2.removeFromLeft(60));
 
+    area.removeFromTop(6);
+    const int previewHeight = juce::jlimit(170, 280, area.getHeight() / 3);
+    previewArea->setBounds(area.removeFromTop(previewHeight));
     area.removeFromTop(6);
     viewport.setBounds(area);
 
@@ -704,8 +1171,6 @@ void ThemeEditorPanel::resized()
         contentWidth = 420;
 
     int y = 8;
-    previewArea->setBounds(8, y, contentWidth - 16, 236);
-    y += 244;
 
     for (size_t sectionIndex = 0; sectionIndex < sections.size(); ++sectionIndex)
     {
@@ -753,6 +1218,69 @@ void ThemeEditorPanel::resized()
     }
 
     content.setSize(contentWidth, y + 8);
+}
+
+void ThemeEditorPanel::mouseMove(const juce::MouseEvent& event)
+{
+    const auto screenPos = event.getScreenPosition();
+
+    auto containsScreen = [&screenPos](const juce::Component& c)
+    {
+        return c.getScreenBounds().contains(screenPos);
+    };
+
+    juce::String hoveredToken;
+
+    for (const auto& control : colourControls)
+    {
+        if (containsScreen(control->label)
+            || containsScreen(control->swatchButton)
+            || containsScreen(control->hexEditor)
+            || containsScreen(control->copyButton)
+            || containsScreen(control->pasteButton)
+            || containsScreen(control->resetButton))
+        {
+            hoveredToken = control->name;
+            break;
+        }
+    }
+
+    if (hoveredToken.isEmpty())
+    {
+        for (const auto& control : floatControls)
+        {
+            if (containsScreen(control->label)
+                || containsScreen(control->slider)
+                || containsScreen(control->resetButton))
+            {
+                hoveredToken = control->name;
+                break;
+            }
+        }
+    }
+
+    if (hoveredToken.isEmpty())
+    {
+        for (const auto& section : sections)
+        {
+            if (containsScreen(section->label) || containsScreen(section->resetButton))
+            {
+                if (!section->colourIndices.empty() && section->colourIndices.front() < colourControls.size())
+                    hoveredToken = colourControls[section->colourIndices.front()]->name;
+                else if (!section->floatIndices.empty() && section->floatIndices.front() < floatControls.size())
+                    hoveredToken = floatControls[section->floatIndices.front()]->name;
+                break;
+            }
+        }
+    }
+
+    if (hoveredToken.isEmpty() && previewArea != nullptr && containsScreen(*previewArea))
+        hoveredToken = "controlBg";
+
+    if (hoveredToken.isNotEmpty())
+        setPreviewTargetToken(hoveredToken);
+    else
+        clearPreviewTargetToken();
 }
 
 void ThemeEditorPanel::refreshControls()
@@ -828,6 +1356,7 @@ void ThemeEditorPanel::refreshControls()
         presets.setText(t.presetName, juce::dontSendNotification);
 
     previewArea->refreshFromTheme();
+    previewWindowButton.setButtonText(previewWindow != nullptr ? "Close Preview" : "Live Preview");
 
     suppressCallbacks = false;
     repaint();

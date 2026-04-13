@@ -711,16 +711,16 @@ public:
                 const auto sr = static_cast<int>(dev->getCurrentSampleRate());
                 const auto bs = dev->getCurrentBufferSizeSamples();
                 const auto devName = dev->getName();
-                g.setColour(juce::Colours::white.withAlpha(0.80f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(0.92f));
                 g.setFont(juce::FontOptions(12.0f));
                 g.drawText(devName, area.removeFromTop(16), juce::Justification::centredLeft, true);
-                g.setColour(juce::Colours::white.withAlpha(0.50f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::muted).withAlpha(0.90f));
                 g.setFont(juce::FontOptions(11.0f));
                 g.drawText(juce::String(sr) + " Hz  |  " + juce::String(bs) + " samples",
                            area.removeFromTop(15), juce::Justification::centredLeft, true);
 
                 const double latencyMs = sr > 0 ? (1000.0 * static_cast<double>(bs) / static_cast<double>(sr)) : 0.0;
-                g.setColour(juce::Colours::white.withAlpha(0.58f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.95f));
                 g.drawText("Latency: " + juce::String(latencyMs, 1) + " ms",
                            area.removeFromTop(14), juce::Justification::centredLeft, true);
 
@@ -729,14 +729,14 @@ public:
                 meterRow.removeFromLeft(4);
                 auto meterR = meterRow.removeFromLeft(40);
 
-                auto drawMiniMeter = [&g](juce::Rectangle<int> r, float level, juce::Colour colour)
+                auto drawMiniMeter = [&g, &themeData](juce::Rectangle<int> r, float level, juce::Colour colour)
                 {
-                    g.setColour(juce::Colour(0xff101812));
+                    g.setColour(setle::theme::panelBackground(themeData, setle::theme::ZoneRole::neutral));
                     g.fillRect(r);
                     const int fill = static_cast<int>(juce::jlimit(0.0f, 1.0f, level) * r.getHeight());
                     g.setColour(colour.withAlpha(0.9f));
                     g.fillRect(r.withY(r.getBottom() - fill).withHeight(fill));
-                    g.setColour(juce::Colours::white.withAlpha(0.16f));
+                    g.setColour(setle::theme::timelineGridLine(themeData, true).withAlpha(0.6f));
                     g.drawRect(r);
                 };
 
@@ -745,7 +745,7 @@ public:
             }
             else
             {
-                g.setColour(juce::Colours::white.withAlpha(0.40f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.95f));
                 g.setFont(juce::FontOptions(12.0f));
                 g.drawText("(no audio device open)", area.removeFromTop(16), juce::Justification::centredLeft, true);
             }
@@ -758,7 +758,7 @@ public:
             const auto midiDevices = juce::MidiInput::getAvailableDevices();
             if (midiDevices.isEmpty())
             {
-                g.setColour(juce::Colours::white.withAlpha(0.40f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.95f));
                 g.setFont(juce::FontOptions(12.0f));
                 g.drawText("(no MIDI inputs found)", area.removeFromTop(15), juce::Justification::centredLeft, true);
             }
@@ -774,10 +774,11 @@ public:
                     const bool active = it != midiActivitySeconds.end() && (nowSec - it->second) < 0.18;
                     const float pulse = 0.55f + 0.45f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.02));
 
-                    juce::Colour dotColour = juce::Colour(0xff6ac87b).withAlpha(active ? pulse : 0.75f);
-                    juce::Colour textColour = isOpen ? juce::Colours::white.withAlpha(active ? 0.95f : 0.75f)
-                                                     : juce::Colours::white.withAlpha(0.35f);
-                    g.setColour(isOpen ? dotColour : juce::Colours::white.withAlpha(0.25f));
+                    juce::Colour dotColour = themeData.zoneC.withAlpha(active ? pulse : 0.75f);
+                    juce::Colour textColour = isOpen
+                                                  ? setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(active ? 0.95f : 0.78f)
+                                                  : setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.78f);
+                    g.setColour(isOpen ? dotColour : setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.45f));
                     g.setFont(juce::FontOptions(12.0f));
                     const auto dot = isOpen ? juce::String(juce::CharPointer_UTF8("\xe2\x97\x8f "))
                                             : juce::String(juce::CharPointer_UTF8("\xe2\x97\x8b "));
@@ -824,7 +825,7 @@ public:
                     text = "0x" + juce::String::toHexString(msg.getRawData(), juce::jmin(3, msg.getRawDataSize()));
 
                 const float alpha = 0.35f + 0.65f * (static_cast<float>(i) / static_cast<float>(juce::jmax(1, snapshot.size() - 1)));
-                g.setColour(juce::Colours::white.withAlpha(alpha));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(alpha));
                 g.drawText(text, area.removeFromTop(13), juce::Justification::centredLeft, true);
             }
         }
@@ -832,8 +833,10 @@ public:
         queueArea.removeFromTop(6);
         drawSectionLabel(g, queueArea, "Grab Queue");
 
-        g.setColour(juce::Colours::white.withAlpha(0.08f));
-        g.drawRoundedRectangle(queueArea.toFloat(), 4.0f, 1.0f);
+        g.setColour(setle::theme::timelineGridLine(themeData, true).withAlpha(0.40f));
+        g.drawRoundedRectangle(queueArea.toFloat(),
+                               setle::theme::radius(themeData, setle::theme::RadiusRole::sm),
+                               setle::theme::stroke(themeData, setle::theme::StrokeRole::subtle));
     }
 
     void resized() override
@@ -959,15 +962,19 @@ public:
 
     void paint(juce::Graphics& g) override
     {
+        const auto& theme = ThemeManager::get().theme();
+        const auto panelStyle = setle::theme::cardStyle(theme, setle::theme::SurfaceState::normal);
         auto bounds = getLocalBounds();
-        g.setColour(colour);
-        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 5.0f);
+        g.setColour(setle::theme::panelBackground(theme, setle::theme::ZoneRole::workPanel).interpolatedWith(colour, 0.35f));
+        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), panelStyle.radius);
+        g.setColour(panelStyle.outline.withAlpha(0.8f));
+        g.drawRoundedRectangle(bounds.toFloat().reduced(1.0f), panelStyle.radius, panelStyle.stroke);
 
-        g.setColour(juce::Colours::white.withAlpha(0.88f));
+        g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::primary).withAlpha(0.96f));
         g.setFont(juce::FontOptions(16.0f));
         g.drawText(title, bounds.removeFromTop(32).reduced(10, 4), juce::Justification::centredLeft, false);
 
-        g.setColour(juce::Colours::white.withAlpha(0.60f));
+        g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::muted).withAlpha(0.95f));
         g.setFont(juce::FontOptions(13.0f));
         g.drawText(subtitle, bounds.reduced(10, 4), juce::Justification::topLeft, true);
     }
@@ -1001,14 +1008,17 @@ public:
             addAndMakeVisible(volumeSlider);
             addAndMakeVisible(panSlider);
 
-            trackNameLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.92f));
+            const auto& themeData = ThemeManager::get().theme();
+            trackNameLabel.setColour(juce::Label::textColourId,
+                                     setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(0.96f));
             trackNameLabel.setFont(juce::FontOptions(14.0f));
             trackNameLabel.setJustificationType(juce::Justification::centredLeft);
 
             muteButton.setButtonText("M");
             muteButton.setClickingTogglesState(true);
-            muteButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3f46));
-            muteButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
+            const auto muteChip = setle::theme::chipStyle(themeData, setle::theme::SurfaceState::normal, themeData.accentWarm);
+            muteButton.setColour(juce::TextButton::buttonColourId, muteChip.fill);
+            muteButton.setColour(juce::TextButton::textColourOffId, muteChip.text.withAlpha(0.95f));
 
             volumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
             volumeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
@@ -1162,11 +1172,15 @@ public:
 
         void paint(juce::Graphics& g) override
         {
+            const auto& theme = ThemeManager::get().theme();
+            const auto stripStyle = setle::theme::cardStyle(theme, setle::theme::SurfaceState::normal);
             auto r = getLocalBounds().toFloat();
-            g.setColour(juce::Colour(0xff1a1e24));
-            g.fillRoundedRectangle(r, 5.0f);
-            g.setColour(juce::Colour(0xff3b4650));
-            g.drawRoundedRectangle(r.reduced(0.5f), 5.0f, 1.0f);
+            g.setColour(stripStyle.fill);
+            g.fillRoundedRectangle(r, setle::theme::radius(theme, setle::theme::RadiusRole::sm));
+            g.setColour(stripStyle.outline.withAlpha(0.85f));
+            g.drawRoundedRectangle(r.reduced(0.5f),
+                                   setle::theme::radius(theme, setle::theme::RadiusRole::sm),
+                                   setle::theme::stroke(theme, setle::theme::StrokeRole::normal));
         }
 
         void resized() override
@@ -2010,8 +2024,9 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(juce::Colour(0xff141414));
-        g.setColour(juce::Colours::white.withAlpha(0.20f));
+        const auto& theme = ThemeManager::get().theme();
+        g.fillAll(setle::theme::panelHeaderBackground(theme, setle::theme::ZoneRole::neutral));
+        g.setColour(setle::theme::timelineGridLine(theme, true).withAlpha(0.55f));
 
         if (orientation == Orientation::vertical)
             g.drawVerticalLine(getWidth() / 2, 2.0f, static_cast<float>(getHeight() - 2));
@@ -2522,6 +2537,8 @@ void WorkspaceShellComponent::paint(juce::Graphics& g)
         g.setColour(theme.zoneC.withAlpha(0.45f + 0.50f * pulse));
         g.fillEllipse(dot);
     }
+
+    drawThemePreviewHighlight(g);
 }
 
 void WorkspaceShellComponent::themeChanged()
@@ -2529,6 +2546,11 @@ void WorkspaceShellComponent::themeChanged()
     if (themeEditorPanel != nullptr)
         themeEditorPanel->refreshControls();
     repaintEntireTree();
+}
+
+void WorkspaceShellComponent::themePreviewTargetChanged(const juce::String&)
+{
+    repaint();
 }
 
 void WorkspaceShellComponent::repaintEntireTree()
@@ -2553,9 +2575,159 @@ void WorkspaceShellComponent::showThemeEditor(bool shouldShow)
 
     themeDismissOverlay.setVisible(shouldShow);
     themeEditorPanel->setVisible(shouldShow);
+    if (!shouldShow)
+        ThemeManager::get().setPreviewHighlightToken({});
     if (shouldShow)
         themeEditorPanel->toFront(true);
     resized();
+}
+
+juce::Rectangle<int> WorkspaceShellComponent::highlightBoundsForThemeToken(const juce::String& token) const
+{
+    auto normalized = token.trim();
+    if (normalized.isEmpty())
+        return {};
+
+    auto toRootRect = [this](const juce::Rectangle<int>& r)
+    {
+        return r.translated(topStrip.getX(), topStrip.getY());
+    };
+
+    auto componentToThis = [this](const juce::Component* component) -> juce::Rectangle<int>
+    {
+        if (component == nullptr || !component->isVisible())
+            return {};
+        return getLocalArea(component, component->getLocalBounds());
+    };
+
+    auto normalizeStartsWith = [&normalized](const char* prefix)
+    {
+        return normalized.startsWithIgnoreCase(prefix);
+    };
+
+    auto unionIfValid = [](juce::Rectangle<int> a, juce::Rectangle<int> b)
+    {
+        if (a.isEmpty()) return b;
+        if (b.isEmpty()) return a;
+        return a.getUnion(b);
+    };
+
+    if (normalized == "surface0")
+        return getLocalBounds();
+
+    if (normalizeStartsWith("header") || normalizeStartsWith("menuBar") || normalized == "focusOutline")
+        return { 0, 0, getWidth(), topStripHeight };
+
+    if (normalized == "zoneAWidth" || normalizeStartsWith("zoneA") || normalized == "signalMidi")
+        return inPanel != nullptr ? inPanel->getBounds() : juce::Rectangle<int>{};
+
+    if (normalized == "zoneCWidth" || normalizeStartsWith("zoneC") || normalized == "signalAudio")
+        return outPanelHost != nullptr ? outPanelHost->getBounds() : juce::Rectangle<int>{};
+
+    if (normalizeStartsWith("zoneB"))
+        return workPanel != nullptr ? workPanel->getBounds() : juce::Rectangle<int>{};
+
+    if (normalized == "zoneDNormHeight"
+        || normalizeStartsWith("zoneD")
+        || normalizeStartsWith("tape")
+        || normalizeStartsWith("playhead")
+        || normalized == "housingEdge")
+        return timelineShell != nullptr ? timelineShell->getBounds() : juce::Rectangle<int>{};
+
+    if (normalized == "cardBg"
+        || normalized == "rowBg"
+        || normalized == "rowHover"
+        || normalized == "rowSelected")
+    {
+        auto r = componentToThis(&theoryEditorPanel);
+        r = unionIfValid(r, componentToThis(libraryBrowser.get()));
+        r = unionIfValid(r, componentToThis(chordPalette.get()));
+        return r.isEmpty() && workPanel != nullptr ? workPanel->getBounds() : r;
+    }
+
+    if (normalizeStartsWith("control")
+        || normalizeStartsWith("btn")
+        || normalizeStartsWith("slider")
+        || normalizeStartsWith("knob")
+        || normalizeStartsWith("switch")
+        || normalized == "sizeTransport")
+    {
+        auto r = toRootRect(playButton.getBounds());
+        r = unionIfValid(r, toRootRect(stopButton.getBounds()));
+        r = unionIfValid(r, toRootRect(recordButton.getBounds()));
+        r = unionIfValid(r, toRootRect(bpmEditor.getBounds()));
+        r = unionIfValid(r, toRootRect(sessionKeySelector.getBounds()));
+        r = unionIfValid(r, toRootRect(sessionModeSelector.getBounds()));
+        r = unionIfValid(r, toRootRect(captureSourceSelector.getBounds()));
+        r = unionIfValid(r, componentToThis(outPanelHost.get()));
+        return r.expanded(6, 4);
+    }
+
+    if (normalizeStartsWith("surface"))
+    {
+        if (normalized == "surface1" && workPanel != nullptr)
+            return workPanel->getBounds();
+        if (normalized == "surface2" && outPanelHost != nullptr)
+            return outPanelHost->getBounds();
+        if (normalized == "surface3" || normalized == "surface4" || normalized == "surfaceEdge")
+        {
+            auto r = toRootRect(sessionKeySelector.getBounds());
+            r = unionIfValid(r, toRootRect(sessionModeSelector.getBounds()));
+            r = unionIfValid(r, toRootRect(captureSourceSelector.getBounds()));
+            r = unionIfValid(r, toRootRect(bpmEditor.getBounds()));
+            return r.expanded(6, 4);
+        }
+    }
+
+    if (normalizeStartsWith("ink") || normalizeStartsWith("size") || normalizeStartsWith("space"))
+    {
+        auto r = toRootRect(topTitle.getBounds());
+        r = unionIfValid(r, toRootRect(interactionStatus.getBounds()));
+        r = unionIfValid(r, componentToThis(&theoryEditorTitle));
+        r = unionIfValid(r, componentToThis(&theoryEditorHint));
+        return r.isEmpty() && workPanel != nullptr ? workPanel->getBounds() : r;
+    }
+
+    if (normalized == "signalCv" || normalized == "signalGate")
+    {
+        auto r = componentToThis(timelineShell);
+        r = unionIfValid(r, componentToThis(timelineTracks));
+        return r;
+    }
+
+    if (normalized == "badgeBg")
+        return componentToThis(timelineShell);
+
+    if (normalized == "moduleSlotHeight")
+        return componentToThis(outPanelHost.get());
+
+    if (normalized == "stepHeight" || normalized == "stepWidth")
+        return componentToThis(gridRollComponent.get());
+
+    if (normalized == "menuBarHeight")
+        return { 0, 0, getWidth(), topStripHeight };
+
+    if (normalizeStartsWith("radius") || normalizeStartsWith("stroke"))
+        return workPanel != nullptr ? workPanel->getBounds() : juce::Rectangle<int>{};
+
+    return workPanel != nullptr ? workPanel->getBounds() : juce::Rectangle<int>{};
+}
+
+void WorkspaceShellComponent::drawThemePreviewHighlight(juce::Graphics& g) const
+{
+    const auto target = highlightBoundsForThemeToken(ThemeManager::get().getPreviewHighlightToken());
+    if (target.isEmpty())
+        return;
+
+    const float pulse = 0.65f + 0.35f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.008));
+    auto outline = juce::Colour(0xFFFF3EE3).withAlpha(0.55f + 0.40f * pulse);
+    auto fill = juce::Colour(0xFFFF3EE3).withAlpha(0.08f + 0.08f * pulse);
+
+    auto rect = target.toFloat().reduced(1.5f);
+    g.setColour(fill);
+    g.fillRoundedRectangle(rect, 6.0f);
+    g.setColour(outline);
+    g.drawRoundedRectangle(rect, 6.0f, 2.2f);
 }
 
 void WorkspaceShellComponent::applyFocusMode(FocusMode mode)

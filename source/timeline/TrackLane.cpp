@@ -99,7 +99,7 @@ void TrackLane::paint(juce::Graphics& g)
                       6.0f);
     }
 
-    g.setColour(theme.surface1);
+    g.setColour(setle::theme::panelBackground(theme, setle::theme::ZoneRole::timeline));
     g.fillRect(clipArea);
 
     const auto beatSpan = juce::jmax(1.0, visibleEndBeat - visibleStartBeat);
@@ -123,10 +123,12 @@ void TrackLane::paint(juce::Graphics& g)
         if (painted.clip == nullptr)
             continue;
 
-        g.setColour(trackColour.withAlpha(0.88f));
+        const auto clipStyle = setle::theme::progressionBlockStyle(theme, false, false, trackColour);
+        g.setColour(clipStyle.fill.withAlpha(0.95f));
         g.fillRoundedRectangle(painted.bounds.toFloat().reduced(1.0f), 4.0f);
-        g.setColour(theme.inkLight.withAlpha(0.40f));
-        g.drawRoundedRectangle(painted.bounds.toFloat().reduced(1.0f), 4.0f, 1.0f);
+        g.setColour(clipStyle.outline.withAlpha(0.78f));
+        g.drawRoundedRectangle(painted.bounds.toFloat().reduced(1.0f), 4.0f,
+                               setle::theme::stroke(theme, setle::theme::StrokeRole::subtle));
 
         auto clipRect = painted.bounds.reduced(4, 3);
 
@@ -153,7 +155,7 @@ void TrackLane::paint(juce::Graphics& g)
                     const auto pos = painted.clip->getPosition();
                     const auto clipDurBeats = juce::jmax(0.001, pos.getLength().inSeconds() / secPerBeat);
 
-                    g.setColour(theme.inkLight.withAlpha(0.55f));
+                    g.setColour(clipStyle.label.withAlpha(0.60f));
                     for (auto* note : notes)
                     {
                         if (note == nullptr) continue;
@@ -172,7 +174,7 @@ void TrackLane::paint(juce::Graphics& g)
         else
         {
             // Lightweight waveform-like thumbnail for audio clips.
-            g.setColour(theme.inkLight.withAlpha(0.35f));
+            g.setColour(clipStyle.subtitle.withAlpha(0.70f));
             const int mid = clipRect.getCentreY();
             for (int x = clipRect.getX(); x < clipRect.getRight(); x += 3)
             {
@@ -186,7 +188,7 @@ void TrackLane::paint(juce::Graphics& g)
         const auto progressionSymbols = painted.clip->state.getProperty("progressionSymbols").toString();
         if (progressionSymbols.isNotEmpty())
         {
-            g.setColour(theme.inkLight.withAlpha(0.60f));
+            g.setColour(clipStyle.label.withAlpha(0.72f));
             g.setFont(juce::FontOptions(9.0f));
             g.drawText(progressionSymbols,
                        painted.bounds.reduced(5, 2).removeFromTop(10),
@@ -194,7 +196,7 @@ void TrackLane::paint(juce::Graphics& g)
                        true);
         }
 
-        g.setColour(theme.inkMuted.withAlpha(0.96f));
+        g.setColour(clipStyle.subtitle.withAlpha(0.95f));
         g.setFont(juce::FontOptions(10.5f));
         g.drawText(painted.clip->getName(),
                    painted.bounds.reduced(6, 3).removeFromBottom(12),

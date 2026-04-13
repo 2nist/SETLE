@@ -2,6 +2,9 @@
 
 #include <juce_core/juce_core.h>
 
+#include "../theme/ThemeManager.h"
+#include "../theme/ThemeStyleHelpers.h"
+
 namespace setle::ui
 {
 
@@ -10,7 +13,10 @@ ProgressionLibraryBrowser::ProgressionLibraryBrowser(const juce::String& session
 {
     filterLabel.setText("Mode Filter:", juce::dontSendNotification);
     filterLabel.setFont(juce::FontOptions(12.0f));
-    filterLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.88f));
+    filterLabel.setColour(juce::Label::textColourId,
+                          setle::theme::textForRole(ThemeManager::get().theme(),
+                                                     setle::theme::TextRole::muted)
+                              .withAlpha(0.94f));
     addAndMakeVisible(filterLabel);
 
     modeFilter.addItem("All", 1);
@@ -25,11 +31,25 @@ ProgressionLibraryBrowser::ProgressionLibraryBrowser(const juce::String& session
 
     searchLabel.setText("Search:", juce::dontSendNotification);
     searchLabel.setFont(juce::FontOptions(12.0f));
-    searchLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.88f));
+    searchLabel.setColour(juce::Label::textColourId,
+                          setle::theme::textForRole(ThemeManager::get().theme(),
+                                                     setle::theme::TextRole::muted)
+                              .withAlpha(0.94f));
     addAndMakeVisible(searchLabel);
 
     searchEditor.setFont(juce::FontOptions(12.0f));
     searchEditor.onTextChange = [this] { rebuildBrowserRows(); };
+    searchEditor.setColour(juce::TextEditor::backgroundColourId,
+                           setle::theme::rowStyle(ThemeManager::get().theme(),
+                                                  setle::theme::SurfaceState::normal)
+                               .fill);
+    searchEditor.setColour(juce::TextEditor::outlineColourId,
+                           setle::theme::rowStyle(ThemeManager::get().theme(),
+                                                  setle::theme::SurfaceState::normal)
+                               .outline);
+    searchEditor.setColour(juce::TextEditor::textColourId,
+                           setle::theme::textForRole(ThemeManager::get().theme(),
+                                                     setle::theme::TextRole::primary));
     addAndMakeVisible(searchEditor);
 
     addAndMakeVisible(rowsViewport);
@@ -40,7 +60,11 @@ ProgressionLibraryBrowser::ProgressionLibraryBrowser(const juce::String& session
 
 void ProgressionLibraryBrowser::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff1a1a1a));
+    const auto& theme = ThemeManager::get().theme();
+    g.fillAll(setle::theme::panelBackground(theme, setle::theme::ZoneRole::workPanel));
+
+    g.setColour(setle::theme::timelineGridLine(theme, true).withAlpha(0.8f));
+    g.drawRect(getLocalBounds());
 }
 
 void ProgressionLibraryBrowser::resized()
@@ -218,27 +242,48 @@ ProgressionLibraryBrowser::BrowserRow::BrowserRow(const ProgressionTemplate& tmp
 
 void ProgressionLibraryBrowser::BrowserRow::paint(juce::Graphics& g)
 {
-    auto bgCol = isHovering ? juce::Colour(0xff2a2a3a) : juce::Colour(0xff1a1a2a);
-    g.fillAll(bgCol);
+    const auto& themeData = ThemeManager::get().theme();
+    const auto rowStyle = setle::theme::rowStyle(themeData,
+                                                  isHovering ? setle::theme::SurfaceState::hovered
+                                                             : setle::theme::SurfaceState::normal);
+    auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+    g.setColour(rowStyle.fill);
+    g.fillRoundedRectangle(bounds, rowStyle.radius);
+    g.setColour(rowStyle.outline);
+    g.drawRoundedRectangle(bounds, rowStyle.radius, rowStyle.stroke);
 
-    g.setColour(juce::Colours::white.withAlpha(0.88f));
+    g.setColour(rowStyle.text.withAlpha(0.95f));
     g.setFont(juce::FontOptions(13.0f));
 
-    auto bounds = getLocalBounds().reduced(6, 4);
-    g.drawText(template_.name, bounds.removeFromLeft(180), juce::Justification::centredLeft, true);
+    auto content = getLocalBounds().reduced(8, 4);
+    g.drawText(template_.name, content.removeFromLeft(180), juce::Justification::centredLeft, true);
 
-    g.setOpacity(0.7f);
+    g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::muted).withAlpha(0.92f));
     g.drawText(template_.category.isNotEmpty() ? template_.category : template_.degreeSummary,
-               bounds.removeFromLeft(100),
+               content.removeFromLeft(100),
                juce::Justification::centredLeft,
                true);
+
+    if (template_.isBundled)
+    {
+        auto badge = content.removeFromRight(70).reduced(4, 7);
+        const auto chip = setle::theme::chipStyle(themeData,
+                                                   setle::theme::SurfaceState::success,
+                                                   themeData.zoneC);
+        g.setColour(chip.fill);
+        g.fillRoundedRectangle(badge.toFloat(), setle::theme::radius(themeData, setle::theme::RadiusRole::chip));
+        g.setColour(chip.text);
+        g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+        g.drawText("BUNDLED", badge, juce::Justification::centred, false);
+    }
 
     g.setFont(juce::FontOptions(11.0f));
     juce::String chordText = template_.chord1;
     if (!template_.chord2.isEmpty()) chordText += " " + template_.chord2;
     if (!template_.chord3.isEmpty()) chordText += " " + template_.chord3;
     if (!template_.chord4.isEmpty()) chordText += " " + template_.chord4;
-    g.drawText(chordText, bounds, juce::Justification::centredLeft, true);
+    g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.95f));
+    g.drawText(chordText, content, juce::Justification::centredLeft, true);
 }
 
 void ProgressionLibraryBrowser::BrowserRow::mouseDown(const juce::MouseEvent& event)
