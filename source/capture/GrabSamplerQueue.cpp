@@ -61,6 +61,10 @@ bool GrabSamplerQueue::loadProgression(int slotIndex,
     slot.state = GrabSlot::State::Ready;
     slot.looping = false;
     slot.repeatCount = 1;
+    // Loading a new progression into a reused slot should not retain stale
+    // coupled audio from the previous assignment.
+    slot.coupledAudio.reset();
+    slot.coupledSampleRate = 0.0;
     notifyQueueChanged();
     return true;
 }
@@ -112,7 +116,10 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
         return;
 
     auto& slot = slots[static_cast<size_t>(slotIndex)];
-    if (slot.state == GrabSlot::State::Empty || slot.progressionId.isEmpty() || songRef == nullptr)
+    if (slot.state == GrabSlot::State::Empty || slot.progressionId.isEmpty())
+        return;
+
+    if (!slot.hasCoupledAudio() && songRef == nullptr)
         return;
 
     if (activeSlot >= 0 && activeSlot != slotIndex)
@@ -210,9 +217,9 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
         rebuildSamplerClipForSlot(edit, slotIndex, *track);
     }
 
-    auto progressionOpt = songRef->findProgressionById(slot.progressionId);
-    if (!progressionOpt.has_value())
-        return;
+    std::optional<model::Progression> progressionOpt;
+    if (songRef != nullptr)
+        progressionOpt = songRef->findProgressionById(slot.progressionId);
 
     double totalSeconds = 0.0;
     if (slot.hasCoupledAudio())
@@ -221,6 +228,9 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
     }
     else
     {
+        if (!progressionOpt.has_value())
+            return;
+
         double totalBeats = 0.0;
         for (const auto& chord : progressionOpt->getChords())
         {

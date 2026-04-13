@@ -494,11 +494,12 @@ private:
         {
             auto area = getLocalBounds().reduced(8, 6);
             auto buttonRow = area.removeFromBottom(24);
-            playButton.setBounds(buttonRow.removeFromLeft(72));
+            const int buttonWidth = juce::jmax(54, (buttonRow.getWidth() - 12) / 3);
+            playButton.setBounds(buttonRow.removeFromLeft(buttonWidth));
             buttonRow.removeFromLeft(6);
-            editButton.setBounds(buttonRow.removeFromLeft(56));
+            editButton.setBounds(buttonRow.removeFromLeft(buttonWidth));
             buttonRow.removeFromLeft(6);
-            promoteButton.setBounds(buttonRow.removeFromLeft(90));
+            promoteButton.setBounds(buttonRow.removeFromLeft(buttonWidth));
         }
 
         void mouseUp(const juce::MouseEvent& event) override
@@ -622,6 +623,7 @@ private:
             textArea = textArea.withBottom(juce::jmax(textArea.getY() + 12, reservedButtons.getY() - 2));
             auto row1 = textArea.removeFromTop(14);
             auto row2 = textArea.removeFromTop(12);
+            auto row3 = textArea.removeFromTop(11);
 
             const auto marker = playing ? juce::String("▶") : juce::String(" ");
             g.setFont(juce::FontOptions(11.8f));
@@ -669,7 +671,14 @@ private:
 
             if (slot->hasCoupledAudio())
             {
-                auto waveArea = textArea.removeFromTop(8);
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.95f));
+                g.setFont(juce::FontOptions(9.5f));
+                g.drawText("    " + formatAudioInfo(*slot),
+                           row3,
+                           juce::Justification::centredLeft,
+                           true);
+
+                auto waveArea = textArea.removeFromTop(10);
                 if (waveArea.getWidth() > 10 && waveArea.getHeight() > 2 && slot->coupledAudio != nullptr)
                 {
                     g.setColour(themeData.surface0.withAlpha(0.55f));
@@ -706,16 +715,20 @@ private:
                     }
                 }
             }
-
-            if (slot->hasCoupledAudio())
+            else
             {
-                auto modeBadge = bounds.removeFromRight(72).removeFromTop(14).reduced(4, 2);
-                g.setColour(themeData.signalAudio.withAlpha(0.24f));
-                g.fillRoundedRectangle(modeBadge.toFloat(), 2.0f);
-                g.setColour(themeData.signalAudio.withAlpha(0.92f));
-                g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
-                g.drawText("AUDIO", modeBadge, juce::Justification::centred, false);
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.9f));
+                g.setFont(juce::FontOptions(9.5f));
+                g.drawText("    MIDI pattern playback", row3, juce::Justification::centredLeft, true);
             }
+
+            auto modeBadge = bounds.removeFromRight(72).removeFromTop(14).reduced(4, 2);
+            const auto badgeColor = slot->hasCoupledAudio() ? themeData.signalAudio : themeData.signalMidi;
+            g.setColour(badgeColor.withAlpha(0.24f));
+            g.fillRoundedRectangle(modeBadge.toFloat(), 2.0f);
+            g.setColour(badgeColor.withAlpha(0.92f));
+            g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+            g.drawText(slot->hasCoupledAudio() ? "AUDIO" : "MIDI", modeBadge, juce::Justification::centred, false);
         }
 
     private:
@@ -724,6 +737,20 @@ private:
             if (auto* queue = queueProvider())
                 return &queue->getSlot(slotIndex);
             return nullptr;
+        }
+
+        juce::String formatAudioInfo(const capture::GrabSlot& slot) const
+        {
+            if (!slot.hasCoupledAudio() || slot.coupledAudio == nullptr)
+                return "audio unavailable";
+
+            const auto samples = slot.coupledAudio->getNumSamples();
+            if (samples <= 0 || slot.coupledSampleRate <= 0.0)
+                return "audio unavailable";
+
+            const auto seconds = static_cast<double>(samples) / slot.coupledSampleRate;
+            const auto kHz = slot.coupledSampleRate / 1000.0;
+            return juce::String(seconds, 2) + "s  @  " + juce::String(kHz, 1) + "kHz";
         }
 
         int slotIndex = 0;
@@ -877,7 +904,7 @@ public:
         area.removeFromTop(8);
 
         // ── MIDI Monitor ──────────────────────────────────────────────────────
-        auto queueArea = area.removeFromBottom(200);
+        auto queueArea = area.removeFromBottom(getQueueAreaHeight());
         if (area.getHeight() < 36)
             return;
 
@@ -930,7 +957,7 @@ public:
         area.removeFromTop(22); // IN title
         area.removeFromTop(4);
 
-        auto queueArea = area.removeFromBottom(200);
+        auto queueArea = area.removeFromBottom(getQueueAreaHeight());
         queueArea.removeFromTop(6);
         queueArea.removeFromTop(14); // section label
         queueArea.removeFromTop(4);
@@ -948,6 +975,11 @@ public:
     }
 
 private:
+    int getQueueAreaHeight() const
+    {
+        return juce::jlimit(220, 360, static_cast<int>(std::round(static_cast<double>(getHeight()) * 0.36)));
+    }
+
     static void drawSectionLabel(juce::Graphics& g, juce::Rectangle<int>& area, const juce::String& label)
     {
         const auto& themeData = ThemeManager::get().theme();
