@@ -1,5 +1,6 @@
 #pragma once
 
+#include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
 
@@ -9,6 +10,7 @@
 
 #include "../capture/GrabSamplerQueue.h"
 #include "../capture/HistoryBuffer.h"
+#include "../capture/CircularAudioBuffer.h"
 #include "../instruments/InstrumentSlot.h"
 #include "../model/SetleSongModel.h"
 #include "../timeline/TimelineTracksComponent.h"
@@ -203,6 +205,8 @@ private:
     juce::Component themeDismissOverlay;
     std::unique_ptr<setle::capture::GrabSamplerQueue> grabSamplerQueue;
     std::unique_ptr<setle::capture::HistoryBuffer> historyBuffer;
+    std::unique_ptr<setle::capture::CircularAudioBuffer> circularAudioBuffer;
+    std::unique_ptr<juce::AudioIODeviceCallback> outputCaptureTap;
     std::unique_ptr<setle::timeline::TrackManager> trackManager;
     std::map<juce::String, std::unique_ptr<setle::instruments::InstrumentSlot>> instrumentSlots;
     model::Song songState;
@@ -213,6 +217,8 @@ private:
     juce::String selectedProgressionId;
     juce::String selectedChordId;
     juce::String selectedNoteId;
+    std::shared_ptr<juce::AudioBuffer<float>> pendingGrabCoupledAudio;
+    double pendingGrabCoupledSampleRate { 0.0 };
 
     // TRANSIENT UI STATE — never persist these to SetleSongModel.
     // They reset on app launch. Keep them on the component, not the model.

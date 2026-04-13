@@ -103,6 +103,37 @@ static const juce::Identifier kSlotTypeProp { "slotType" };
 static const juce::Identifier kSlotPersistentIdProp { "persistentId" };
 static const juce::Identifier kSlotPersistentNameProp { "persistentName" };
 
+class OutputCaptureTap final : public juce::AudioIODeviceCallback
+{
+public:
+    explicit OutputCaptureTap(setle::capture::CircularAudioBuffer& bufferToWrite)
+        : buffer(bufferToWrite)
+    {
+    }
+
+    void audioDeviceIOCallbackWithContext(const float* const*,
+                                          int,
+                                          float* const* outputChannelData,
+                                          int numOutputChannels,
+                                          int numSamples,
+                                          const juce::AudioIODeviceCallbackContext&) override
+    {
+        buffer.pushAudioBlock(outputChannelData, numOutputChannels, numSamples);
+    }
+
+    void audioDeviceAboutToStart(juce::AudioIODevice* device) override
+    {
+        if (device != nullptr)
+            buffer.prepare(device->getCurrentSampleRate(),
+                           juce::jmax(1, device->getActiveOutputChannels().countNumberOfSetBits()));
+    }
+
+    void audioDeviceStopped() override {}
+
+private:
+    setle::capture::CircularAudioBuffer& buffer;
+};
+
 juce::String slotTypeToString(setle::instruments::InstrumentSlot::SlotType type)
 {
     using SlotType = setle::instruments::InstrumentSlot::SlotType;
@@ -2330,6 +2361,13 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     edit = te::Edit::createSingleTrackEdit(engineRef);
     historyBuffer = std::make_unique<setle::capture::HistoryBuffer>(
         setle::state::AppPreferences::get().getHistoryBufferMaxBeats(64));
+    const auto historyBeats = juce::jmax(16, setle::state::AppPreferences::get().getHistoryBufferMaxBeats(64));
+    const auto captureSeconds = juce::jlimit(30.0,
+                                             180.0,
+                                             (60.0 / juce::jmax(20.0, songState.getBpm())) * static_cast<double>(historyBeats) + 2.0);
+    circularAudioBuffer = std::make_unique<setle::capture::CircularAudioBuffer>(captureSeconds);
+    outputCaptureTap = std::make_unique<OutputCaptureTap>(*circularAudioBuffer);
+    engineRef.getDeviceManager().deviceManager.addAudioCallback(outputCaptureTap.get());
     refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
     if (grabSamplerQueue != nullptr)
         grabSamplerQueue->setSong(&songState);
@@ -2434,6 +2472,10 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 WorkspaceShellComponent::~WorkspaceShellComponent()
 {
     stopTimer();
+    if (outputCaptureTap != nullptr)
+        engineRef.getDeviceManager().deviceManager.removeAudioCallback(outputCaptureTap.get());
+    outputCaptureTap.reset();
+    circularAudioBuffer.reset();
     saveLayoutState();
     saveSongState();
     ThemeManager::get().removeListener(this);
@@ -4929,9 +4971,20 @@ juce::String WorkspaceShellComponent::runProgressionAction(int actionId, const j
             progression->getName(),
             0.75f);
 
-        // Build a deterministic preview buffer so Reel has immediate audio content
-        // even before full coupled audio capture is implemented.
+        bool appliedCoupledAudio = false;
+        if (pendingGrabCoupledAudio != nullptr
+            && pendingGrabCoupledSampleRate > 0.0
+            && pendingGrabCoupledAudio->getNumSamples() > 0)
         {
+            appliedCoupledAudio = grabSamplerQueue->setSlotAudioBuffer(
+                slot,
+                *pendingGrabCoupledAudio,
+                pendingGrabCoupledSampleRate);
+        }
+
+        if (!appliedCoupledAudio)
+        {
+            // Fallback preview for non-grab entry points.
             constexpr double sr = 44100.0;
             const auto secPerBeat = 60.0 / juce::jmax(1.0, songState.getBpm());
 
@@ -5346,6 +5399,9 @@ void WorkspaceShellComponent::handleProgressionAction(const juce::String& progre
 
 void WorkspaceShellComponent::grabFromBuffer(int beats)
 {
+    pendingGrabCoupledAudio.reset();
+    pendingGrabCoupledSampleRate = 0.0;
+
     if (historyBuffer == nullptr || !historyBuffer->isCapturing())
     {
         interactionStatus.setText("Capture source is Off - select a source first", juce::dontSendNotification);
@@ -5354,6 +5410,12 @@ void WorkspaceShellComponent::grabFromBuffer(int beats)
 
     const auto bpm = songState.getBpm();
     const auto captured = historyBuffer->getLastNBeats(bpm, beats);
+    const auto coupledAudio = (circularAudioBuffer != nullptr)
+                                  ? circularAudioBuffer->getLastNBeats(bpm, beats)
+                                  : juce::AudioBuffer<float>();
+    const auto coupledSampleRate = (circularAudioBuffer != nullptr)
+                                       ? circularAudioBuffer->getSampleRate()
+                                       : 0.0;
 
     if (captured.empty())
     {
@@ -5466,7 +5528,16 @@ void WorkspaceShellComponent::grabFromBuffer(int beats)
     }
 
     songState.addProgression(progression);
+    pendingGrabCoupledAudio.reset();
+    pendingGrabCoupledSampleRate = 0.0;
+    if (coupledAudio.getNumSamples() > 0 && coupledSampleRate > 0.0)
+    {
+        pendingGrabCoupledAudio = std::make_shared<juce::AudioBuffer<float>>(coupledAudio);
+        pendingGrabCoupledSampleRate = coupledSampleRate;
+    }
     handleProgressionAction(progression.getId(), progressionGrabSampler);
+    pendingGrabCoupledAudio.reset();
+    pendingGrabCoupledSampleRate = 0.0;
 
     interactionStatus.setText("Grabbed " + juce::String(beats)
                                   + " beats -> " + juce::String(static_cast<int>(progression.getChords().size()))

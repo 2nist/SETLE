@@ -126,6 +126,8 @@ juce_add_gui_app(SETLE
 # Sources — just Main.cpp to start
 target_sources(SETLE PRIVATE
     source/Main.cpp
+    source/capture/CircularAudioBuffer.cpp
+    source/capture/CircularAudioBuffer.h
     source/capture/GrabSamplerQueue.cpp
     source/capture/GrabSamplerQueue.h
     source/capture/GrabSlot.h
@@ -308,6 +310,10 @@ if(SETLE_BUILD_TESTS)
         source/tests/SetleSongModelTests.cpp
         source/model/SetleSongModel.cpp
         source/model/SetleSongModel.h
+        source/theory/BachTheory.cpp
+        source/theory/BachTheory.h
+        source/theory/DiatonicHarmony.cpp
+        source/theory/DiatonicHarmony.h
     )
 
     target_link_libraries(setle_model_tests PRIVATE
