@@ -5,7 +5,7 @@ namespace setle::ui
 
 ToolPaletteComponent::ToolPaletteComponent()
 {
-    const std::array<const char*, 7> labels { "Sel", "Draw", "Ers", "Splt", "Str", "Lst", "Mrq" };
+    const std::array<const char*, 8> labels { "Sel", "Draw", "Ers", "Splt", "Str", "Lst", "Mrq", "Snap" };
 
     for (size_t i = 0; i < toolButtons.size(); ++i)
     {

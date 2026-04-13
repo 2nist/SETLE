@@ -26,10 +26,10 @@ public:
     /** Called when a cell is selected (single-click). */
     std::function<void(int cellIndex)> onCellSelected;
 
-    /** Called when a cell is double-clicked — expand into note detail. */
+    /** Called when a cell is double-clicked — open note mode. */
     std::function<void(int cellIndex)> onCellDoubleClicked;
 
-    /** Called when context menu requests opening note detail for a cell. */
+    /** Called when context menu requests opening note mode for a cell. */
     std::function<void(int cellIndex)> onOpenNoteDetail;
 
     /** Called after any structural change (resize, reorder, divide, delete). */

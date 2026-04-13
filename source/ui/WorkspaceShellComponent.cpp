@@ -2441,6 +2441,7 @@ bool WorkspaceShellComponent::keyPressed(const juce::KeyPress& key)
             case 't': case 'T': EditToolManager::get().setActiveTool(EditTool::Stretch); return true;
             case 'l': case 'L': EditToolManager::get().setActiveTool(EditTool::Listen); return true;
             case 'm': case 'M': EditToolManager::get().setActiveTool(EditTool::Marquee); return true;
+            case 'g': case 'G': EditToolManager::get().setActiveTool(EditTool::ScaleSnap); return true;
             default: break;
         }
     }

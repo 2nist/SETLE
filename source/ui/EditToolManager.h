@@ -13,7 +13,8 @@ enum class EditTool
     Split,
     Stretch,
     Listen,
-    Marquee
+    Marquee,
+    ScaleSnap
 };
 
 class EditToolManager

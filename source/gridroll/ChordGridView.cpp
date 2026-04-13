@@ -590,7 +590,7 @@ void ChordGridView::showCellContextMenu(int cellIndex, juce::Point<int> screenPo
     menu.addItem(701, "Transpose...");
     menu.addItem(702, "Set Swing...");
     menu.addItem(703, "Humanize", true, std::abs(cell.swing) > 0.0001f);
-    menu.addItem(704, "Open Note Detail");
+    menu.addItem(704, "Open Note Mode");
     menu.addItem(705, "Assign FX Block...");
     menu.addSeparator();
     menu.addItem(600, "Delete Cell");

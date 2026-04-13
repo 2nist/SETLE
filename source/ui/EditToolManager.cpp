@@ -50,6 +50,8 @@ juce::MouseCursor EditToolManager::getCursorFor(Surface surface) const
             return juce::MouseCursor::NormalCursor;
         case T::Marquee:
             return juce::MouseCursor::CrosshairCursor;
+        case T::ScaleSnap:
+            return juce::MouseCursor::CrosshairCursor;
     }
 
     return juce::MouseCursor::NormalCursor;

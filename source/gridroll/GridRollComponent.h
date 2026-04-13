@@ -5,7 +5,7 @@
 
 #include "ChordGridView.h"
 #include "DrumGridView.h"
-#include "NoteDetailView.h"
+#include "NoteModeView.h"
 #include "../model/SetleSongModel.h"
 #include "../theory/MeterContext.h"
 #include "../theme/ThemeManager.h"
@@ -18,16 +18,12 @@ namespace setle::gridroll
 /**
  * Host component for the GridRoll editor (Phase 14D).
  *
- * Contains ChordGridView and DrumGridView and manages mode / zoom state.
- * Supports three layout modes:
- *   ChordGrid — chord row only
- *   DrumGrid  — drum sequencer only
- *   Split     — chord (top 40%) + drums (bottom 60%), locked horizontal scroll
+ * Contains ChordGridView, NoteModeView, and DrumGridView and manages mode / zoom state.
  */
 class GridRollComponent : public juce::Component
 {
 public:
-    enum class Mode { ChordGrid, DrumGrid, Split };
+    enum class Mode { ChordGrid, NoteMode, DrumGrid, Split };
 
     static constexpr int kHeaderHeight = 32; // mode buttons + name + zoom
 
@@ -65,8 +61,15 @@ private:
     void applyMode();
     void syncChordCellsToModel();
     void syncDrumCellsToBackend();
-    void openNoteDetail(int cellIndex);
-    void closeNoteDetail();
+    void jumpToChordInNoteMode(int cellIndex);
+    double totalBeats() const;
+    void setNoteBeatRange(double startBeat, double endBeat);
+    void setNotePitchRange(int lowMidi, int highMidi);
+    void syncChordViewportToNoteRange();
+    void setHorizontalZoomFactor(double factor);
+    void adjustHorizontalZoom(double factorMultiplier);
+    void resetHorizontalZoom();
+    void adjustPitchZoom(int semitoneDelta);
 
     // ---------------------------------------------------------------
     // State
@@ -76,28 +79,35 @@ private:
 
     std::unique_ptr<ChordGridView> chordGrid;
     std::unique_ptr<DrumGridView>  drumGrid;
-    std::unique_ptr<NoteDetailView> noteDetail;
+    std::unique_ptr<NoteModeView> noteModeView;
     juce::Viewport chordViewport;
     juce::Viewport drumViewport;
 
     Mode   currentMode     { Mode::ChordGrid };
-    int    expandedCellIdx { -1 };   // -1 = no detail open
     double playheadBeat    { 0.0 };
-    double zoomBeatsPerPx  { 1.0 };
+    double horizontalZoomFactor { 1.0 };
     setle::theory::MeterContext currentMeter;
+    double noteVisibleStartBeat { 0.0 };
+    double noteVisibleEndBeat { 16.0 };
+    int noteLowestMidi { 48 };
+    int noteHighestMidi { 72 };
 
     juce::String progressionId;
 
     // Header controls
     juce::TextButton chordModeButton { "Chords" };
+    juce::TextButton noteModeButton  { "Notes" };
     juce::TextButton drumModeButton  { "Drums" };
     juce::TextButton splitModeButton { "Split" };
     juce::Label      progressionName;
     juce::Label      sessionKeyDisplay;
-    juce::ToggleButton scaleLockToggle { "Scale" };
-    juce::ToggleButton chordLockToggle { "Chord" };
+    juce::Label      zoomLabel { {}, "Zoom:" };
     juce::TextButton zoomInButton    { "+" };
     juce::TextButton zoomOutButton   { "-" };
+    juce::TextButton zoomResetButton { "1:1" };
+    juce::Label      pitchLabel { {}, "Pitch:" };
+    juce::TextButton pitchInButton   { "+" };
+    juce::TextButton pitchOutButton  { "-" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GridRollComponent)
 };

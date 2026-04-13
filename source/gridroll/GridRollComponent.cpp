@@ -1,79 +1,101 @@
 #include "GridRollComponent.h"
-#include "../state/AppPreferences.h"
+
+#include <cmath>
+#include <map>
 
 namespace setle::gridroll
 {
 
-// ---------------------------------------------------------------
 GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
     : song(songRef)
     , edit(editRef)
 {
-    // ---- create sub-views ----
-    chordGrid  = std::make_unique<ChordGridView>(song);
-    drumGrid   = std::make_unique<DrumGridView>();
-    noteDetail = std::make_unique<NoteDetailView>(song);
+    chordGrid = std::make_unique<ChordGridView>(song);
+    drumGrid = std::make_unique<DrumGridView>();
+    noteModeView = std::make_unique<NoteModeView>(song, edit);
+
     chordViewport.setViewedComponent(chordGrid.get(), false);
     chordViewport.setScrollBarsShown(true, false, true, false);
+
     drumViewport.setViewedComponent(drumGrid.get(), false);
     drumViewport.setScrollBarsShown(false, true, true, false);
 
     drumGrid->buildDefaultRows();
 
-    // ---- chord callbacks ----
-    chordGrid->onCellDoubleClicked = [this](int idx)   { openNoteDetail(idx); };
-    chordGrid->onCellSelected      = [this](int /*idx*/) { repaint(); };
-    chordGrid->onCellsChanged      = [this]
+    chordGrid->onCellDoubleClicked = [this](int idx) { jumpToChordInNoteMode(idx); };
+    chordGrid->onOpenNoteDetail = [this](int idx) { jumpToChordInNoteMode(idx); };
+    chordGrid->onCellSelected = [this](int) { repaint(); };
+    chordGrid->onCellsChanged = [this]
     {
         syncChordCellsToModel();
+        noteModeView->setTargetProgression(progressionId);
+        setNoteBeatRange(noteVisibleStartBeat, noteVisibleEndBeat);
+        setNotePitchRange(noteLowestMidi, noteHighestMidi);
     };
     chordGrid->onStatusMessage = [this](const juce::String& msg)
     {
-        if (onStatusMessage) onStatusMessage(msg);
+        if (onStatusMessage)
+            onStatusMessage(msg);
     };
 
-    // ---- drum callbacks ----
     drumGrid->onCellsChanged = [this]
     {
         syncDrumCellsToBackend();
-        if (onProgressionEdited) onProgressionEdited(progressionId);
+        if (onProgressionEdited)
+            onProgressionEdited(progressionId);
     };
     drumGrid->onStatusMessage = [this](const juce::String& msg)
     {
-        if (onStatusMessage) onStatusMessage(msg);
+        if (onStatusMessage)
+            onStatusMessage(msg);
     };
 
-    // ---- note detail callbacks ----
-    noteDetail->onNotesChanged = [this]
+    noteModeView->onNotesChanged = [this]
     {
-        syncChordCellsToModel();
+        chordGrid->loadProgression(progressionId);
+        if (onProgressionEdited)
+            onProgressionEdited(progressionId);
     };
-    noteDetail->onCloseRequested = [this] { closeNoteDetail(); };
-    noteDetail->onStatusMessage  = [this](const juce::String& msg)
+    noteModeView->onVisibleBeatRangeChanged = [this](double startBeat, double endBeat)
     {
-        if (onStatusMessage) onStatusMessage(msg);
+        noteVisibleStartBeat = startBeat;
+        noteVisibleEndBeat = endBeat;
+        const auto span = juce::jmax(0.001, noteVisibleEndBeat - noteVisibleStartBeat);
+        horizontalZoomFactor = juce::jlimit(1.0, 8.0, totalBeats() / span);
+        syncChordViewportToNoteRange();
+    };
+    noteModeView->onVisiblePitchRangeChanged = [this](int lowMidi, int highMidi)
+    {
+        noteLowestMidi = lowMidi;
+        noteHighestMidi = highMidi;
+    };
+    noteModeView->onStatusMessage = [this](const juce::String& msg)
+    {
+        if (onStatusMessage)
+            onStatusMessage(msg);
     };
 
-    // ---- make visible ----
     addAndMakeVisible(chordViewport);
     addAndMakeVisible(drumViewport);
-    addChildComponent(*noteDetail);
+    addAndMakeVisible(*noteModeView);
 
-    // ---- header buttons ----
-    auto setActiveModeButton = [this](Mode m)
+    auto setActiveModeButton = [this](Mode mode)
     {
-        return [this, m] { setMode(m); };
+        return [this, mode] { setMode(mode); };
     };
     chordModeButton.onClick = setActiveModeButton(Mode::ChordGrid);
-    drumModeButton.onClick  = setActiveModeButton(Mode::DrumGrid);
+    noteModeButton.onClick = setActiveModeButton(Mode::NoteMode);
+    drumModeButton.onClick = setActiveModeButton(Mode::DrumGrid);
     splitModeButton.onClick = setActiveModeButton(Mode::Split);
 
-    for (auto* btn : { &chordModeButton, &drumModeButton, &splitModeButton })
+    for (auto* btn : { &chordModeButton, &noteModeButton, &drumModeButton, &splitModeButton,
+                       &zoomInButton, &zoomOutButton, &zoomResetButton, &pitchInButton, &pitchOutButton })
     {
         const auto& theme = ThemeManager::get().theme();
         btn->setColour(juce::TextButton::buttonColourId, theme.controlBg);
         btn->setColour(juce::TextButton::textColourOffId, theme.controlText.withAlpha(0.9f));
         btn->setColour(juce::TextButton::buttonOnColourId, theme.controlOnBg);
+        btn->setClickingTogglesState(false);
         addAndMakeVisible(*btn);
     }
 
@@ -87,82 +109,69 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
     sessionKeyDisplay.setFont(juce::FontOptions(11.0f));
     addAndMakeVisible(sessionKeyDisplay);
 
-    scaleLockToggle.onClick = [this]
-    {
-        if (noteDetail != nullptr)
-            noteDetail->setScaleLock(scaleLockToggle.getToggleState());
-        setle::state::AppPreferences::get().setScaleLockEnabled(scaleLockToggle.getToggleState());
-    };
-    chordLockToggle.onClick = [this]
-    {
-        if (noteDetail != nullptr)
-            noteDetail->setChordLock(chordLockToggle.getToggleState());
-        setle::state::AppPreferences::get().setChordLockEnabled(chordLockToggle.getToggleState());
-    };
-    addAndMakeVisible(scaleLockToggle);
-    addAndMakeVisible(chordLockToggle);
+    zoomLabel.setColour(juce::Label::textColourId, ThemeManager::get().theme().inkMuted.withAlpha(0.85f));
+    zoomLabel.setFont(juce::FontOptions(11.0f));
+    addAndMakeVisible(zoomLabel);
 
-    zoomInButton.onClick  = [this]
-    {
-        zoomBeatsPerPx = juce::jmax(0.05, zoomBeatsPerPx * 0.75);
-        repaint();
-    };
-    zoomOutButton.onClick = [this]
-    {
-        zoomBeatsPerPx = juce::jmin(4.0, zoomBeatsPerPx * 1.33);
-        repaint();
-    };
-    for (auto* b : { &zoomInButton, &zoomOutButton })
-    {
-        const auto& theme = ThemeManager::get().theme();
-        b->setColour(juce::TextButton::buttonColourId, theme.controlBg);
-        b->setColour(juce::TextButton::textColourOffId, theme.controlText.withAlpha(0.9f));
-        addAndMakeVisible(*b);
-    }
+    pitchLabel.setColour(juce::Label::textColourId, ThemeManager::get().theme().inkMuted.withAlpha(0.85f));
+    pitchLabel.setFont(juce::FontOptions(11.0f));
+    addAndMakeVisible(pitchLabel);
 
-    scaleLockToggle.setToggleState(setle::state::AppPreferences::get().getScaleLockEnabled(), juce::dontSendNotification);
-    chordLockToggle.setToggleState(setle::state::AppPreferences::get().getChordLockEnabled(), juce::dontSendNotification);
-    noteDetail->setScaleLock(scaleLockToggle.getToggleState());
-    noteDetail->setChordLock(chordLockToggle.getToggleState());
+    zoomInButton.onClick = [this] { adjustHorizontalZoom(1.25); };
+    zoomOutButton.onClick = [this] { adjustHorizontalZoom(0.8); };
+    zoomResetButton.onClick = [this] { resetHorizontalZoom(); };
+    pitchInButton.onClick = [this] { adjustPitchZoom(-4); };
+    pitchOutButton.onClick = [this] { adjustPitchZoom(4); };
 
     applyMode();
-    setSize(800, 300);
+    setSize(900, 320);
 }
 
-// ---------------------------------------------------------------
 void GridRollComponent::setTargetProgression(const juce::String& id)
 {
     progressionId = id;
-    closeNoteDetail();
 
     auto progOpt = song.findProgressionById(id);
     if (progOpt.has_value())
     {
         progressionName.setText(progOpt->getName(), juce::dontSendNotification);
-        const juce::String keyMode = progOpt->getKey() + " " + progOpt->getMode();
-        sessionKeyDisplay.setText(keyMode, juce::dontSendNotification);
+        sessionKeyDisplay.setText((progOpt->getKey() + " " + progOpt->getMode()).trim(), juce::dontSendNotification);
     }
     else
     {
         progressionName.setText("—", juce::dontSendNotification);
-        sessionKeyDisplay.setText("", juce::dontSendNotification);
+        sessionKeyDisplay.setText({}, juce::dontSendNotification);
     }
 
     chordGrid->loadProgression(id);
+    noteModeView->setTargetProgression(id);
+
+    const auto beats = totalBeats();
+    noteVisibleStartBeat = 0.0;
+    noteVisibleEndBeat = beats;
+    noteLowestMidi = 48;
+    noteHighestMidi = 72;
+    horizontalZoomFactor = 1.0;
+
+    setNoteBeatRange(noteVisibleStartBeat, noteVisibleEndBeat);
+    setNotePitchRange(noteLowestMidi, noteHighestMidi);
+
     setMeterContext(setle::theory::MeterContext::forBeat(playheadBeat, song));
+    resized();
+    repaint();
 }
 
-// ---------------------------------------------------------------
 void GridRollComponent::setMode(Mode mode)
 {
+    if (currentMode == mode)
+        return;
+
     currentMode = mode;
-    closeNoteDetail();
     applyMode();
     resized();
     repaint();
 }
 
-// ---------------------------------------------------------------
 void GridRollComponent::setPlayheadBeat(double beat)
 {
     playheadBeat = beat;
@@ -172,11 +181,9 @@ void GridRollComponent::setPlayheadBeat(double beat)
 
     chordGrid->setPlayheadBeat(beat);
     drumGrid->setPlayheadBeat(beat);
-    if (noteDetail != nullptr)
-        noteDetail->setPlayheadBeat(beat);
+    noteModeView->setPlayheadBeat(beat);
 }
 
-// ---------------------------------------------------------------
 void GridRollComponent::setTheorySnap(const juce::String& snap)
 {
     chordGrid->setTheorySnap(snap);
@@ -193,181 +200,240 @@ void GridRollComponent::setMeterContext(const setle::theory::MeterContext& meter
     drumGrid->setMeterContext(currentMeter);
 }
 
-// ---------------------------------------------------------------
 void GridRollComponent::applyMode()
 {
-    // Update button tint to indicate active mode
     chordModeButton.setToggleState(currentMode == Mode::ChordGrid, juce::dontSendNotification);
-    drumModeButton.setToggleState (currentMode == Mode::DrumGrid,  juce::dontSendNotification);
-    splitModeButton.setToggleState(currentMode == Mode::Split,     juce::dontSendNotification);
+    noteModeButton.setToggleState(currentMode == Mode::NoteMode, juce::dontSendNotification);
+    drumModeButton.setToggleState(currentMode == Mode::DrumGrid, juce::dontSendNotification);
+    splitModeButton.setToggleState(currentMode == Mode::Split, juce::dontSendNotification);
 
+    chordViewport.setScrollBarsShown(currentMode != Mode::Split, false, true, false);
     chordViewport.setVisible(currentMode == Mode::ChordGrid || currentMode == Mode::Split);
-    drumViewport.setVisible(currentMode == Mode::DrumGrid  || currentMode == Mode::Split);
+    noteModeView->setVisible(currentMode == Mode::NoteMode || currentMode == Mode::Split);
+    drumViewport.setVisible(currentMode == Mode::DrumGrid);
 }
 
-// ---------------------------------------------------------------
 void GridRollComponent::paint(juce::Graphics& g)
 {
     const auto& theme = ThemeManager::get().theme();
     g.fillAll(theme.surface1);
 
-    // Header background
     g.setColour(theme.headerBg);
     g.fillRect(0, 0, getWidth(), kHeaderHeight);
 }
 
-// ---------------------------------------------------------------
 void GridRollComponent::resized()
 {
     auto area = getLocalBounds();
     auto header = area.removeFromTop(kHeaderHeight);
 
-    // Mode buttons
-    chordModeButton.setBounds(header.removeFromLeft(72).reduced(4, 6));
-    drumModeButton.setBounds (header.removeFromLeft(66).reduced(4, 6));
-    splitModeButton.setBounds(header.removeFromLeft(60).reduced(4, 6));
+    chordModeButton.setBounds(header.removeFromLeft(74).reduced(4, 6));
+    noteModeButton.setBounds(header.removeFromLeft(66).reduced(4, 6));
+    drumModeButton.setBounds(header.removeFromLeft(66).reduced(4, 6));
+    splitModeButton.setBounds(header.removeFromLeft(62).reduced(4, 6));
     header.removeFromLeft(8);
 
-    // Progression name
     progressionName.setBounds(header.removeFromLeft(180).reduced(4, 4));
-    sessionKeyDisplay.setBounds(header.removeFromLeft(110).reduced(4, 4));
-    scaleLockToggle.setBounds(header.removeFromLeft(64).reduced(2, 4));
-    chordLockToggle.setBounds(header.removeFromLeft(68).reduced(2, 4));
+    sessionKeyDisplay.setBounds(header.removeFromLeft(96).reduced(4, 4));
 
-    // Zoom controls (right side)
+    pitchInButton.setBounds(header.removeFromRight(28).reduced(4, 6));
+    pitchOutButton.setBounds(header.removeFromRight(28).reduced(4, 6));
+    pitchLabel.setBounds(header.removeFromRight(46).reduced(2, 7));
+
+    header.removeFromRight(8);
+
+    zoomInButton.setBounds(header.removeFromRight(28).reduced(4, 6));
+    zoomResetButton.setBounds(header.removeFromRight(42).reduced(4, 6));
     zoomOutButton.setBounds(header.removeFromRight(28).reduced(4, 6));
-    zoomInButton.setBounds (header.removeFromRight(28).reduced(4, 6));
+    zoomLabel.setBounds(header.removeFromRight(46).reduced(2, 7));
 
-    // Content area
     if (currentMode == Mode::ChordGrid)
     {
         chordViewport.setBounds(area);
-        const int chordContentWidth = juce::jmax(chordViewport.getWidth(),
-                                                 static_cast<int>(chordGrid->getTotalBeats() * 72.0) + 32);
-        chordGrid->setSize(chordContentWidth, chordViewport.getHeight());
-
-        if (noteDetail->isVisible())
-        {
-            const int chordH  = ChordGridView::kHeight;
-            const int detailH = NoteDetailView::kHeight;
-            chordViewport.setBounds(area.removeFromTop(chordH));
-            chordGrid->setSize(chordContentWidth, chordH);
-            noteDetail->setBounds(area.removeFromTop(detailH));
-        }
+        syncChordViewportToNoteRange();
+        return;
     }
-    else if (currentMode == Mode::DrumGrid)
+
+    if (currentMode == Mode::NoteMode)
+    {
+        noteModeView->setBounds(area);
+        syncChordViewportToNoteRange();
+        return;
+    }
+
+    if (currentMode == Mode::DrumGrid)
     {
         drumViewport.setBounds(area);
         drumGrid->setSize(drumViewport.getWidth(), juce::jmax(drumGrid->getHeight(), drumViewport.getHeight()));
+        return;
     }
-    else  // Split
-    {
-        const int totalH  = area.getHeight();
-        const int chordH  = noteDetail->isVisible()
-                                ? ChordGridView::kHeight + NoteDetailView::kHeight
-                                : static_cast<int>(totalH * 0.40f);
-        const int drumH   = totalH - chordH;
 
-        auto chordArea = area.removeFromTop(chordH);
-        if (noteDetail->isVisible())
-        {
-            chordViewport.setBounds(chordArea.removeFromTop(ChordGridView::kHeight));
-            const int chordContentWidth = juce::jmax(chordViewport.getWidth(),
-                                                     static_cast<int>(chordGrid->getTotalBeats() * 72.0) + 32);
-            chordGrid->setSize(chordContentWidth, chordViewport.getHeight());
-            noteDetail->setBounds(chordArea.removeFromTop(NoteDetailView::kHeight));
-        }
-        else
-        {
-            chordViewport.setBounds(chordArea);
-            const int chordContentWidth = juce::jmax(chordViewport.getWidth(),
-                                                     static_cast<int>(chordGrid->getTotalBeats() * 72.0) + 32);
-            chordGrid->setSize(chordContentWidth, chordViewport.getHeight());
-        }
-        drumViewport.setBounds(area.removeFromTop(drumH));
-        drumGrid->setSize(drumViewport.getWidth(), juce::jmax(drumGrid->getHeight(), drumViewport.getHeight()));
-    }
+    auto chordArea = area.removeFromTop(static_cast<int>(std::round(area.getHeight() * 0.30f)));
+    auto noteArea = area;
+
+    chordViewport.setBounds(chordArea);
+    noteModeView->setBounds(noteArea);
+    syncChordViewportToNoteRange();
 }
 
-// ---------------------------------------------------------------
-void GridRollComponent::openNoteDetail(int cellIndex)
+void GridRollComponent::jumpToChordInNoteMode(int cellIndex)
 {
     const auto& cells = chordGrid->getCells();
     if (cellIndex < 0 || cellIndex >= static_cast<int>(cells.size()))
         return;
 
-    auto progOpt = song.findProgressionById(progressionId);
-    const juce::String key  = progOpt.has_value() ? progOpt->getKey()  : "C";
-    const juce::String mode = progOpt.has_value() ? progOpt->getMode() : "ionian";
-
-    expandedCellIdx = cellIndex;
-    noteDetail->loadCell(cells[static_cast<size_t>(cellIndex)], key, mode);
-    noteDetail->setScaleLock(scaleLockToggle.getToggleState());
-    noteDetail->setChordLock(chordLockToggle.getToggleState());
-    noteDetail->setVisible(true);
-    noteDetail->grabKeyboardFocus();
-    resized();
-    repaint();
+    setMode(Mode::NoteMode);
+    noteModeView->scrollToBeat(cells[static_cast<size_t>(cellIndex)].startBeat, true);
+    noteVisibleStartBeat = noteModeView->getVisibleStartBeat();
+    noteVisibleEndBeat = noteModeView->getVisibleEndBeat();
+    syncChordViewportToNoteRange();
 }
 
-// ---------------------------------------------------------------
-void GridRollComponent::closeNoteDetail()
+double GridRollComponent::totalBeats() const
 {
-    expandedCellIdx = -1;
-    noteDetail->setVisible(false);
-    resized();
-    repaint();
+    return juce::jmax(2.0, chordGrid->getTotalBeats());
 }
 
-// ---------------------------------------------------------------
+void GridRollComponent::setNoteBeatRange(double startBeat, double endBeat)
+{
+    noteModeView->setVisibleBeatRange(startBeat, endBeat);
+    noteVisibleStartBeat = noteModeView->getVisibleStartBeat();
+    noteVisibleEndBeat = noteModeView->getVisibleEndBeat();
+
+    const auto span = juce::jmax(0.001, noteVisibleEndBeat - noteVisibleStartBeat);
+    horizontalZoomFactor = juce::jlimit(1.0, 8.0, totalBeats() / span);
+    syncChordViewportToNoteRange();
+}
+
+void GridRollComponent::setNotePitchRange(int lowMidi, int highMidi)
+{
+    noteModeView->setVisiblePitchRange(lowMidi, highMidi);
+    noteLowestMidi = noteModeView->getLowestVisibleMidi();
+    noteHighestMidi = noteModeView->getHighestVisibleMidi();
+}
+
+void GridRollComponent::syncChordViewportToNoteRange()
+{
+    if (chordGrid == nullptr || chordViewport.getWidth() <= 0 || chordViewport.getHeight() <= 0)
+        return;
+
+    const auto total = totalBeats();
+    const auto span = juce::jmax(0.5, noteVisibleEndBeat - noteVisibleStartBeat);
+    const auto ppb = static_cast<double>(chordViewport.getWidth()) / span;
+    const int contentWidth = juce::jmax(chordViewport.getWidth(), static_cast<int>(std::round(total * ppb)) + 32);
+
+    chordGrid->setSize(contentWidth, chordViewport.getHeight());
+
+    const int maxViewX = juce::jmax(0, contentWidth - chordViewport.getWidth());
+    const int viewX = juce::jlimit(0, maxViewX, static_cast<int>(std::round(noteVisibleStartBeat * ppb)));
+    chordViewport.setViewPosition(viewX, 0);
+}
+
+void GridRollComponent::setHorizontalZoomFactor(double factor)
+{
+    const auto total = totalBeats();
+    const auto clampedFactor = juce::jlimit(1.0, 8.0, factor);
+    const auto newSpan = juce::jlimit(2.0, total, total / clampedFactor);
+    const auto centre = noteVisibleStartBeat + (noteVisibleEndBeat - noteVisibleStartBeat) * 0.5;
+    setNoteBeatRange(centre - newSpan * 0.5, centre + newSpan * 0.5);
+}
+
+void GridRollComponent::adjustHorizontalZoom(double factorMultiplier)
+{
+    setHorizontalZoomFactor(horizontalZoomFactor * factorMultiplier);
+}
+
+void GridRollComponent::resetHorizontalZoom()
+{
+    setHorizontalZoomFactor(1.0);
+}
+
+void GridRollComponent::adjustPitchZoom(int semitoneDelta)
+{
+    const auto currentSpan = noteHighestMidi - noteLowestMidi;
+    const auto newSpan = juce::jlimit(12, 72, currentSpan + semitoneDelta);
+    const auto centre = (noteLowestMidi + noteHighestMidi) / 2;
+    auto low = centre - newSpan / 2;
+    auto high = low + newSpan;
+
+    if (low < 0)
+    {
+        high -= low;
+        low = 0;
+    }
+    if (high > 127)
+    {
+        const auto excess = high - 127;
+        low -= excess;
+        high = 127;
+    }
+
+    setNotePitchRange(juce::jmax(0, low), juce::jmin(127, high));
+}
+
 void GridRollComponent::syncChordCellsToModel()
 {
-    // Write updated cells back into the model Progression
     auto progOpt = song.findProgressionById(progressionId);
     if (!progOpt.has_value())
         return;
 
-    model::Progression& prog = *progOpt;
-    // Clear existing chords and rebuild from cell list
-    // (ValueTree-backed: create new Chord objects for each updated cell)
+    auto progTree = progOpt->valueTree();
+    if (!progTree.isValid())
+        return;
+
+    std::map<juce::String, juce::ValueTree> existingById;
+    for (const auto& child : progTree)
+    {
+        if (!child.hasType(model::Schema::chordType))
+            continue;
+        const auto id = child.getProperty(model::Schema::idProp).toString();
+        if (id.isNotEmpty())
+            existingById[id] = child.createCopy();
+    }
+
+    for (int i = progTree.getNumChildren(); --i >= 0;)
+    {
+        if (progTree.getChild(i).hasType(model::Schema::chordType))
+            progTree.removeChild(i, nullptr);
+    }
+
+    double lengthBeats = 0.0;
     const auto& cells = chordGrid->getCells();
-
-    // Remove all current chords from prog
-    const auto existing = prog.getChords();
-    // We rebuild by mutating the backing ValueTree directly via the model API:
-    // For simplicity, delete-all-and-re-add via existing addChord interface
-    // Note: this is the approved model-mutation path per the spec.
-
-    // Build replacement progression state using the chord API
-    auto progTree = prog.valueTree();
-    // Remove child chord nodes
-    for (auto child : existing)
-        progTree.removeChild(child.valueTree(), nullptr);
-
-    double cursor = 0.0;
     for (const auto& cell : cells)
     {
-        auto chord = model::Chord::create(cell.chordSymbol,
-                                          "unknown",
-                                          cell.midiNote);
-        chord.setFunction(cell.chordFunction);
-        chord.setName(cell.romanNumeral);
-        chord.setStartBeats(cell.startBeat);
-        chord.setDurationBeats(cell.durationBeats);
+        juce::ValueTree chordTree;
 
-        // If note detail edited notes for this cell, write them in
-        if (expandedCellIdx >= 0 &&
-            static_cast<size_t>(expandedCellIdx) < cells.size() &&
-            cells[static_cast<size_t>(expandedCellIdx)].cellId == cell.cellId &&
-            noteDetail != nullptr)
+        auto id = cell.cellId;
+        if (id.isEmpty())
+            id = juce::Uuid().toString();
+
+        const auto existing = existingById.find(id);
+        if (existing != existingById.end())
         {
-            for (const auto& note : noteDetail->getNotes())
-                chord.addNote(note);
+            chordTree = existing->second.createCopy();
+        }
+        else
+        {
+            chordTree = model::Chord::create(cell.chordSymbol,
+                                             "unknown",
+                                             cell.midiNote).valueTree();
         }
 
-        prog.addChord(chord);
-        cursor += cell.durationBeats;
+        chordTree.setProperty(model::Schema::idProp, id, nullptr);
+        chordTree.setProperty(model::Schema::nameProp, cell.romanNumeral, nullptr);
+        chordTree.setProperty(model::Schema::symbolProp, cell.chordSymbol, nullptr);
+        chordTree.setProperty(model::Schema::functionProp, cell.chordFunction, nullptr);
+        chordTree.setProperty(model::Schema::sourceProp, cell.source, nullptr);
+        chordTree.setProperty(model::Schema::confidenceProp, cell.confidence, nullptr);
+        chordTree.setProperty(model::Schema::rootMidiProp, cell.midiNote, nullptr);
+        chordTree.setProperty(model::Schema::startBeatsProp, cell.startBeat, nullptr);
+        chordTree.setProperty(model::Schema::durationBeatsProp, cell.durationBeats, nullptr);
+
+        progTree.appendChild(chordTree, nullptr);
+        lengthBeats = juce::jmax(lengthBeats, cell.startBeat + cell.durationBeats);
     }
+
+    progTree.setProperty(model::Schema::lengthBeatsProp, lengthBeats, nullptr);
 
     if (onProgressionEdited)
         onProgressionEdited(progressionId);

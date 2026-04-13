@@ -19,7 +19,7 @@ public:
     void activeToolChanged(EditTool newTool) override;
 
 private:
-    std::array<juce::TextButton, 7> toolButtons;
+    std::array<juce::TextButton, 8> toolButtons;
     static constexpr int kButtonWidth = 28;
     static constexpr int kButtonHeight = 22;
 };

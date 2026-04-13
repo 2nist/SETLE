@@ -177,6 +177,8 @@ target_sources(SETLE PRIVATE
     source/gridroll/ChordGridView.h
     source/gridroll/NoteDetailView.cpp
     source/gridroll/NoteDetailView.h
+    source/gridroll/NoteModeView.cpp
+    source/gridroll/NoteModeView.h
     source/gridroll/DrumGridView.cpp
     source/gridroll/DrumGridView.h
     source/gridroll/GroovePanel.cpp
