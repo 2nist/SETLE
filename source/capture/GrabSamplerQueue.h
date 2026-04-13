@@ -28,6 +28,9 @@ public:
                          const juce::String& progressionId,
                          const juce::String& displayName,
                          float confidence);
+    bool setSlotAudioBuffer(int slotIndex,
+                            const juce::AudioBuffer<float>& audio,
+                            double sampleRate);
     void clearSlot(int slotIndex);
     const GrabSlot& getSlot(int slotIndex) const;
     GrabSlot& getSlotMutable(int slotIndex);
@@ -47,6 +50,7 @@ private:
     bool isValidSlot(int slotIndex) const;
     te::AudioTrack* findOrCreateSamplerTrack(te::Edit& edit);
     void rebuildSamplerClipForSlot(te::Edit& edit, int slotIndex, te::AudioTrack& track);
+    void rebuildSamplerClipForAudioSlot(te::AudioTrack& track, double durationSeconds);
     void notifyQueueChanged();
 
     std::array<GrabSlot, kSlotCount> slots;

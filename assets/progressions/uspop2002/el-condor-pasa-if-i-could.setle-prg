@@ -1,0 +1,134 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "El Condor Pasa If I Could",
+  "category": "Pop",
+  "source": "el-condor-pasa-if-i-could.spl.prg",
+  "chords": [
+    {
+      "symbol": "Emin/b3",
+      "quality": "minor",
+      "rootMidi": 64,
+      "durationBeats": 58.75
+    },
+    {
+      "symbol": "Amin/b3",
+      "quality": "minor",
+      "rootMidi": 69,
+      "durationBeats": 12.5
+    },
+    {
+      "symbol": "Emin/5",
+      "quality": "minor",
+      "rootMidi": 64,
+      "durationBeats": 16.5
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 19.5
+    },
+    {
+      "symbol": "Emin",
+      "quality": "minor",
+      "rootMidi": 64,
+      "durationBeats": 19.5
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 19.5
+    },
+    {
+      "symbol": "Emin",
+      "quality": "minor",
+      "rootMidi": 64,
+      "durationBeats": 13.0
+    },
+    {
+      "symbol": "Cmaj",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 13.0
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 12.75
+    },
+    {
+      "symbol": "Cmaj",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 12.75
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 13.25
+    },
+    {
+      "symbol": "Emin",
+      "quality": "minor",
+      "rootMidi": 64,
+      "durationBeats": 26.0
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 19.5
+    },
+    {
+      "symbol": "Emin",
+      "quality": "minor",
+      "rootMidi": 64,
+      "durationBeats": 13.0
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 19.75
+    },
+    {
+      "symbol": "Emin",
+      "quality": "minor",
+      "rootMidi": 64,
+      "durationBeats": 6.5
+    },
+    {
+      "symbol": "Cmaj",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 13.0
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 13.0
+    },
+    {
+      "symbol": "Cmaj",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 13.0
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 13.0
+    },
+    {
+      "symbol": "Emin",
+      "quality": "minor",
+      "rootMidi": 64,
+      "durationBeats": 29.0
+    }
+  ]
+}

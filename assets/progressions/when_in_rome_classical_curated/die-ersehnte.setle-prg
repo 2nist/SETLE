@@ -1,0 +1,152 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Die Ersehnte",
+  "category": "Classical",
+  "source": "die-ersehnte.spl.prg",
+  "chords": [
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Eb majorV7/IV",
+      "quality": "diminished",
+      "rootMidi": 63,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "IV",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "Eb majorV7/IV",
+      "quality": "diminished",
+      "rootMidi": 63,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "IV",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "viio7",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Eb majorV7/IV",
+      "quality": "diminished",
+      "rootMidi": 63,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "iv",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "iio6",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "viio7",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i64",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "Eb majorviio7/V",
+      "quality": "diminished",
+      "rootMidi": 63,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V42",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "IV",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 12.0
+    }
+  ]
+}

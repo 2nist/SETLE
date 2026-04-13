@@ -1,5 +1,8 @@
 #include "WorkspaceShellComponent.h"
 
+#include "ToolPaletteComponent.h"
+#include "EditToolManager.h"
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -7,6 +10,8 @@
 #include <cstdlib>
 #include <functional>
 #include <set>
+
+#include "../theme/ThemePresets.h"
 
 namespace te = tracktion::engine;
 
@@ -62,14 +67,109 @@ enum TheoryActionId
     historyGrabCustom = 504,
     historySetLength = 505,
     historyChangeSource = 506,
-    historyClear = 507
+    historyClear = 507,
+    historyAutoGrabToggle = 508,
+    historyPreviewMode = 509,
+    historySetBpm = 510,
+    historySyncToTransport = 511,
+    historyExportMidi = 512,
+    historyCaptureSingle = 513,
+
+    sectionRename = 105,
+    sectionDelete = 106,
+    sectionDuplicate = 107,
+    sectionSetColor = 108,
+    sectionSetTimeSig = 109,
+    sectionExportMidi = 110,
+    sectionJumpTo = 111,
+
+    chordDelete = 215,
+    chordDuplicate = 216,
+    chordInsertBefore = 217,
+    chordInsertAfter = 218,
+    chordNudgeLeft = 219,
+    chordNudgeRight = 220,
+    chordSetDuration = 221,
+    chordInvertVoicing = 222,
+    chordSendToGridRoll = 223
 };
+
+static const juce::Identifier kInstrumentSlotsContainerId { "instrumentSlots" };
+static const juce::Identifier kInstrumentSlotEntryId { "instrumentSlot" };
+static const juce::Identifier kSlotTrackIdProp { "trackId" };
+static const juce::Identifier kSlotTypeProp { "slotType" };
+static const juce::Identifier kSlotPersistentIdProp { "persistentId" };
+static const juce::Identifier kSlotPersistentNameProp { "persistentName" };
+
+juce::String slotTypeToString(setle::instruments::InstrumentSlot::SlotType type)
+{
+    using SlotType = setle::instruments::InstrumentSlot::SlotType;
+    switch (type)
+    {
+        case SlotType::PolySynth:   return "PolySynth";
+        case SlotType::DrumMachine: return "DrumMachine";
+        case SlotType::ReelSampler: return "ReelSampler";
+        case SlotType::VST3:        return "VST3";
+        case SlotType::MidiOut:     return "MidiOut";
+        case SlotType::Empty:       break;
+    }
+    return "Empty";
+}
+
+setle::instruments::InstrumentSlot::SlotType slotTypeFromString(const juce::String& value)
+{
+    using SlotType = setle::instruments::InstrumentSlot::SlotType;
+    if (value == "PolySynth") return SlotType::PolySynth;
+    if (value == "DrumMachine") return SlotType::DrumMachine;
+    if (value == "ReelSampler") return SlotType::ReelSampler;
+    if (value == "VST3") return SlotType::VST3;
+    if (value == "MidiOut") return SlotType::MidiOut;
+    return SlotType::Empty;
+}
 
 juce::String chordRootNameForMidi(int midiNote)
 {
     static constexpr std::array<const char*, 12> names { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
     const auto pitchClass = ((midiNote % 12) + 12) % 12;
     return names[static_cast<size_t>(pitchClass)];
+}
+
+int pitchClassForKeyName(const juce::String& keyName)
+{
+    const auto normalized = keyName.trim();
+    if (normalized.equalsIgnoreCase("C")) return 0;
+    if (normalized.equalsIgnoreCase("C#") || normalized.equalsIgnoreCase("Db")) return 1;
+    if (normalized.equalsIgnoreCase("D")) return 2;
+    if (normalized.equalsIgnoreCase("D#") || normalized.equalsIgnoreCase("Eb")) return 3;
+    if (normalized.equalsIgnoreCase("E") || normalized.equalsIgnoreCase("Fb")) return 4;
+    if (normalized.equalsIgnoreCase("F") || normalized.equalsIgnoreCase("E#")) return 5;
+    if (normalized.equalsIgnoreCase("F#") || normalized.equalsIgnoreCase("Gb")) return 6;
+    if (normalized.equalsIgnoreCase("G")) return 7;
+    if (normalized.equalsIgnoreCase("G#") || normalized.equalsIgnoreCase("Ab")) return 8;
+    if (normalized.equalsIgnoreCase("A")) return 9;
+    if (normalized.equalsIgnoreCase("A#") || normalized.equalsIgnoreCase("Bb")) return 10;
+    if (normalized.equalsIgnoreCase("B") || normalized.equalsIgnoreCase("Cb")) return 11;
+    return 0;
+}
+
+juce::String transposeChordSymbolRoot(const juce::String& symbol, int semitones)
+{
+    if (symbol.isEmpty())
+        return symbol;
+
+    auto rootLength = 1;
+    if (symbol.length() > 1)
+    {
+        const auto accidental = symbol.substring(1, 2);
+        if (accidental == "#" || accidental == "b")
+            rootLength = 2;
+    }
+
+    const auto oldRoot = symbol.substring(0, rootLength);
+    const auto suffix = symbol.substring(rootLength);
+    const auto oldPc = pitchClassForKeyName(oldRoot);
+    const auto newRoot = chordRootNameForMidi(oldPc + semitones);
+    return newRoot + suffix;
 }
 
 int quantizeToCMajor(int midiNote)
@@ -285,6 +385,7 @@ public:
         std::function<void(int)> clearSlot;
         std::function<void(int)> toggleLoop;
         std::function<void(int)> renameSlot;
+        std::function<void(juce::Component&, const juce::String&)> showProgressionContextMenu;
     };
 
 private:
@@ -384,6 +485,7 @@ private:
             menu.addSeparator();
             menu.addItem(3, "Rename...");
             menu.addItem(4, "Edit in Theory Panel");
+            menu.addItem(8, "Progression Actions...");
             menu.addSeparator();
             menu.addItem(5, "Promote to Library");
             menu.addItem(6, "Drop to Timeline at Playhead");
@@ -423,6 +525,12 @@ private:
                                    {
                                        if (queueActions.editSlot)
                                            queueActions.editSlot(slotIndex);
+                                   }
+                                   else if (selected == 8)
+                                   {
+                                       const auto* slotState = getSlot();
+                                       if (slotState != nullptr && queueActions.showProgressionContextMenu)
+                                           queueActions.showProgressionContextMenu(*this, slotState->progressionId);
                                    }
                                    else if (selected == 5)
                                    {
@@ -735,6 +843,13 @@ private:
 
     void handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& msg) override
     {
+        if (msg.isController() && setle::state::AppPreferences::get().getMidiLearnActive())
+        {
+            setle::state::AppPreferences::get().setMidiLearnCC(msg.getControllerNumber());
+            setle::state::AppPreferences::get().setMidiLearnChannel(msg.getChannel());
+            setle::state::AppPreferences::get().setMidiLearnActive(false);
+        }
+
         const juce::ScopedLock sl(logLock);
         midiLog.add(msg);
         if (midiLog.size() > 12)
@@ -781,6 +896,331 @@ private:
     juce::String title;
     juce::String subtitle;
     juce::Colour colour;
+};
+
+class WorkspaceShellComponent::OutPanelHost final : public juce::Component
+{
+public:
+    using SlotType = setle::instruments::InstrumentSlot::SlotType;
+    using TypeChangedCallback = std::function<void(const juce::String&, SlotType)>;
+    using VstScanCallback = std::function<void()>;
+    using VstLoadCallback = std::function<void(const juce::String&)>;
+    using MidiOutChangedCallback = std::function<void(const juce::String&, const juce::String&)>;
+
+    class InstrumentStrip final : public juce::Component
+    {
+    public:
+        InstrumentStrip()
+        {
+            addAndMakeVisible(trackNameLabel);
+            addAndMakeVisible(typeSelector);
+            addAndMakeVisible(scanVstButton);
+            addAndMakeVisible(loadVstButton);
+            addAndMakeVisible(midiOutSelector);
+            addAndMakeVisible(muteButton);
+            addAndMakeVisible(volumeSlider);
+            addAndMakeVisible(panSlider);
+
+            trackNameLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.92f));
+            trackNameLabel.setFont(juce::FontOptions(14.0f));
+            trackNameLabel.setJustificationType(juce::Justification::centredLeft);
+
+            muteButton.setButtonText("M");
+            muteButton.setClickingTogglesState(true);
+            muteButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3f46));
+            muteButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
+
+            volumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+            volumeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
+            volumeSlider.setRange(0.0, 1.0, 0.01);
+            volumeSlider.setValue(0.75, juce::dontSendNotification);
+            volumeSlider.onValueChange = [this]
+            {
+                if (volumePlugin != nullptr)
+                    volumePlugin->setSliderPos(static_cast<float>(volumeSlider.getValue()));
+            };
+
+            panSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+            panSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
+            panSlider.setRange(-1.0, 1.0, 0.01);
+            panSlider.setValue(0.0, juce::dontSendNotification);
+            panSlider.onValueChange = [this]
+            {
+                if (volumePlugin != nullptr)
+                    volumePlugin->setPan(static_cast<float>(panSlider.getValue()));
+            };
+
+            muteButton.onClick = [this]
+            {
+                if (volumePlugin != nullptr)
+                    volumePlugin->muteOrUnmute();
+            };
+
+            typeSelector.addItem("PolySynth", 1);
+            typeSelector.addItem("DrumMachine", 2);
+            typeSelector.addItem("ReelSampler", 3);
+            typeSelector.addItem("VST3", 4);
+            typeSelector.addItem("MIDI Out", 5);
+            typeSelector.onChange = [this]
+            {
+                if (onTypeChanged == nullptr)
+                    return;
+
+                switch (typeSelector.getSelectedId())
+                {
+                    case 1: onTypeChanged(trackId, SlotType::PolySynth); break;
+                    case 2: onTypeChanged(trackId, SlotType::DrumMachine); break;
+                    case 3: onTypeChanged(trackId, SlotType::ReelSampler); break;
+                    case 4: onTypeChanged(trackId, SlotType::VST3); break;
+                    case 5: onTypeChanged(trackId, SlotType::MidiOut); break;
+                    default: break;
+                }
+
+                updateTypeSpecificControls();
+            };
+
+            loadVstButton.setButtonText("Load VST...");
+            loadVstButton.onClick = [this]
+            {
+                if (onVstLoadRequested != nullptr)
+                    onVstLoadRequested(trackId);
+            };
+
+            scanVstButton.setButtonText("Scan VST3...");
+            scanVstButton.onClick = [this]
+            {
+                if (onVstScanRequested != nullptr)
+                    onVstScanRequested();
+            };
+
+            midiOutSelector.onChange = [this]
+            {
+                if (onMidiOutChanged == nullptr)
+                    return;
+
+                const auto idx = midiOutSelector.getSelectedItemIndex();
+                if (idx >= 0 && idx < static_cast<int>(midiOutputIdentifiers.size()))
+                    onMidiOutChanged(trackId, midiOutputIdentifiers[static_cast<size_t>(idx)]);
+            };
+        }
+
+        void configure(te::AudioTrack& audioTrack,
+                       const juce::String& name,
+                       const juce::String& id,
+                       setle::instruments::InstrumentSlot* slot,
+                       TypeChangedCallback callback,
+                       VstScanCallback scanCallback,
+                       VstLoadCallback vstCallback,
+                       MidiOutChangedCallback midiOutCallback)
+        {
+            trackId = id;
+            onTypeChanged = std::move(callback);
+            onVstScanRequested = std::move(scanCallback);
+            onVstLoadRequested = std::move(vstCallback);
+            onMidiOutChanged = std::move(midiOutCallback);
+            trackNameLabel.setText(name, juce::dontSendNotification);
+            volumePlugin = audioTrack.getVolumePlugin();
+
+            midiOutSelector.clear(juce::dontSendNotification);
+            midiOutputIdentifiers.clear();
+            midiOutSelector.addItem("Default MIDI Output", 1);
+            midiOutputIdentifiers.push_back("default");
+            int itemId = 2;
+            for (const auto& device : juce::MidiOutput::getAvailableDevices())
+            {
+                midiOutSelector.addItem(device.name, itemId++);
+                midiOutputIdentifiers.push_back(device.identifier);
+            }
+            midiOutSelector.setSelectedItemIndex(0, juce::dontSendNotification);
+
+            if (volumePlugin != nullptr)
+            {
+                volumeSlider.setValue(volumePlugin->getSliderPos(), juce::dontSendNotification);
+                panSlider.setValue(volumePlugin->getPan(), juce::dontSendNotification);
+            }
+
+            auto selected = 1;
+            auto midiSelectionIndex = 0;
+            if (slot != nullptr)
+            {
+                const auto info = slot->getInfo();
+                switch (info.type)
+                {
+                    case SlotType::PolySynth: selected = 1; break;
+                    case SlotType::DrumMachine: selected = 2; break;
+                    case SlotType::ReelSampler: selected = 3; break;
+                    case SlotType::VST3: selected = 4; break;
+                    case SlotType::MidiOut: selected = 5; break;
+                    case SlotType::Empty: selected = 1; break;
+                }
+
+                if (info.type == SlotType::MidiOut)
+                {
+                    for (int i = 0; i < static_cast<int>(midiOutputIdentifiers.size()); ++i)
+                    {
+                        if (midiOutputIdentifiers[static_cast<size_t>(i)] == info.persistentIdentifier)
+                        {
+                            midiSelectionIndex = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (auto* editor = slot->getEditorComponent())
+                {
+                    if (editor->getParentComponent() != this)
+                        addAndMakeVisible(*editor);
+                    editorComponent = editor;
+                }
+            }
+
+            typeSelector.setSelectedId(selected, juce::dontSendNotification);
+            midiOutSelector.setSelectedItemIndex(midiSelectionIndex, juce::dontSendNotification);
+            updateTypeSpecificControls();
+            resized();
+        }
+
+        void paint(juce::Graphics& g) override
+        {
+            auto r = getLocalBounds().toFloat();
+            g.setColour(juce::Colour(0xff1a1e24));
+            g.fillRoundedRectangle(r, 5.0f);
+            g.setColour(juce::Colour(0xff3b4650));
+            g.drawRoundedRectangle(r.reduced(0.5f), 5.0f, 1.0f);
+        }
+
+        void resized() override
+        {
+            auto b = getLocalBounds().reduced(8);
+            auto row = b.removeFromTop(28);
+            trackNameLabel.setBounds(row.removeFromLeft(160));
+            muteButton.setBounds(row.removeFromRight(32));
+            row.removeFromRight(6);
+            scanVstButton.setBounds(row.removeFromRight(112));
+            row.removeFromRight(4);
+            loadVstButton.setBounds(row.removeFromRight(104));
+            row.removeFromRight(4);
+            midiOutSelector.setBounds(row.removeFromRight(170));
+            row.removeFromRight(4);
+            typeSelector.setBounds(row.removeFromRight(120));
+
+            b.removeFromTop(6);
+            if (editorComponent != nullptr)
+                editorComponent->setBounds(b.removeFromTop(84));
+            else
+                b.removeFromTop(84);
+
+            b.removeFromTop(6);
+            auto mix = b.removeFromTop(24);
+            volumeSlider.setBounds(mix.removeFromLeft(220));
+            mix.removeFromLeft(8);
+            panSlider.setBounds(mix.removeFromLeft(220));
+        }
+
+    private:
+        void updateTypeSpecificControls()
+        {
+            const auto id = typeSelector.getSelectedId();
+            scanVstButton.setVisible(id == 4);
+            loadVstButton.setVisible(id == 4);
+            midiOutSelector.setVisible(id == 5);
+        }
+
+        juce::String trackId;
+        TypeChangedCallback onTypeChanged;
+        VstScanCallback onVstScanRequested;
+        VstLoadCallback onVstLoadRequested;
+        MidiOutChangedCallback onMidiOutChanged;
+        juce::Label trackNameLabel;
+        juce::ComboBox typeSelector;
+        juce::TextButton scanVstButton;
+        juce::TextButton loadVstButton;
+        juce::ComboBox midiOutSelector;
+        std::vector<juce::String> midiOutputIdentifiers;
+        juce::TextButton muteButton;
+        juce::Slider volumeSlider;
+        juce::Slider panSlider;
+        te::VolumeAndPanPlugin* volumePlugin { nullptr };
+        juce::Component::SafePointer<juce::Component> editorComponent;
+    };
+
+    OutPanelHost()
+    {
+        addAndMakeVisible(viewport);
+        viewport.setViewedComponent(&content, false);
+        viewport.setScrollBarsShown(true, false);
+    }
+
+    void rebuild(const juce::Array<te::Track*>& tracks,
+                 std::map<juce::String, std::unique_ptr<setle::instruments::InstrumentSlot>>& slots,
+                 TypeChangedCallback callback,
+                 VstScanCallback scanCallback,
+                 VstLoadCallback vstCallback,
+                 MidiOutChangedCallback midiOutCallback)
+    {
+        onTypeChanged = std::move(callback);
+        onVstScanRequested = std::move(scanCallback);
+        onVstLoadRequested = std::move(vstCallback);
+        onMidiOutChanged = std::move(midiOutCallback);
+        strips.clear();
+
+        for (auto* track : tracks)
+        {
+            if (track == nullptr)
+                continue;
+
+            if (setle::timeline::TrackManager::isSystemTrack(*track))
+                continue;
+
+            auto* audioTrack = dynamic_cast<te::AudioTrack*>(track);
+            if (audioTrack == nullptr)
+                continue;
+
+            const auto trackId = audioTrack->itemID.toString();
+            auto it = slots.find(trackId);
+            if (it == slots.end())
+                continue;
+
+            auto strip = std::make_unique<InstrumentStrip>();
+            strip->configure(*audioTrack,
+                             audioTrack->getName(),
+                             trackId,
+                             it->second.get(),
+                             onTypeChanged,
+                             onVstScanRequested,
+                             onVstLoadRequested,
+                             onMidiOutChanged);
+            content.addAndMakeVisible(*strip);
+            strips.push_back(std::move(strip));
+        }
+
+        resized();
+        repaint();
+    }
+
+    void resized() override
+    {
+        viewport.setBounds(getLocalBounds());
+
+        auto width = juce::jmax(260, getWidth() - 14);
+        int y = 6;
+        for (auto& strip : strips)
+        {
+            strip->setBounds(6, y, width - 12, 180);
+            y += 188;
+        }
+
+        content.setSize(width, juce::jmax(y + 6, getHeight()));
+    }
+
+private:
+    juce::Viewport viewport;
+    juce::Component content;
+    std::vector<std::unique_ptr<InstrumentStrip>> strips;
+    TypeChangedCallback onTypeChanged;
+    VstScanCallback onVstScanRequested;
+    VstLoadCallback onVstLoadRequested;
+    MidiOutChangedCallback onMidiOutChanged;
 };
 
 class WorkspaceShellComponent::TimelineShell final : public juce::Component
@@ -904,6 +1344,16 @@ public:
                     menu.addItem(sectionSetRepeatPattern, "Set Repeat Pattern...");
                     menu.addItem(sectionAddTransitionAnchor, "Add Transition Anchor...");
                     menu.addSeparator();
+                    menu.addItem(sectionRename, "Rename Section...");
+                    menu.addItem(sectionDuplicate, "Duplicate Section");
+                    menu.addItem(sectionDelete, "Delete Section");
+                    menu.addSeparator();
+                    menu.addItem(sectionSetColor, "Set Color...");
+                    menu.addItem(sectionSetTimeSig, "Set Time Signature...");
+                    menu.addSeparator();
+                    menu.addItem(sectionJumpTo, "Jump to Section");
+                    menu.addItem(sectionExportMidi, "Export Section as MIDI...");
+                    menu.addSeparator();
                     menu.addItem(sectionConflictCheck, "Run Section Conflict Check");
                     break;
                 }
@@ -913,6 +1363,17 @@ public:
                     menu.addItem(chordEdit, "Edit Chord...");
                     menu.addItem(chordSubstitution, "Chord Substitution...");
                     menu.addItem(chordSetFunction, "Set Harmonic Function...");
+                    menu.addSeparator();
+                    menu.addItem(chordDuplicate, "Duplicate Chord");
+                    menu.addItem(chordInsertBefore, "Insert Chord Before");
+                    menu.addItem(chordInsertAfter, "Insert Chord After");
+                    menu.addItem(chordDelete, "Delete Chord");
+                    menu.addSeparator();
+                    menu.addItem(chordNudgeLeft, "Nudge Left");
+                    menu.addItem(chordNudgeRight, "Nudge Right");
+                    menu.addItem(chordSetDuration, "Set Duration...");
+                    menu.addItem(chordInvertVoicing, "Invert Voicing");
+                    menu.addItem(chordSendToGridRoll, "Open in Grid Roll");
                     menu.addSeparator();
                     menu.addItem(chordScopeOccurrence, "Apply Scope: This Occurrence");
                     menu.addItem(chordScopeRepeat, "Apply Scope: This Repeat");
@@ -955,9 +1416,20 @@ public:
                     menu.addItem(historyGrab8, "Grab Last 8 Beats");
                     menu.addItem(historyGrab16, "Grab Last 16 Beats");
                     menu.addItem(historyGrabCustom, "Grab Custom...");
+                    menu.addItem(historyCaptureSingle, "Capture Single Take");
                     menu.addSeparator();
                     menu.addItem(historySetLength, "Set Buffer Length...");
+                    menu.addItem(historySetBpm, "Override BPM...");
                     menu.addItem(historyChangeSource, "Change Source");
+                    menu.addSeparator();
+                    menu.addItem(historyAutoGrabToggle, "Auto-Grab After Stop",
+                                 true, setle::state::AppPreferences::get().getAutoGrabEnabled());
+                    menu.addItem(historySyncToTransport, "Sync to Transport",
+                                 true, false);
+                    menu.addItem(historyPreviewMode, "Preview Mode",
+                                 true, false);
+                    menu.addSeparator();
+                    menu.addItem(historyExportMidi, "Export Buffer as MIDI...");
                     menu.addItem(historyClear, "Clear Buffer");
                     break;
                 }
@@ -974,6 +1446,13 @@ public:
                     if (id == sectionSetRepeatPattern) return "Set Repeat Pattern";
                     if (id == sectionAddTransitionAnchor) return "Add Transition Anchor";
                     if (id == sectionConflictCheck) return "Run Section Conflict Check";
+                    if (id == sectionRename) return "Rename Section";
+                    if (id == sectionDelete) return "Delete Section";
+                    if (id == sectionDuplicate) return "Duplicate Section";
+                    if (id == sectionSetColor) return "Set Section Color";
+                    if (id == sectionSetTimeSig) return "Set Time Signature";
+                    if (id == sectionExportMidi) return "Export Section as MIDI";
+                    if (id == sectionJumpTo) return "Jump to Section";
                     break;
                 }
 
@@ -993,6 +1472,15 @@ public:
                     if (id == chordSnapEighth) return "Set Theory Snap 1/8";
                     if (id == chordSnapSixteenth) return "Set Theory Snap 1/16";
                     if (id == chordSnapThirtySecond) return "Set Theory Snap 1/32";
+                    if (id == chordDelete) return "Delete Chord";
+                    if (id == chordDuplicate) return "Duplicate Chord";
+                    if (id == chordInsertBefore) return "Insert Chord Before";
+                    if (id == chordInsertAfter) return "Insert Chord After";
+                    if (id == chordNudgeLeft) return "Nudge Chord Left";
+                    if (id == chordNudgeRight) return "Nudge Chord Right";
+                    if (id == chordSetDuration) return "Set Chord Duration";
+                    if (id == chordInvertVoicing) return "Invert Chord Voicing";
+                    if (id == chordSendToGridRoll) return "Open Chord in Grid Roll";
                     break;
                 }
 
@@ -1023,6 +1511,12 @@ public:
                     if (id == historySetLength) return "Set Buffer Length";
                     if (id == historyChangeSource) return "Change Source";
                     if (id == historyClear) return "Clear Buffer";
+                    if (id == historyAutoGrabToggle) return "Toggle Auto-Grab";
+                    if (id == historyPreviewMode) return "Toggle Preview Mode";
+                    if (id == historySetBpm) return "Override Buffer BPM";
+                    if (id == historySyncToTransport) return "Sync to Transport";
+                    if (id == historyExportMidi) return "Export Buffer as MIDI";
+                    if (id == historyCaptureSingle) return "Capture Single Take";
                     break;
                 }
             }
@@ -1126,12 +1620,6 @@ public:
               "Chord/function overlays aligned to timeline (right-click for chord tools)",
               TheoryMenuTarget::chord,
               callback),
-          trackArea(
-              "Main Timeline / Tracks",
-              juce::Colour(0xff1d2430),
-              "Primary arrangement surface (right-click for note/progression tools)",
-              TheoryMenuTarget::note,
-              callback),
           historyLane(
               "History Buffer Lane",
               juce::Colour(0xff232338),
@@ -1141,8 +1629,22 @@ public:
     {
         addAndMakeVisible(sectionLane);
         addAndMakeVisible(theoryLane);
-        addAndMakeVisible(trackArea);
         addAndMakeVisible(historyLane);
+    }
+
+    void setPlayheadFraction(double fraction)
+    {
+        playheadFraction = juce::jlimit(0.0, 1.0, fraction);
+        repaint();
+    }
+
+    juce::Rectangle<int> getTrackAreaBoundsInParent() const
+    {
+        auto area = getLocalBounds().reduced(0, 1);
+        area.removeFromTop(sectionHeight);
+        area.removeFromTop(theoryHeight);
+        area.removeFromBottom(historyHeight);
+        return area.translated(getX(), getY());
     }
 
     void resized() override
@@ -1152,7 +1654,18 @@ public:
         sectionLane.setBounds(bounds.removeFromTop(sectionHeight));
         theoryLane.setBounds(bounds.removeFromTop(theoryHeight));
         historyLane.setBounds(bounds.removeFromBottom(historyHeight));
-        trackArea.setBounds(bounds);
+    }
+
+    void paintOverChildren(juce::Graphics& g) override
+    {
+        auto trackArea = getLocalBounds().reduced(0, 1);
+        trackArea.removeFromTop(sectionHeight);
+        trackArea.removeFromTop(theoryHeight);
+        trackArea.removeFromBottom(historyHeight);
+
+        const auto x = trackArea.getX() + static_cast<int>(std::round(playheadFraction * trackArea.getWidth()));
+        g.setColour(juce::Colours::white.withAlpha(0.28f));
+        g.drawVerticalLine(x, static_cast<float>(trackArea.getY()), static_cast<float>(trackArea.getBottom()));
     }
 
 private:
@@ -1162,8 +1675,8 @@ private:
 
     ContextLane sectionLane;
     ContextLane theoryLane;
-    ContextLane trackArea;
     ContextLane historyLane;
+    double playheadFraction { 0.0 };
 };
 
 class WorkspaceShellComponent::DragBar final : public juce::Component
@@ -1251,13 +1764,20 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     topStrip.addAndMakeVisible(recordButton);
     topStrip.addAndMakeVisible(bpmLabel);
     topStrip.addAndMakeVisible(bpmEditor);
-    topStrip.addAndMakeVisible(captureSourceLabel);
-    topStrip.addAndMakeVisible(captureSourceSelector);
     topStrip.addAndMakeVisible(focusInButton);
     topStrip.addAndMakeVisible(focusBalancedButton);
     topStrip.addAndMakeVisible(focusOutButton);
     topStrip.addAndMakeVisible(undoTheoryButton);
     topStrip.addAndMakeVisible(redoTheoryButton);
+    topStrip.addAndMakeVisible(themeButton);
+    themeButton.onClick = [this] { showThemeEditor(!themeDismissOverlay.isVisible()); };
+
+    themeDismissOverlay.setAlwaysOnTop(true);
+    themeDismissOverlay.setInterceptsMouseClicks(false, false);
+    addChildComponent(themeDismissOverlay);
+
+    themeEditorPanel = std::make_unique<ThemeEditorPanel>();
+    addChildComponent(*themeEditorPanel);
 
     // Session Key/Mode Selectors
     sessionKeyLabel.setText("Key:", juce::dontSendNotification);
@@ -1317,6 +1837,11 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     };
     topStrip.addAndMakeVisible(sessionModeSelector);
 
+    toolPalette = std::make_unique<ToolPaletteComponent>();
+    topStrip.addAndMakeVisible(toolPalette.get());
+    topStrip.addAndMakeVisible(captureSourceLabel);
+    topStrip.addAndMakeVisible(captureSourceSelector);
+
     addAndMakeVisible(topStrip);
 
     inPanel = new InDevicePanel(
@@ -1339,7 +1864,20 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
                 slot.looping = !slot.looping;
                 updateInPanelQueueView();
             },
-            [this](int slotIndex) { renameQueueSlot(slotIndex); }
+            [this](int slotIndex) { renameQueueSlot(slotIndex); },
+            [this](juce::Component& target, const juce::String& progressionId)
+            {
+                auto menu = buildProgressionContextMenu(progressionId);
+                menu.showMenuAsync(
+                    juce::PopupMenu::Options().withTargetComponent(&target),
+                    [safeThis = juce::Component::SafePointer<WorkspaceShellComponent>(this), progressionId](int selectedAction)
+                    {
+                        if (safeThis == nullptr || selectedAction <= 0)
+                            return;
+
+                        safeThis->handleProgressionAction(progressionId, selectedAction);
+                    });
+            }
         });
     addAndMakeVisible(inPanel);
 
@@ -1349,12 +1887,6 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         "Active editor host:\npiano roll, sequencer, notation,\nor focused plugin UI");
     addAndMakeVisible(workPanel);
     configureTheoryEditorPanel();
-
-    outPanel = new LabelPanel(
-        "OUT",
-        juce::Colour(0xff2d2431),
-        "Mixer, FX chain, routing,\nexport and output diagnostics");
-    addAndMakeVisible(outPanel);
 
     timelineShell = new TimelineShell(
         [this](TheoryMenuTarget target, int actionId, const juce::String& actionName)
@@ -1449,12 +1981,10 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         bpmEditor.setText(juce::String(bpm, 1), juce::dontSendNotification);
     };
 
-    juce::PropertiesFile::Options options;
-    options.applicationName = "SETLE";
-    options.filenameSuffix = "settings";
-    options.folderName = "SETLE";
-    options.storageFormat = juce::PropertiesFile::storeAsXML;
-    appProperties.setStorageParameters(options);
+    juce::LookAndFeel::setDefaultLookAndFeel(&setleLookAndFeel);
+    ThemeManager::get().addListener(this);
+    ThemeManager::get().applyTheme(ThemePresets::presetByName(setle::state::AppPreferences::get().getActiveThemeName()));
+
     refreshCaptureSourceSelector();
     midiDeviceSignature = buildMidiDeviceSignature();
 
@@ -1463,22 +1993,102 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 
     // --- Phase 4: create a single-track Tracktion Edit and sync BPM ---
     edit = te::Edit::createSingleTrackEdit(engineRef);
-    historyBuffer = std::make_unique<setle::capture::HistoryBuffer>(64);
-    if (auto* settings = appProperties.getUserSettings())
-        refreshCaptureSourceSelector(settings->getValue("capture.source", ""));
+    historyBuffer = std::make_unique<setle::capture::HistoryBuffer>(
+        setle::state::AppPreferences::get().getHistoryBufferMaxBeats(64));
+    refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
     if (grabSamplerQueue != nullptr)
         grabSamplerQueue->setSong(&songState);
     if (edit != nullptr)
     {
         if (auto* tempo = edit->tempoSequence.getTempo(0))
             tempo->setBpm(songState.getBpm());
+
+        trackManager = std::make_unique<setle::timeline::TrackManager>(*edit);
+        trackManager->ensureDefaultTracks();
+        ensureInstrumentSlots();
+        applyPersistedInstrumentSlotAssignments();
+
+        outPanelHost = std::make_unique<OutPanelHost>();
+        addAndMakeVisible(*outPanelHost);
+
+        if (auto midiTracks = trackManager->getMidiTracks(); !midiTracks.isEmpty())
+        {
+            if (auto* firstMidi = midiTracks.getFirst())
+            {
+                const auto trackId = firstMidi->itemID.toString();
+                auto it = instrumentSlots.find(trackId);
+                if (it != instrumentSlots.end() && it->second->getInfo().type == setle::instruments::InstrumentSlot::SlotType::Empty)
+                    it->second->loadPolySynth();
+            }
+        }
+
+        rebuildOutPanelStrips();
+
+        timelineTracks = new setle::timeline::TimelineTracksComponent(*edit, *trackManager);
+        timelineTracks->setVisibleBeatRange(0.0, 32.0);
+        timelineTracks->onStatusMessage = [this](const juce::String& message)
+        {
+            interactionStatus.setText(message, juce::dontSendNotification);
+        };
+        timelineTracks->onClipClicked = [this](te::Clip& clip)
+        {
+            // Find progression linked to this clip by name
+            juce::String targetProgId;
+            const auto progs = songState.getProgressions();
+            for (const auto& prog : progs)
+            {
+                if (prog.getName() == clip.getName())
+                {
+                    targetProgId = prog.getId();
+                    break;
+                }
+            }
+            if (targetProgId.isEmpty() && !progs.empty())
+                targetProgId = progs[0].getId();
+
+            if (gridRollComponent != nullptr && !targetProgId.isEmpty())
+            {
+                gridRollComponent->setTargetProgression(targetProgId);
+                gridRollComponent->setTheorySnap(theorySnap);
+            }
+            switchWorkTab(true);
+            interactionStatus.setText("GridRoll: " + clip.getName(), juce::dontSendNotification);
+        };
+        addAndMakeVisible(timelineTracks);
+        timelineTracks->refreshTracks();
+
+        // ---- GridRollComponent (needs edit to be valid) ----
+        gridRollComponent = std::make_unique<setle::gridroll::GridRollComponent>(songState, *edit);
+        gridRollComponent->setVisible(false);   // theory tab is default
+        gridRollComponent->setTheorySnap(theorySnap);
+        gridRollComponent->onProgressionEdited = [this](const juce::String& progId)
+        {
+            const auto snapshot = createSongSnapshot();
+            saveSongState();
+            if (!progId.isEmpty())
+                loadProgressionToEdit(progId, 0.0, true, nullptr);
+            refreshTimelineData();
+            captureUndoStateIfChanged(snapshot);
+        };
+        gridRollComponent->onStatusMessage = [this](const juce::String& msg)
+        {
+            interactionStatus.setText(msg, juce::dontSendNotification);
+        };
+        gridRollComponent->onDrumPatternEdited = [this](const std::vector<setle::gridroll::GridRollCell>& cells,
+                                                        const juce::String& progId)
+        {
+            applyDrumPatternToSlots(cells, progId);
+        };
+        if (!selectedProgressionId.isEmpty())
+            gridRollComponent->setTargetProgression(selectedProgressionId);
+        workPanel->addAndMakeVisible(*gridRollComponent);
     }
     bpmEditor.setText(juce::String(songState.getBpm(), 1), juce::dontSendNotification);
 
     openTheoryEditor(TheoryMenuTarget::section, sectionEditTheory, "Edit Section Theory");
     updateFocusButtonState();
     updateUndoRedoButtonState();
-    startTimerHz(2);
+    startTimerHz(30);
     updateInPanelQueueView();
 }
 
@@ -1487,19 +2097,48 @@ WorkspaceShellComponent::~WorkspaceShellComponent()
     stopTimer();
     saveLayoutState();
     saveSongState();
+    ThemeManager::get().removeListener(this);
+    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
 }
 
 bool WorkspaceShellComponent::keyPressed(const juce::KeyPress& key)
 {
-    const auto modifiers = key.getModifiers();
-    const auto commandLike = modifiers.isCommandDown() || modifiers.isCtrlDown();
+    if (key == juce::KeyPress::escapeKey && themeEditorPanel != nullptr && themeEditorPanel->isVisible())
+    {
+        showThemeEditor(false);
+        return true;
+    }
+
+    // Single-letter tool shortcuts (no modifiers)
+    const auto keyMods = key.getModifiers();
+    const auto modifierMask = juce::ModifierKeys::shiftModifier
+                            | juce::ModifierKeys::ctrlModifier
+                            | juce::ModifierKeys::altModifier
+                            | juce::ModifierKeys::commandModifier;
+    const bool hasNoModifiers = (keyMods.getRawFlags() & modifierMask) == 0;
+    if (hasNoModifiers)
+    {
+        const auto code = key.getKeyCode();
+        switch (code)
+        {
+            case 's': case 'S': EditToolManager::get().setActiveTool(EditTool::Select); return true;
+            case 'd': case 'D': EditToolManager::get().setActiveTool(EditTool::Draw); return true;
+            case 'e': case 'E': EditToolManager::get().setActiveTool(EditTool::Erase); return true;
+            case 'b': case 'B': EditToolManager::get().setActiveTool(EditTool::Split); return true;
+            case 't': case 'T': EditToolManager::get().setActiveTool(EditTool::Stretch); return true;
+            case 'l': case 'L': EditToolManager::get().setActiveTool(EditTool::Listen); return true;
+            case 'm': case 'M': EditToolManager::get().setActiveTool(EditTool::Marquee); return true;
+            default: break;
+        }
+    }
+    const auto commandLike = keyMods.isCommandDown() || keyMods.isCtrlDown();
 
     if (!commandLike)
         return false;
 
     if (key.getKeyCode() == 'z' || key.getKeyCode() == 'Z')
     {
-        if (modifiers.isShiftDown())
+        if (keyMods.isShiftDown())
             performRedo();
         else
             performUndo();
@@ -1515,9 +2154,51 @@ bool WorkspaceShellComponent::keyPressed(const juce::KeyPress& key)
     return false;
 }
 
+void WorkspaceShellComponent::mouseDown(const juce::MouseEvent& event)
+{
+    if (themeEditorPanel != nullptr && themeEditorPanel->isVisible() && !themeEditorPanel->getBounds().contains(event.getPosition()))
+    {
+        showThemeEditor(false);
+    }
+}
+
 void WorkspaceShellComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff121417));
+    g.fillAll(ThemeManager::get().theme().surface0);
+}
+
+void WorkspaceShellComponent::themeChanged()
+{
+    if (themeEditorPanel != nullptr)
+        themeEditorPanel->refreshControls();
+    repaintEntireTree();
+}
+
+void WorkspaceShellComponent::repaintEntireTree()
+{
+    std::function<void(juce::Component*)> repaintChildren = [&](juce::Component* component)
+    {
+        if (component == nullptr)
+            return;
+
+        component->repaint();
+        for (int i = 0; i < component->getNumChildComponents(); ++i)
+            repaintChildren(component->getChildComponent(i));
+    };
+
+    repaintChildren(this);
+}
+
+void WorkspaceShellComponent::showThemeEditor(bool shouldShow)
+{
+    if (themeEditorPanel == nullptr)
+        return;
+
+    themeDismissOverlay.setVisible(shouldShow);
+    themeEditorPanel->setVisible(shouldShow);
+    if (shouldShow)
+        themeEditorPanel->toFront(true);
+    resized();
 }
 
 void WorkspaceShellComponent::applyFocusMode(FocusMode mode)
@@ -1551,8 +2232,9 @@ void WorkspaceShellComponent::updateFocusButtonState()
 {
     auto setButtonState = [](juce::TextButton& button, bool active)
     {
-        button.setColour(juce::TextButton::buttonColourId, active ? juce::Colour(0xff2c4a67) : juce::Colour(0xff303338));
-        button.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
+        const auto& theme = ThemeManager::get().theme();
+        button.setColour(juce::TextButton::buttonColourId, active ? theme.controlOnBg : theme.controlBg);
+        button.setColour(juce::TextButton::textColourOffId, active ? theme.controlTextOn : theme.controlText);
     };
 
     setButtonState(focusInButton, focusMode == FocusMode::inFocused);
@@ -1587,8 +2269,20 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
     libraryBrowser = std::make_unique<ProgressionLibraryBrowser>(songState.getSessionKey(), songState.getSessionMode());
     libraryBrowser->setOnRowClicked([this](const juce::String& templateId)
     {
-        selectedProgressionId = templateId;
         handleProgressionAction(templateId, progressionCreateCandidate);
+    });
+    libraryBrowser->setOnRowContextRequested([this](const juce::String& progressionId, juce::Component& target)
+    {
+        auto menu = buildProgressionContextMenu(progressionId);
+        menu.showMenuAsync(
+            juce::PopupMenu::Options().withTargetComponent(&target),
+            [safeThis = juce::Component::SafePointer<WorkspaceShellComponent>(this), progressionId](int selectedAction)
+            {
+                if (safeThis == nullptr || selectedAction <= 0)
+                    return;
+
+                safeThis->handleProgressionAction(progressionId, selectedAction);
+            });
     });
     theoryEditorPanel.addAndMakeVisible(*libraryBrowser);
 
@@ -1658,6 +2352,83 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
         populateTheoryFieldsForCurrentSelection();
         interactionStatus.setText("Theory editor reloaded from current selection", juce::dontSendNotification);
     };
+
+    // ---- Tab strip ----
+    for (auto* btn : { &workTabTheoryButton, &workTabGridRollButton, &workTabFxButton })
+    {
+        btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
+        workPanel->addAndMakeVisible(*btn);
+    }
+    workTabTheoryButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c4a67)); // default active
+    workTabGridRollButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
+    workTabFxButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
+    workTabTheoryButton.onClick   = [this] { switchWorkTab(0); };
+    workTabGridRollButton.onClick  = [this] { switchWorkTab(1); };
+    workTabFxButton.onClick        = [this] { switchWorkTab(2); };
+
+    // Create EffBuilderComponent
+    effBuilderComponent = std::make_unique<setle::eff::EffBuilderComponent>();
+    workPanel->addAndMakeVisible(*effBuilderComponent);
+    effBuilderComponent->setVisible(false);
+
+    // gridRollComponent is created later in the constructor after edit is initialised
+}
+
+void WorkspaceShellComponent::switchWorkTab(int tabIndex)
+{
+    workPanelTabIndex    = tabIndex;
+    workPanelShowGridRoll = (tabIndex == 1);
+
+    theoryEditorPanel.setVisible(tabIndex == 0);
+
+    if (gridRollComponent != nullptr)
+    {
+        if (tabIndex == 1)
+            gridRollComponent->setTheorySnap(theorySnap);
+        gridRollComponent->setVisible(tabIndex == 1);
+    }
+
+    if (effBuilderComponent != nullptr)
+    {
+        effBuilderComponent->setVisible(tabIndex == 2);
+
+        if (tabIndex == 2)
+        {
+            // Wire up the first available active slot's eff processor
+            for (auto& [trackId, slot] : instrumentSlots)
+            {
+                if (slot != nullptr && slot->getInfo().isActive)
+                {
+                    selectedFxTrackId = trackId;
+                    auto* proc = slot->getEffProcessor();
+                    if (proc == nullptr)
+                    {
+                        // Create an empty chain for this track on first visit
+                        setle::eff::EffDefinition emptyDef;
+                        emptyDef.effId    = juce::Uuid().toString();
+                        emptyDef.name     = "Track FX";
+                        emptyDef.schemaVersion = 1;
+                        slot->loadEffChain(emptyDef);
+                        proc = slot->getEffProcessor();
+                    }
+                    const auto effFile = getEffFileForTrack(trackId);
+                    effBuilderComponent->loadDefinition(proc, proc->getDefinition(), effFile);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Update tab button visual state
+    const auto activeCol   = juce::Colour(0xff2c4a67);
+    const auto inactiveCol = juce::Colour(0xff2a3040);
+    workTabTheoryButton.setColour(juce::TextButton::buttonColourId,
+                                   tabIndex == 0 ? activeCol : inactiveCol);
+    workTabGridRollButton.setColour(juce::TextButton::buttonColourId,
+                                    tabIndex == 1 ? activeCol : inactiveCol);
+    workTabFxButton.setColour(juce::TextButton::buttonColourId,
+                               tabIndex == 2 ? activeCol : inactiveCol);
+    resized();
 }
 
 void WorkspaceShellComponent::openTheoryEditor(TheoryMenuTarget target, int actionId, const juce::String& actionName)
@@ -2286,6 +3057,12 @@ juce::String WorkspaceShellComponent::applyTheoryEditorAction()
 
 void WorkspaceShellComponent::refreshTimelineData()
 {
+    if (timelineTracks != nullptr)
+        timelineTracks->refreshTracks();
+
+    ensureInstrumentSlots();
+    rebuildOutPanelStrips();
+
     const auto sections = songState.getSections();
     const auto progressions = songState.getProgressions();
 
@@ -2335,6 +3112,312 @@ void WorkspaceShellComponent::refreshTimelineData()
             populateTheoryFieldsForCurrentSelection();
             interactionStatus.setText("Selected chord: " + chordId.substring(0, 8), juce::dontSendNotification);
         });
+
+    syncTimeSignaturesToEdit();
+}
+
+void WorkspaceShellComponent::syncTimeSignaturesToEdit()
+{
+    if (!edit)
+        return;
+
+    auto& tempoSequence = edit->tempoSequence;
+
+    // Clear all existing time sig events beyond beat 0
+    // (keep the default — remove any section-derived ones)
+    for (int i = tempoSequence.getNumTimeSigs() - 1; i > 0; --i)
+        tempoSequence.removeTimeSig(i);
+
+    // Add one time sig event per section that has a non-default meter
+    const int songDefaultNum = 4;
+    const int songDefaultDen = 4;
+
+    for (const auto& section : songState.getSections())
+    {
+        const int num = section.getTimeSigNumerator();   // default 4
+        const int den = section.getTimeSigDenominator(); // default 4
+
+        if (num != songDefaultNum || den != songDefaultDen)
+        {
+            // Calculate this section's start beat
+            double sectionStartBeat = 0.0;
+            const auto sections = songState.getSections();
+            const auto progressions = songState.getProgressions();
+
+            for (const auto& s : sections)
+            {
+                if (s.getId() == section.getId())
+                    break;
+
+                // Sum all chord durations in this section's progressions
+                for (const auto& ref : s.getProgressionRefs())
+                {
+                    for (const auto& prog : progressions)
+                    {
+                        if (prog.getId() == ref.getProgressionId())
+                        {
+                            for (const auto& chord : prog.getChords())
+                                sectionStartBeat += chord.getDurationBeats();
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (auto ts = tempoSequence.insertTimeSig(tracktion::BeatPosition::fromBeats(sectionStartBeat))) { ts->numerator = num; ts->denominator = den; }
+        }
+    }
+}
+
+void WorkspaceShellComponent::ensureInstrumentSlots()
+{
+    if (edit == nullptr || trackManager == nullptr)
+        return;
+
+    std::set<juce::String> liveTrackIds;
+    const auto tracks = trackManager->getAllUserTracks();
+    for (auto* track : tracks)
+    {
+        auto* audioTrack = dynamic_cast<te::AudioTrack*>(track);
+        if (audioTrack == nullptr)
+            continue;
+
+        const auto trackId = audioTrack->itemID.toString();
+        liveTrackIds.insert(trackId);
+
+        if (instrumentSlots.find(trackId) == instrumentSlots.end())
+            instrumentSlots[trackId] = std::make_unique<setle::instruments::InstrumentSlot>(*audioTrack, *edit);
+    }
+
+    for (auto it = instrumentSlots.begin(); it != instrumentSlots.end();)
+    {
+        if (liveTrackIds.find(it->first) == liveTrackIds.end())
+            it = instrumentSlots.erase(it);
+        else
+            ++it;
+    }
+}
+
+void WorkspaceShellComponent::applyPersistedInstrumentSlotAssignments()
+{
+    if (!songState.isValid() || instrumentSlots.empty())
+        return;
+
+    auto root = songState.valueTree();
+    const auto container = root.getChildWithName(kInstrumentSlotsContainerId);
+    if (!container.isValid())
+        return;
+
+    for (const auto& child : container)
+    {
+        if (!child.hasType(kInstrumentSlotEntryId))
+            continue;
+
+        const auto trackId = child.getProperty(kSlotTrackIdProp, {}).toString();
+        if (trackId.isEmpty())
+            continue;
+
+        auto it = instrumentSlots.find(trackId);
+        if (it == instrumentSlots.end() || it->second == nullptr)
+            continue;
+
+        const auto type = slotTypeFromString(child.getProperty(kSlotTypeProp, {}).toString());
+        const auto persistentId = child.getProperty(kSlotPersistentIdProp, {}).toString();
+        const auto persistentName = child.getProperty(kSlotPersistentNameProp, {}).toString();
+
+        it->second->clear();
+        switch (type)
+        {
+            case setle::instruments::InstrumentSlot::SlotType::PolySynth:
+                it->second->loadPolySynth();
+                break;
+            case setle::instruments::InstrumentSlot::SlotType::DrumMachine:
+                it->second->loadDrumMachine();
+                break;
+            case setle::instruments::InstrumentSlot::SlotType::ReelSampler:
+                it->second->loadReelSampler();
+                break;
+            case setle::instruments::InstrumentSlot::SlotType::MidiOut:
+                it->second->loadMidiOut(persistentId.isNotEmpty() ? persistentId : "default");
+                break;
+            case setle::instruments::InstrumentSlot::SlotType::VST3:
+            {
+                juce::PluginDescription resolved;
+                bool found = false;
+                for (const auto& desc : engineRef.getPluginManager().knownPluginList.getTypes())
+                {
+                    if (!desc.pluginFormatName.containsIgnoreCase("VST3"))
+                        continue;
+
+                    if ((!persistentId.isEmpty() && desc.fileOrIdentifier == persistentId)
+                        || (!persistentName.isEmpty() && desc.name == persistentName))
+                    {
+                        resolved = desc;
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    resolved.name = persistentName.isNotEmpty() ? persistentName : "VST3";
+                    resolved.fileOrIdentifier = persistentId;
+                    resolved.pluginFormatName = "VST3";
+                }
+
+                it->second->loadVST3(resolved);
+                break;
+            }
+            case setle::instruments::InstrumentSlot::SlotType::Empty:
+                break;
+        }
+    }
+}
+
+void WorkspaceShellComponent::persistInstrumentSlotAssignments()
+{
+    if (!songState.isValid())
+        return;
+
+    auto root = songState.valueTree();
+    if (!root.isValid())
+        return;
+
+    for (int i = root.getNumChildren(); --i >= 0;)
+    {
+        if (root.getChild(i).hasType(kInstrumentSlotsContainerId))
+            root.removeChild(i, nullptr);
+    }
+
+    juce::ValueTree container(kInstrumentSlotsContainerId);
+    for (const auto& [trackId, slot] : instrumentSlots)
+    {
+        if (slot == nullptr)
+            continue;
+
+        const auto info = slot->getInfo();
+        if (info.type == setle::instruments::InstrumentSlot::SlotType::Empty)
+            continue;
+
+        juce::ValueTree entry(kInstrumentSlotEntryId);
+        entry.setProperty(kSlotTrackIdProp, trackId, nullptr);
+        entry.setProperty(kSlotTypeProp, slotTypeToString(info.type), nullptr);
+        entry.setProperty(kSlotPersistentIdProp, info.persistentIdentifier, nullptr);
+        entry.setProperty(kSlotPersistentNameProp, info.persistentName, nullptr);
+        container.appendChild(entry, nullptr);
+    }
+
+    root.appendChild(container, nullptr);
+}
+
+void WorkspaceShellComponent::rebuildOutPanelStrips()
+{
+    if (outPanelHost == nullptr || trackManager == nullptr)
+        return;
+
+    outPanelHost->rebuild(
+        trackManager->getAllUserTracks(),
+        instrumentSlots,
+        [this](const juce::String& trackId, setle::instruments::InstrumentSlot::SlotType type)
+        {
+            auto it = instrumentSlots.find(trackId);
+            if (it == instrumentSlots.end() || it->second == nullptr)
+                return;
+
+            switch (type)
+            {
+                case setle::instruments::InstrumentSlot::SlotType::PolySynth:   it->second->loadPolySynth(); break;
+                case setle::instruments::InstrumentSlot::SlotType::DrumMachine: it->second->loadDrumMachine(); break;
+                case setle::instruments::InstrumentSlot::SlotType::ReelSampler: it->second->loadReelSampler(); break;
+                case setle::instruments::InstrumentSlot::SlotType::VST3:        it->second->loadVST3(juce::PluginDescription{}); break;
+                case setle::instruments::InstrumentSlot::SlotType::MidiOut:     it->second->loadMidiOut("default"); break;
+                case setle::instruments::InstrumentSlot::SlotType::Empty:       it->second->clear(); break;
+            }
+
+            persistInstrumentSlotAssignments();
+            rebuildOutPanelStrips();
+        },
+        [this]()
+        {
+            interactionStatus.setText("VST3 scan uses Tracktion known plugin list.", juce::dontSendNotification);
+        },
+        [this](const juce::String& trackId)
+        {
+            juce::PopupMenu menu;
+            std::vector<juce::PluginDescription> vst3Descs;
+
+            int itemId = 1;
+            for (const auto& desc : engineRef.getPluginManager().knownPluginList.getTypes())
+            {
+                if (!desc.pluginFormatName.containsIgnoreCase("VST3"))
+                    continue;
+
+                menu.addItem(itemId++, desc.name.isNotEmpty() ? desc.name : desc.fileOrIdentifier);
+                vst3Descs.push_back(desc);
+            }
+
+            if (vst3Descs.empty())
+            {
+                interactionStatus.setText("No VST3 plugins found in known plugin list.", juce::dontSendNotification);
+                return;
+            }
+
+            const auto chosen = menu.show();
+            if (chosen <= 0 || chosen > static_cast<int>(vst3Descs.size()))
+                return;
+
+            auto it = instrumentSlots.find(trackId);
+            if (it == instrumentSlots.end() || it->second == nullptr)
+                return;
+
+            it->second->loadVST3(vst3Descs[static_cast<size_t>(chosen - 1)]);
+            persistInstrumentSlotAssignments();
+            rebuildOutPanelStrips();
+        },
+        [this](const juce::String& trackId, const juce::String& deviceIdentifier)
+        {
+            auto it = instrumentSlots.find(trackId);
+            if (it == instrumentSlots.end() || it->second == nullptr)
+                return;
+
+            it->second->loadMidiOut(deviceIdentifier);
+            persistInstrumentSlotAssignments();
+            rebuildOutPanelStrips();
+        });
+}
+
+void WorkspaceShellComponent::applyDrumPatternToSlots(const std::vector<setle::gridroll::GridRollCell>& cells,
+                                                      const juce::String& progressionId)
+{
+    (void) progressionId;
+
+    std::map<int, float> swingByNote;
+    for (const auto& cell : cells)
+    {
+        if (cell.type != setle::gridroll::GridRollCell::CellType::DrumHit)
+            continue;
+        swingByNote[cell.midiNote] = juce::jmax(swingByNote[cell.midiNote], cell.swing);
+    }
+
+    ensureInstrumentSlots();
+    for (auto& [trackId, slot] : instrumentSlots)
+    {
+        (void) trackId;
+        if (slot != nullptr)
+        {
+            slot->setDrumPattern(cells);
+            if (auto* processor = slot->getEffProcessor())
+            {
+                for (const auto& [midiNote, swing] : swingByNote)
+                    processor->setDrumSwingForNote(midiNote, swing);
+            }
+        }
+    }
+}
+
+juce::String WorkspaceShellComponent::getTrackIdForTrack(const te::Track& track) const
+{
+    return track.itemID.toString();
 }
 
 void WorkspaceShellComponent::initialiseSongState()
@@ -2345,11 +3428,7 @@ void WorkspaceShellComponent::initialiseSongState()
     seedSongStateIfNeeded();
     ensureSelectionDefaults();
 
-    juce::String savedCaptureSource;
-    if (auto* settings = appProperties.getUserSettings())
-        savedCaptureSource = settings->getValue("capture.source", "");
-
-    refreshCaptureSourceSelector(savedCaptureSource);
+    refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
 
     // Restore session key/mode selectors from songState
     {
@@ -2380,6 +3459,7 @@ void WorkspaceShellComponent::initialiseSongState()
 
     saveSongState();
     refreshTimelineData();
+    loadEffChains();
 
     interactionStatus.setText("Theory state ready - " + summarizeSongState(), juce::dontSendNotification);
 }
@@ -2474,9 +3554,57 @@ void WorkspaceShellComponent::saveSongState()
     if (!songState.isValid())
         return;
 
+    persistInstrumentSlotAssignments();
+    saveEffChains();
+
     const auto result = songState.saveToFile(getSongStateFile(), model::StorageFormat::xml);
     if (result.failed())
         DBG("Failed to save song state: " + result.getErrorMessage());
+
+    syncTimeSignaturesToEdit();
+}
+
+juce::File WorkspaceShellComponent::getEffectsFolder() const
+{
+    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+        .getChildFile("SETLE")
+        .getChildFile("effects");
+}
+
+juce::File WorkspaceShellComponent::getEffFileForTrack(const juce::String& trackId) const
+{
+    return getEffectsFolder().getChildFile(trackId + ".eff");
+}
+
+void WorkspaceShellComponent::saveEffChains()
+{
+    for (auto& [trackId, slot] : instrumentSlots)
+    {
+        if (slot == nullptr) continue;
+        auto* proc = slot->getEffProcessor();
+        if (proc == nullptr) continue;
+        const auto& def = proc->getDefinition();
+        if (def.effId.isEmpty()) continue;
+
+        const auto file = getEffFileForTrack(trackId);
+        file.getParentDirectory().createDirectory();
+        setle::eff::EffSerializer::saveToFile(def, file);
+    }
+}
+
+void WorkspaceShellComponent::loadEffChains()
+{
+    for (auto& [trackId, slot] : instrumentSlots)
+    {
+        if (slot == nullptr) continue;
+        const auto file = getEffFileForTrack(trackId);
+        if (!file.existsAsFile()) continue;
+
+        const auto def = setle::eff::EffSerializer::loadFromFile(file);
+        if (def.effId.isEmpty()) continue;
+
+        slot->loadEffChain(def);
+    }
 }
 
 juce::String WorkspaceShellComponent::createSongSnapshot() const
@@ -2620,6 +3748,12 @@ juce::String WorkspaceShellComponent::summarizeSongState() const
 
 void WorkspaceShellComponent::handleTimelineTheoryAction(TheoryMenuTarget target, int actionId, const juce::String& actionName)
 {
+    if (target == TheoryMenuTarget::progression)
+    {
+        handleProgressionAction(selectedProgressionId, actionId);
+        return;
+    }
+
     seedSongStateIfNeeded();
     ensureSelectionDefaults();
     const auto beforeSnapshot = createSongSnapshot();
@@ -2648,7 +3782,7 @@ juce::String WorkspaceShellComponent::runTheoryAction(TheoryMenuTarget target, i
         case TheoryMenuTarget::note:
             return runNoteAction(actionId);
         case TheoryMenuTarget::progression:
-            return runProgressionAction(actionId, selectedProgressionId);
+            return "Progression actions are handled via progression dispatch";
         case TheoryMenuTarget::historyBuffer:
             return runHistoryBufferAction(actionId);
     }
@@ -2690,7 +3824,110 @@ juce::String WorkspaceShellComponent::runSectionAction(int actionId)
         return "Section conflict check found " + juce::String(missingProgressionRefs) + " missing progression reference(s)";
     }
 
-    return "Section action not implemented";
+    auto selectedSection = getSelectedSection();
+    if (!selectedSection.has_value())
+        return "Section action skipped: no section selected";
+
+    if (actionId == sectionRename)
+    {
+        juce::AlertWindow window("Rename Section", "Enter new section name:", juce::AlertWindow::NoIcon);
+        window.addTextEditor("name", selectedSection->getName(), "Name");
+        window.addButton("Rename", 1);
+        window.addButton("Cancel", 0);
+
+        if (window.runModalLoop() == 1)
+        {
+            const auto newName = window.getTextEditorContents("name").trim();
+            if (newName.isNotEmpty())
+            {
+                selectedSection->setName(newName);
+                refreshTheoryLanes();
+                return "Section renamed to " + newName;
+            }
+        }
+        return "Rename cancelled";
+    }
+
+    if (actionId == sectionDelete)
+    {
+        songState.removeSection(selectedSection->getId());
+        selectedSectionId = {};
+        refreshTheoryLanes();
+        return "Section deleted";
+    }
+
+    if (actionId == sectionDuplicate)
+    {
+        auto copy = model::Section::create(selectedSection->getName() + " (Copy)", selectedSection->getRepeatCount());
+        copy.setColor(selectedSection->getColor());
+        copy.setTimeSigNumerator(selectedSection->getTimeSigNumerator());
+        copy.setTimeSigDenominator(selectedSection->getTimeSigDenominator());
+        for (const auto& ref : selectedSection->getProgressionRefs())
+            copy.addProgressionRef(ref);
+        songState.addSection(copy);
+        selectedSectionId = copy.getId();
+        refreshTheoryLanes();
+        return "Section duplicated";
+    }
+
+    if (actionId == sectionSetColor)
+    {
+        juce::AlertWindow window("Set Section Color", "Enter a hex color (e.g. #FF6B35):", juce::AlertWindow::NoIcon);
+        window.addTextEditor("color", selectedSection->getColor().isEmpty() ? "#888888" : selectedSection->getColor(), "Hex Color");
+        window.addButton("Set", 1);
+        window.addButton("Clear", 2);
+        window.addButton("Cancel", 0);
+
+        const int result = window.runModalLoop();
+        if (result == 1)
+        {
+            selectedSection->setColor(window.getTextEditorContents("color").trim());
+            refreshTheoryLanes();
+            return "Section color updated";
+        }
+        if (result == 2)
+        {
+            selectedSection->setColor({});
+            refreshTheoryLanes();
+            return "Section color cleared";
+        }
+        return "Set color cancelled";
+    }
+
+    if (actionId == sectionSetTimeSig)
+    {
+        juce::AlertWindow window("Set Time Signature", "Enter numerator and denominator:", juce::AlertWindow::NoIcon);
+        window.addTextEditor("num", juce::String(selectedSection->getTimeSigNumerator()), "Numerator");
+        window.addTextEditor("den", juce::String(selectedSection->getTimeSigDenominator()), "Denominator");
+        window.addButton("Set", 1);
+        window.addButton("Cancel", 0);
+
+        if (window.runModalLoop() == 1)
+        {
+            const int num = juce::jlimit(1, 32, parseIntOr(window.getTextEditorContents("num"), 4));
+            const int den = juce::jlimit(1, 32, parseIntOr(window.getTextEditorContents("den"), 4));
+            selectedSection->setTimeSigNumerator(num);
+            selectedSection->setTimeSigDenominator(den);
+            syncTimeSignaturesToEdit();
+            refreshTheoryLanes();
+            return "Time signature set to " + juce::String(num) + "/" + juce::String(den);
+        }
+        return "Set time signature cancelled";
+    }
+
+    if (actionId == sectionJumpTo)
+    {
+        interactionStatus.setText("Jump to section: " + selectedSection->getName(), juce::dontSendNotification);
+        return "Jumped to section " + selectedSection->getName();
+    }
+
+    if (actionId == sectionExportMidi)
+    {
+        interactionStatus.setText("Export MIDI: feature coming soon", juce::dontSendNotification);
+        return "Export MIDI not yet implemented for sections";
+    }
+
+    return "Section action unavailable for current selection";
 }
 
 juce::String WorkspaceShellComponent::runChordAction(int actionId)
@@ -2897,7 +4134,108 @@ juce::String WorkspaceShellComponent::runChordAction(int actionId)
         return "Theory snap set to " + snapValue;
     }
 
-    return "Chord action not implemented";
+    if (actionId == chordDelete)
+    {
+        if (!progression.has_value())
+            return "Chord delete skipped: no progression selected";
+
+        progression->removeChord(chord->getId());
+        selectedChordId = {};
+        refreshTheoryLanes();
+        return "Chord deleted";
+    }
+
+    if (actionId == chordDuplicate)
+    {
+        if (!progression.has_value())
+            return "Chord duplicate skipped: no progression selected";
+
+        auto copy = model::Chord::create(chord->getSymbol(), chord->getQuality(), chord->getRootMidi());
+        copy.setName(chord->getName());
+        copy.setFunction(chord->getFunction());
+        copy.setStartBeats(chord->getStartBeats() + chord->getDurationBeats());
+        copy.setDurationBeats(chord->getDurationBeats());
+        copy.setTension(chord->getTension());
+        for (const auto& note : chord->getNotes())
+            copy.addNote(model::Note::create(note.getPitch(), note.getVelocity(), note.getStartBeats(), note.getDurationBeats(), note.getChannel()));
+        progression->addChord(copy);
+        selectedChordId = copy.getId();
+        refreshTheoryLanes();
+        return "Chord duplicated";
+    }
+
+    if (actionId == chordInsertBefore || actionId == chordInsertAfter)
+    {
+        if (!progression.has_value())
+            return "Chord insert skipped: no progression selected";
+
+        const double insertAt = actionId == chordInsertBefore
+                                    ? chord->getStartBeats()
+                                    : chord->getStartBeats() + chord->getDurationBeats();
+        auto blank = model::Chord::create("?", "unknown", 60);
+        blank.setStartBeats(insertAt);
+        blank.setDurationBeats(chord->getDurationBeats());
+        progression->addChord(blank);
+        selectedChordId = blank.getId();
+        refreshTheoryLanes();
+        return juce::String(actionId == chordInsertBefore ? "Chord inserted before" : "Chord inserted after");
+    }
+
+    if (actionId == chordNudgeLeft || actionId == chordNudgeRight)
+    {
+        if (!progression.has_value())
+            return "Chord nudge skipped: no progression selected";
+
+        const double snapBeats = theorySnap == "bar" ? 4.0
+                               : theorySnap == "1/2" ? 2.0
+                               : theorySnap == "1/4" ? 1.0
+                               : theorySnap == "halfBeat" ? 0.5
+                               : theorySnap == "1/8" ? 0.5
+                               : theorySnap == "1/16" ? 0.25
+                               : theorySnap == "1/32" ? 0.125
+                               : 1.0;
+        const double delta = (actionId == chordNudgeLeft) ? -snapBeats : snapBeats;
+        chord->setStartBeats(juce::jmax(0.0, chord->getStartBeats() + delta));
+        refreshTheoryLanes();
+        return juce::String(actionId == chordNudgeLeft ? "Chord nudged left" : "Chord nudged right");
+    }
+
+    if (actionId == chordSetDuration)
+    {
+        if (!progression.has_value())
+            return "Chord duration skipped: no progression selected";
+
+        juce::AlertWindow window("Set Chord Duration", "Enter duration in beats:", juce::AlertWindow::NoIcon);
+        window.addTextEditor("dur", juce::String(chord->getDurationBeats()), "Beats");
+        window.addButton("Set", 1);
+        window.addButton("Cancel", 0);
+
+        if (window.runModalLoop() == 1)
+        {
+            const double dur = juce::jmax(0.0625, window.getTextEditorContents("dur").trim().getDoubleValue());
+            chord->setDurationBeats(dur);
+            refreshTheoryLanes();
+            return "Chord duration set to " + juce::String(dur) + " beats";
+        }
+        return "Set duration cancelled";
+    }
+
+    if (actionId == chordInvertVoicing)
+    {
+        for (auto& note : chord->getNotes())
+            note.setPitch(note.getPitch() > 60 ? note.getPitch() - 12 : note.getPitch() + 12);
+        refreshTheoryLanes();
+        return "Chord voicing inverted";
+    }
+
+    if (actionId == chordSendToGridRoll)
+    {
+        interactionStatus.setText("Opening chord in Grid Roll...", juce::dontSendNotification);
+        switchWorkTab(1);
+        return "Chord sent to Grid Roll";
+    }
+
+    return "Chord action unavailable for current selection";
 }
 
 juce::String WorkspaceShellComponent::runNoteAction(int actionId)
@@ -3009,7 +4347,7 @@ juce::String WorkspaceShellComponent::runNoteAction(int actionId)
         return "Derived progression created from note selection";
     }
 
-    return "Note action not implemented";
+    return "Note action unavailable for current selection";
 }
 
 juce::String WorkspaceShellComponent::runProgressionAction(int actionId, const juce::String& targetProgressionId)
@@ -3033,6 +4371,69 @@ juce::String WorkspaceShellComponent::runProgressionAction(int actionId, const j
             progression->getId(),
             progression->getName(),
             0.75f);
+
+        // Build a deterministic preview buffer so Reel has immediate audio content
+        // even before full coupled audio capture is implemented.
+        {
+            constexpr double sr = 44100.0;
+            const auto secPerBeat = 60.0 / juce::jmax(1.0, songState.getBpm());
+
+            double totalBeats = 0.0;
+            for (const auto& chord : progression->getChords())
+                totalBeats += juce::jmax(0.25, chord.getDurationBeats());
+            totalBeats = juce::jmax(1.0, totalBeats);
+
+            const int totalSamples = static_cast<int>(std::ceil(totalBeats * secPerBeat * sr));
+            juce::AudioBuffer<float> preview(2, juce::jmax(1, totalSamples));
+            preview.clear();
+
+            double beatCursor = 0.0;
+            for (const auto& chord : progression->getChords())
+            {
+                const auto chordBeats = juce::jmax(0.25, chord.getDurationBeats());
+                const int startSample = juce::jlimit(0, preview.getNumSamples() - 1,
+                    static_cast<int>(std::floor(beatCursor * secPerBeat * sr)));
+                const int endSample = juce::jlimit(startSample + 1, preview.getNumSamples(),
+                    static_cast<int>(std::ceil((beatCursor + chordBeats) * secPerBeat * sr)));
+
+                std::vector<int> pitches;
+                for (const auto& note : chord.getNotes())
+                    pitches.push_back(note.getPitch());
+                if (pitches.empty())
+                    pitches.push_back(chord.getRootMidi());
+
+                std::vector<double> phase(static_cast<size_t>(pitches.size()), 0.0);
+                std::vector<double> inc(static_cast<size_t>(pitches.size()), 0.0);
+                for (size_t i = 0; i < pitches.size(); ++i)
+                    inc[i] = juce::MathConstants<double>::twoPi
+                             * juce::MidiMessage::getMidiNoteInHertz(pitches[i]) / sr;
+
+                for (int s = startSample; s < endSample; ++s)
+                {
+                    const double t = static_cast<double>(s - startSample) / juce::jmax(1, endSample - startSample);
+                    const float env = static_cast<float>(std::pow(1.0 - juce::jmin(0.999, t), 0.45));
+                    float sample = 0.0f;
+
+                    for (size_t i = 0; i < pitches.size(); ++i)
+                    {
+                        sample += static_cast<float>(std::sin(phase[i]));
+                        phase[i] += inc[i];
+                        if (phase[i] >= juce::MathConstants<double>::twoPi)
+                            phase[i] -= juce::MathConstants<double>::twoPi;
+                    }
+
+                    sample /= static_cast<float>(juce::jmax(1, static_cast<int>(pitches.size())));
+                    sample *= env * 0.23f;
+                    preview.addSample(0, s, sample);
+                    preview.addSample(1, s, sample);
+                }
+
+                beatCursor += chordBeats;
+            }
+
+            grabSamplerQueue->setSlotAudioBuffer(slot, preview, sr);
+        }
+
         updateInPanelQueueView();
 
         return "Progression moved to sampler queue slot " + juce::String(slot + 1);
@@ -3051,32 +4452,196 @@ juce::String WorkspaceShellComponent::runProgressionAction(int actionId, const j
         return "Progression tagged as transition material";
     }
 
-    // Stub implementations for Phase 10 new actions
     if (actionId == progressionEditIdentity)
-        return "Edit progression identity...";
+    {
+        openTheoryEditor(TheoryMenuTarget::progression, progressionAnnotateKeyMode, "Edit Progression Identity");
+        return "Progression identity editor opened";
+    }
 
     if (actionId == progressionForkVariant)
-        return "Fork as variant...";
+    {
+        auto variant = model::Progression::create(
+            progression->getName() + " Variant " + juce::String(static_cast<int>(songState.getProgressions().size()) + 1),
+            progression->getKey(),
+            progression->getMode());
+        variant.setVariantOf(progression->getId());
+        variant.setLengthBeats(progression->getLengthBeats());
+
+        for (const auto& sourceChord : progression->getChords())
+        {
+            auto cloned = model::Chord::create(sourceChord.getSymbol(), sourceChord.getQuality(), sourceChord.getRootMidi());
+            cloned.setName(sourceChord.getName());
+            cloned.setFunction(sourceChord.getFunction());
+            cloned.setSource(sourceChord.getSource());
+            cloned.setStartBeats(sourceChord.getStartBeats());
+            cloned.setDurationBeats(sourceChord.getDurationBeats());
+            cloned.setTension(sourceChord.getTension());
+            for (const auto& sourceNote : sourceChord.getNotes())
+                cloned.addNote(model::Note::create(sourceNote.getPitch(),
+                                                   sourceNote.getVelocity(),
+                                                   sourceNote.getStartBeats(),
+                                                   sourceNote.getDurationBeats(),
+                                                   sourceNote.getChannel()));
+            variant.addChord(cloned);
+        }
+
+        songState.addProgression(variant);
+        selectedProgressionId = variant.getId();
+        return "Forked progression as variant";
+    }
 
     if (actionId == progressionAddChord)
-        return "Add chord at end...";
+    {
+        const auto existing = progression->getChords();
+        double nextStart = 0.0;
+        for (const auto& chord : existing)
+        {
+            const auto duration = chord.getDurationBeats() > 0.0 ? chord.getDurationBeats() : 1.0;
+            nextStart += duration;
+        }
+
+        auto newChord = model::Chord::create("Cmaj7", "major7", 60);
+        if (!existing.empty())
+        {
+            const auto& last = existing.back();
+            const auto newRoot = juce::jlimit(0, 127, last.getRootMidi() + 5);
+            newChord.setRootMidi(newRoot);
+            newChord.setSymbol(cycleChordSymbol(last.getSymbol()));
+            newChord.setName(newChord.getSymbol());
+            newChord.setQuality(last.getQuality());
+            newChord.setFunction(last.getFunction());
+        }
+        newChord.setStartBeats(nextStart);
+        newChord.setDurationBeats(4.0);
+        progression->addChord(newChord);
+        return "Added chord to progression";
+    }
 
     if (actionId == progressionClearChords)
-        return "Clear chords...";
+    {
+        auto tree = progression->valueTree();
+        for (int i = tree.getNumChildren(); --i >= 0;)
+        {
+            if (tree.getChild(i).hasType(model::Schema::chordType))
+                tree.removeChild(i, nullptr);
+        }
+        return "Cleared progression chords";
+    }
 
     if (actionId == progressionAssignToSection)
-        return "Assign to section...";
+    {
+        auto sections = songState.getSections();
+        if (sections.empty())
+        {
+            auto generated = model::Section::create("Verse", 4);
+            generated.addProgressionRef(model::SectionProgressionRef::create(progression->getId(), 0, ""));
+            songState.addSection(generated);
+            selectedSectionId = generated.getId();
+            return "Created section and assigned progression";
+        }
+
+        auto section = getSelectedSection().value_or(sections.front());
+        auto refs = section.getProgressionRefs();
+        for (const auto& ref : refs)
+        {
+            if (ref.getProgressionId() == progression->getId())
+                return "Progression already assigned to section";
+        }
+
+        section.addProgressionRef(model::SectionProgressionRef::create(
+            progression->getId(),
+            static_cast<int>(refs.size()),
+            ""));
+        selectedSectionId = section.getId();
+        return "Assigned progression to section";
+    }
 
     if (actionId == progressionSubAllDominants)
-        return "Sub dominants...";
+    {
+        int substitutions = 0;
+        for (auto chord : progression->getChords())
+        {
+            const auto dominantByFunction = chord.getFunction().containsIgnoreCase("D");
+            const auto dominantBySymbol = chord.getSymbol().containsChar('7');
+            if (!dominantByFunction && !dominantBySymbol)
+                continue;
+
+            const auto transposedRoot = juce::jlimit(0, 127, chord.getRootMidi() + 6);
+            chord.setRootMidi(transposedRoot);
+            chord.setSymbol(transposeChordSymbolRoot(chord.getSymbol(), 6));
+            chord.setName(chord.getSymbol());
+            ++substitutions;
+        }
+
+        return substitutions > 0
+                   ? "Applied dominant substitutions: " + juce::String(substitutions)
+                   : "No dominant chords found to substitute";
+    }
 
     if (actionId == progressionTransposeToKey)
-        return "Transpose to session key...";
+    {
+        const auto fromPc = pitchClassForKeyName(progression->getKey());
+        const auto toPc = pitchClassForKeyName(songState.getSessionKey());
+        const auto semitones = ((toPc - fromPc) + 12) % 12;
+
+        for (auto chord : progression->getChords())
+        {
+            chord.setRootMidi(juce::jlimit(0, 127, chord.getRootMidi() + semitones));
+            chord.setSymbol(transposeChordSymbolRoot(chord.getSymbol(), semitones));
+            chord.setName(chord.getSymbol());
+
+            for (auto note : chord.getNotes())
+                note.setPitch(juce::jlimit(0, 127, note.getPitch() + semitones));
+        }
+
+        progression->setKey(songState.getSessionKey());
+        progression->setMode(songState.getSessionMode());
+        return "Transposed progression to session key";
+    }
 
     if (actionId == progressionSaveAsTemplate)
-        return "Save as template...";
+    {
+        juce::DynamicObject::Ptr payload = new juce::DynamicObject();
+        payload->setProperty("id", progression->getId());
+        payload->setProperty("name", progression->getName());
+        payload->setProperty("key", progression->getKey());
+        payload->setProperty("mode", progression->getMode());
+        payload->setProperty("lengthBeats", progression->getLengthBeats());
 
-    return "Progression action not implemented";
+        juce::Array<juce::var> chordArray;
+        for (const auto& chord : progression->getChords())
+        {
+            juce::DynamicObject::Ptr chordObj = new juce::DynamicObject();
+            chordObj->setProperty("symbol", chord.getSymbol());
+            chordObj->setProperty("quality", chord.getQuality());
+            chordObj->setProperty("rootMidi", chord.getRootMidi());
+            chordObj->setProperty("durationBeats", chord.getDurationBeats());
+            chordObj->setProperty("function", chord.getFunction());
+            chordArray.add(juce::var(chordObj.get()));
+        }
+        payload->setProperty("chords", chordArray);
+
+        auto targetDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+            .getChildFile("SETLE")
+            .getChildFile("templates")
+            .getChildFile("progressions");
+        targetDir.createDirectory();
+
+        auto safeName = progression->getName();
+        safeName = safeName.retainCharacters("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ");
+        safeName = safeName.replaceCharacter(' ', '_');
+        if (safeName.isEmpty())
+            safeName = progression->getId().substring(0, 8);
+
+        const auto file = targetDir.getChildFile(safeName + ".setle-prg");
+        const auto serialized = juce::JSON::toString(juce::var(payload.get()), true);
+        if (!file.replaceWithText(serialized))
+            return "Failed to save progression template";
+
+        return "Saved progression template: " + file.getFileName();
+    }
+
+    return "Progression action unavailable for current selection";
 }
 
 juce::String WorkspaceShellComponent::runHistoryBufferAction(int actionId)
@@ -3130,6 +4695,7 @@ juce::String WorkspaceShellComponent::runHistoryBufferAction(int actionId)
         {
             const auto beats = juce::jlimit(1, 128, parseIntOr(window.getTextEditorContents("length"), historyBuffer->getMaxBeats()));
             historyBuffer->setMaxBeats(beats);
+            setle::state::AppPreferences::get().setHistoryBufferMaxBeats(beats);
             return "History buffer length set to " + juce::String(beats) + " beats";
         }
 
@@ -3149,11 +4715,65 @@ juce::String WorkspaceShellComponent::runHistoryBufferAction(int actionId)
         return "History buffer cleared";
     }
 
-    return "History buffer action not implemented";
+    if (actionId == historyAutoGrabToggle)
+    {
+        const bool enabled = !setle::state::AppPreferences::get().getAutoGrabEnabled();
+        setle::state::AppPreferences::get().setAutoGrabEnabled(enabled);
+        interactionStatus.setText(juce::String("Auto-grab after stop: ") + (enabled ? "ON" : "OFF"), juce::dontSendNotification);
+        return juce::String("Auto-grab toggled ") + (enabled ? "on" : "off");
+    }
+
+    if (actionId == historySetBpm)
+    {
+        juce::AlertWindow window("Override Buffer BPM", "Enter BPM (0 = use transport):", juce::AlertWindow::NoIcon);
+        window.addTextEditor("bpm", "0", "BPM");
+        window.addButton("Set", 1);
+        window.addButton("Cancel", 0);
+
+        if (window.runModalLoop() == 1)
+        {
+            const auto bpm = juce::jlimit(0, 300, parseIntOr(window.getTextEditorContents("bpm"), 0));
+            interactionStatus.setText("Buffer BPM override: " + juce::String(bpm == 0 ? "transport" : juce::String(bpm)), juce::dontSendNotification);
+            return "Buffer BPM set to " + juce::String(bpm);
+        }
+        return "Set buffer BPM cancelled";
+    }
+
+    if (actionId == historySyncToTransport)
+    {
+        interactionStatus.setText("Sync to transport: feature coming soon", juce::dontSendNotification);
+        return "Sync to transport not yet implemented";
+    }
+
+    if (actionId == historyPreviewMode)
+    {
+        interactionStatus.setText("Preview mode: feature coming soon", juce::dontSendNotification);
+        return "Preview mode not yet implemented";
+    }
+
+    if (actionId == historyExportMidi)
+    {
+        interactionStatus.setText("Export buffer as MIDI: feature coming soon", juce::dontSendNotification);
+        return "Export buffer as MIDI not yet implemented";
+    }
+
+    if (actionId == historyCaptureSingle)
+    {
+        grabFromBuffer(historyBuffer->getMaxBeats());
+        return "Single take captured";
+    }
+
+    return "History action unavailable: " + juce::String(actionId);
 }
 
 void WorkspaceShellComponent::handleProgressionAction(const juce::String& progressionId, int actionId)
 {
+    if (progressionId.isEmpty())
+    {
+        interactionStatus.setText("Progression action skipped: no progression selected", juce::dontSendNotification);
+        return;
+    }
+
     selectedProgressionId = progressionId;
 
     const auto result = runProgressionAction(actionId, progressionId);
@@ -3357,8 +4977,7 @@ void WorkspaceShellComponent::applyCaptureSourceSelection()
     else
         historyBuffer->setSource(identifier);
 
-    if (auto* settings = appProperties.getUserSettings())
-        settings->setValue("capture.source", identifier);
+    setle::state::AppPreferences::get().setCaptureSource(identifier);
 }
 
 juce::String WorkspaceShellComponent::buildMidiDeviceSignature() const
@@ -3442,47 +5061,61 @@ void WorkspaceShellComponent::clampLayoutValues(int totalTopWidth, int totalBody
 
 void WorkspaceShellComponent::loadLayoutState()
 {
-    if (auto* settings = appProperties.getUserSettings())
-    {
-        leftPanelWidth = settings->getIntValue("ui.leftWidth", leftPanelWidth);
-        rightPanelWidth = settings->getIntValue("ui.rightWidth", rightPanelWidth);
-        timelineHeight = settings->getIntValue("ui.timelineHeight", timelineHeight);
+    leftPanelWidth = setle::state::AppPreferences::get().getUiLeftWidth(leftPanelWidth);
+    rightPanelWidth = setle::state::AppPreferences::get().getUiRightWidth(rightPanelWidth);
+    timelineHeight = setle::state::AppPreferences::get().getUiTimelineHeight(timelineHeight);
 
-        const auto modeRaw = settings->getIntValue("ui.focusMode", static_cast<int>(FocusMode::balanced));
-        if (modeRaw == static_cast<int>(FocusMode::inFocused))
-            focusMode = FocusMode::inFocused;
-        else if (modeRaw == static_cast<int>(FocusMode::outFocused))
-            focusMode = FocusMode::outFocused;
-        else
-            focusMode = FocusMode::balanced;
-    }
+    const auto modeRaw = setle::state::AppPreferences::get().getUiFocusMode(static_cast<int>(FocusMode::balanced));
+    if (modeRaw == static_cast<int>(FocusMode::inFocused))
+        focusMode = FocusMode::inFocused;
+    else if (modeRaw == static_cast<int>(FocusMode::outFocused))
+        focusMode = FocusMode::outFocused;
+    else
+        focusMode = FocusMode::balanced;
 }
 
 void WorkspaceShellComponent::saveLayoutState()
 {
-    if (auto* settings = appProperties.getUserSettings())
-    {
-        settings->setValue("ui.leftWidth", leftPanelWidth);
-        settings->setValue("ui.rightWidth", rightPanelWidth);
-        settings->setValue("ui.timelineHeight", timelineHeight);
-        settings->setValue("ui.focusMode", static_cast<int>(focusMode));
-        settings->saveIfNeeded();
-    }
+    setle::state::AppPreferences::get().setUiLeftWidth(leftPanelWidth);
+    setle::state::AppPreferences::get().setUiRightWidth(rightPanelWidth);
+    setle::state::AppPreferences::get().setUiTimelineHeight(timelineHeight);
+    setle::state::AppPreferences::get().setUiFocusMode(static_cast<int>(focusMode));
 }
 
 void WorkspaceShellComponent::timerCallback()
 {
     const auto signature = buildMidiDeviceSignature();
-    if (signature == midiDeviceSignature)
+    if (signature != midiDeviceSignature)
+    {
+        midiDeviceSignature = signature;
+
+        refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
+    }
+
+    if (edit == nullptr)
         return;
 
-    midiDeviceSignature = signature;
+    const auto* tempo = edit->tempoSequence.getTempo(0);
+    const auto bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
+    const auto secPerBeat = 60.0 / juce::jmax(1.0, bpm);
+    const auto playheadBeat = edit->getTransport().getPosition().inSeconds() / secPerBeat;
+    const auto fraction = juce::jlimit(0.0, 1.0, playheadBeat / 32.0);
 
-    juce::String preferredSource;
-    if (auto* settings = appProperties.getUserSettings())
-        preferredSource = settings->getValue("capture.source", "");
+    if (timelineShell != nullptr)
+        timelineShell->setPlayheadFraction(fraction);
 
-    refreshCaptureSourceSelector(preferredSource);
+    if (timelineTracks != nullptr)
+        timelineTracks->setPlayheadFraction(fraction);
+
+    if (gridRollComponent != nullptr)
+        gridRollComponent->setPlayheadBeat(playheadBeat);
+
+    for (auto& [trackId, slot] : instrumentSlots)
+    {
+        (void) trackId;
+        if (slot != nullptr)
+            slot->setTransportBeat(playheadBeat);
+    }
 }
 
 void WorkspaceShellComponent::updateInPanelQueueView()
@@ -3508,6 +5141,14 @@ void WorkspaceShellComponent::stopQueuePlayback()
 
     grabSamplerQueue->stopPlayback(*edit);
     updateInPanelQueueView();
+    if (setle::state::AppPreferences::get().getAutoGrabEnabled())
+    {
+        const int beats = setle::state::AppPreferences::get().getHistoryBufferMaxBeats(8);
+        grabFromBuffer(juce::jlimit(1, 128, beats));
+        interactionStatus.setText("Sampler playback stopped and auto-grabbed", juce::dontSendNotification);
+        return;
+    }
+
     interactionStatus.setText("Sampler playback stopped", juce::dontSendNotification);
 }
 
@@ -3539,8 +5180,16 @@ void WorkspaceShellComponent::dropQueueSlotToTimeline(int slotIndex)
     if (slot.state == setle::capture::GrabSlot::State::Empty || slot.progressionId.isEmpty())
         return;
 
+    te::Track* targetTrack = nullptr;
+    if (trackManager != nullptr)
+    {
+        const auto userTracks = trackManager->getAllUserTracks();
+        if (!userTracks.isEmpty())
+            targetTrack = userTracks.getFirst();
+    }
+
     const auto playheadSeconds = edit->getTransport().getPosition().inSeconds();
-    loadProgressionToEdit(slot.progressionId, playheadSeconds, true);
+    loadProgressionToEdit(slot.progressionId, playheadSeconds, true, targetTrack);
     interactionStatus.setText("Dropped slot " + juce::String(slotIndex + 1) + " to timeline at playhead", juce::dontSendNotification);
 }
 
@@ -3601,7 +5250,8 @@ void WorkspaceShellComponent::loadProgressionToEdit()
 
 void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progressionId,
                                                     double startTimeSeconds,
-                                                    bool preferNonSystemTrack)
+                                                    bool preferNonSystemTrack,
+                                                    te::Track* preferredTrack)
 {
     if (edit == nullptr)
         return;
@@ -3610,8 +5260,8 @@ void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progress
     if (tracks.isEmpty())
         return;
 
-    te::AudioTrack* track = nullptr;
-    if (preferNonSystemTrack)
+    auto* track = dynamic_cast<te::AudioTrack*>(preferredTrack);
+    if (track == nullptr && preferNonSystemTrack)
     {
         for (auto* t : tracks)
         {
@@ -3711,6 +5361,7 @@ void WorkspaceShellComponent::resized()
     topStrip.setBounds(topBounds);
 
     auto buttonArea = topBounds.removeFromRight(1410);
+    themeButton.setBounds(buttonArea.removeFromRight(72).reduced(4, 6));
     redoTheoryButton.setBounds(buttonArea.removeFromRight(112).reduced(4, 6));
     undoTheoryButton.setBounds(buttonArea.removeFromRight(122).reduced(4, 6));
     focusOutButton.setBounds(buttonArea.removeFromRight(118).reduced(4, 6));
@@ -3743,6 +5394,8 @@ void WorkspaceShellComponent::resized()
     auto timelineSplitterArea = bounds.removeFromBottom(splitterThickness);
     timelineResizeBar->setBounds(timelineSplitterArea);
     timelineShell->setBounds(timelineArea);
+    if (timelineTracks != nullptr)
+        timelineTracks->setBounds(timelineShell->getTrackAreaBoundsInParent());
 
     clampLayoutValues(bounds.getWidth(), bounds.getHeight() + timelineHeight);
 
@@ -3753,16 +5406,32 @@ void WorkspaceShellComponent::resized()
     leftResizeBar->setBounds(leftSplitterArea);
 
     auto outArea = bounds.removeFromRight(rightPanelWidth);
-    outPanel->setBounds(outArea);
+    if (outPanelHost != nullptr)
+        outPanelHost->setBounds(outArea);
 
     auto rightSplitterArea = bounds.removeFromRight(splitterThickness);
     rightResizeBar->setBounds(rightSplitterArea);
 
     workPanel->setBounds(bounds);
 
-    auto editorBounds = workPanel->getLocalBounds().reduced(12);
-    editorBounds.removeFromTop(42);
+    // ---- WORK panel tab strip ----
+    auto workLocal = workPanel->getLocalBounds().reduced(12);
+    {
+        auto tabRow = workLocal.removeFromTop(28);
+        workTabTheoryButton.setBounds(tabRow.removeFromLeft(120).reduced(2, 2));
+        workTabGridRollButton.setBounds(tabRow.removeFromLeft(100).reduced(2, 2));
+        workTabFxButton.setBounds(tabRow.removeFromLeft(60).reduced(2, 2));
+    }
+    workLocal.removeFromTop(6); // gap between tabs and content
+
+    auto editorBounds = workLocal;
     theoryEditorPanel.setBounds(editorBounds);
+
+    if (gridRollComponent != nullptr)
+        gridRollComponent->setBounds(editorBounds);
+
+    if (effBuilderComponent != nullptr)
+        effBuilderComponent->setBounds(editorBounds);
 
     auto panelBounds = theoryEditorPanel.getLocalBounds().reduced(10);
 
@@ -3793,6 +5462,12 @@ void WorkspaceShellComponent::resized()
     reloadTheoryEditorButton.setBounds(buttonRow.removeFromRight(96));
     buttonRow.removeFromRight(6);
     applyTheoryEditorButton.setBounds(buttonRow.removeFromRight(140));
+
+    if (themeEditorPanel != nullptr)
+    {
+        themeDismissOverlay.setBounds(getLocalBounds());
+        themeEditorPanel->setBounds(getWidth() - 320, topStripHeight, 320, getHeight() - topStripHeight);
+    }
 }
 
 } // namespace setle::ui

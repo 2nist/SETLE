@@ -2,6 +2,10 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include "../model/SetleSongModel.h"
+#include "../theory/MeterContext.h"
+#include <array>
+#include <cmath>
+#include <iostream>
 
 namespace
 {
@@ -10,7 +14,9 @@ bool expect(bool condition, const juce::String& message)
     if (condition)
         return true;
 
-    juce::Logger::writeToLog("FAIL: " + message);
+    const auto failMessage = "FAIL: " + message;
+    juce::Logger::writeToLog(failMessage);
+    std::cerr << failMessage << std::endl;
     return false;
 }
 
@@ -901,6 +907,309 @@ bool testSessionKeyModeDefaultsOnMigration()
     return ok;
 }
 
+bool testChordSourceAndConfidenceRoundtripAllFormats()
+{
+    using namespace setle::model;
+
+    const auto formats = std::array<std::pair<StorageFormat, juce::String>, 3> {{
+        { StorageFormat::xml, "xml" },
+        { StorageFormat::binary, "bin" },
+        { StorageFormat::gzipBinary, "gz" }
+    }};
+
+    bool ok = true;
+    for (const auto& [format, ext] : formats)
+    {
+        auto song = Song::create("ChordSourceConfidence", 120.0);
+        auto prog = Progression::create("SourceConfidence Prog", "C", "ionian");
+        auto chord = Chord::create("G7", "dominant7", 67);
+        chord.setSource("captured");
+        chord.setConfidence(0.82f);
+        prog.addChord(chord);
+        song.addProgression(prog);
+
+        const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                              .getChildFile("setle_chord_source_confidence_" + ext);
+        file.deleteFile();
+
+        const auto saveResult = song.saveToFile(file, format);
+        ok &= expect(saveResult.wasOk(), "Chord source/confidence: save should succeed for " + ext);
+
+        const auto loaded = Song::loadFromFile(file, format);
+        ok &= expect(loaded.has_value(), "Chord source/confidence: load should succeed for " + ext);
+        if (loaded.has_value())
+        {
+            const auto progs = loaded->getProgressions();
+            ok &= expect(!progs.empty(), "Chord source/confidence: progression present for " + ext);
+            if (!progs.empty())
+            {
+                const auto chords = progs.front().getChords();
+                ok &= expect(!chords.empty(), "Chord source/confidence: chord present for " + ext);
+                if (!chords.empty())
+                {
+                    ok &= expect(chords.front().getSource() == "captured",
+                                 "Chord source survives roundtrip for " + ext);
+                    ok &= expect(std::abs(chords.front().getConfidence() - 0.82f) < 0.001f,
+                                 "Chord confidence survives roundtrip for " + ext);
+                }
+            }
+        }
+
+        file.deleteFile();
+    }
+
+    return ok;
+}
+
+bool testProgressionVariantOfRoundtripAllFormats()
+{
+    using namespace setle::model;
+
+    const auto formats = std::array<std::pair<StorageFormat, juce::String>, 3> {{
+        { StorageFormat::xml, "xml" },
+        { StorageFormat::binary, "bin" },
+        { StorageFormat::gzipBinary, "gz" }
+    }};
+
+    bool ok = true;
+    for (const auto& [format, ext] : formats)
+    {
+        auto song = Song::create("VariantOfRoundtrip", 120.0);
+
+        auto base = Progression::create("Base", "C", "ionian");
+        song.addProgression(base);
+
+        auto variant = Progression::create("Variant", "C", "ionian");
+        variant.setVariantOf(base.getId());
+        song.addProgression(variant);
+
+        const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                              .getChildFile("setle_variantof_roundtrip_" + ext);
+        file.deleteFile();
+
+        const auto saveResult = song.saveToFile(file, format);
+        ok &= expect(saveResult.wasOk(), "VariantOf: save should succeed for " + ext);
+
+        const auto loaded = Song::loadFromFile(file, format);
+        ok &= expect(loaded.has_value(), "VariantOf: load should succeed for " + ext);
+        if (loaded.has_value())
+        {
+            const auto progressions = loaded->getProgressions();
+            ok &= expect(progressions.size() >= 2, "VariantOf: expected two progressions for " + ext);
+            if (progressions.size() >= 2)
+            {
+                const auto loadedBaseId = progressions.front().getId();
+                const auto loadedVariantOf = progressions[1].getVariantOf();
+                ok &= expect(loadedVariantOf == loadedBaseId,
+                             "VariantOf survives roundtrip for " + ext);
+            }
+        }
+
+        file.deleteFile();
+    }
+
+    return ok;
+}
+
+bool testChordSourceConfidenceDefaultOnMigration()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("MigrationChordDefaults", 120.0);
+    auto prog = Progression::create("LegacyProg", "C", "ionian");
+    auto chord = Chord::create("Cmaj7", "major7", 60);
+
+    auto chordTree = chord.valueTree();
+    chordTree.removeProperty(Schema::sourceProp, nullptr);
+    chordTree.removeProperty(Schema::confidenceProp, nullptr);
+    prog.valueTree().appendChild(chordTree.createCopy(), nullptr);
+    song.addProgression(prog);
+
+    auto xml = song.valueTree().toXmlString();
+    auto rawTree = juce::ValueTree::fromXml(xml);
+    if (!rawTree.isValid())
+        return expect(false, "Migration chord defaults: failed to build raw tree");
+
+    rawTree.removeProperty(Schema::schemaVersionProp, nullptr);
+
+    auto migrated = Song(rawTree);
+    const auto progs = migrated.getProgressions();
+    if (progs.empty())
+        return expect(false, "Migration chord defaults: no progression after migration");
+
+    const auto chords = progs.front().getChords();
+    if (chords.empty())
+        return expect(false, "Migration chord defaults: no chord after migration");
+
+    bool ok = true;
+    ok &= expect(chords.front().getSource() == "manual", "Migration backfills chord source");
+    ok &= expect(std::abs(chords.front().getConfidence()) < 0.001f, "Migration backfills chord confidence");
+    return ok;
+}
+
+// ---- V2A: Section color and time signature survive XML round-trip ----
+bool testSectionColorTimeSigXmlRoundtrip()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("V2A", 120.0);
+    auto section = Section::create("Verse", 4);
+    section.setColor("#FF6B35");
+    section.setTimeSigNumerator(5);
+    section.setTimeSigDenominator(8);
+    song.addSection(section);
+
+    const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getChildFile("setle_V2A.xml");
+    file.deleteFile();
+
+    if (song.saveToFile(file, StorageFormat::xml).failed())
+        return expect(false, "V2A: save failed");
+
+    const auto loaded = Song::loadFromFile(file, StorageFormat::xml);
+    file.deleteFile();
+
+    if (!loaded.has_value())
+        return expect(false, "V2A: load failed");
+
+    const auto sections = loaded->getSections();
+    if (sections.empty())
+        return expect(false, "V2A: no sections");
+
+    bool ok = true;
+    ok &= expect(sections.front().getColor() == "#FF6B35", "V2A: color should survive XML round-trip");
+    ok &= expect(sections.front().getTimeSigNumerator() == 5, "V2A: timeSigNumerator should survive XML round-trip");
+    ok &= expect(sections.front().getTimeSigDenominator() == 8, "V2A: timeSigDenominator should survive XML round-trip");
+    return ok;
+}
+
+// ---- V2B: Schema v1→v2 migration backfills color and time sig defaults ----
+bool testSchemaV1ToV2MigrationBackfillsColorAndTimeSig()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("V2B", 120.0);
+    auto section = Section::create("Bridge", 2);
+    song.addSection(section);
+
+    auto xml = song.valueTree().toXmlString();
+    auto rawTree = juce::ValueTree::fromXml(xml);
+    if (!rawTree.isValid())
+        return expect(false, "V2B: failed to build raw tree");
+
+    // Simulate a v1 file
+    rawTree.setProperty(Schema::schemaVersionProp, 1, nullptr);
+
+    // Remove the new v2 fields from the section node
+    auto sectionsContainer = rawTree.getChildWithName(Schema::sectionsContainerType);
+    for (auto sectionNode : sectionsContainer)
+    {
+        sectionNode.removeProperty(Schema::colorProp, nullptr);
+        sectionNode.removeProperty(Schema::timeSigNumeratorProp, nullptr);
+        sectionNode.removeProperty(Schema::timeSigDenominatorProp, nullptr);
+    }
+
+    auto migrated = Song(rawTree);
+    const auto sections = migrated.getSections();
+    if (sections.empty())
+        return expect(false, "V2B: no sections after migration");
+
+    bool ok = true;
+    ok &= expect(sections.front().getColor().isEmpty(), "V2B: migration should add empty color");
+    ok &= expect(sections.front().getTimeSigNumerator() == 4, "V2B: migration should add timeSigNumerator=4");
+    ok &= expect(sections.front().getTimeSigDenominator() == 4, "V2B: migration should add timeSigDenominator=4");
+    return ok;
+}
+
+// ---- V2C: Section color/timeSig default values without explicit set ----
+bool testSectionDefaultColorAndTimeSig()
+{
+    using namespace setle::model;
+
+    auto section = Section::create("DefaultTest", 4);
+
+    bool ok = true;
+    ok &= expect(section.getColor().isEmpty(), "V2C: default color should be empty");
+    ok &= expect(section.getTimeSigNumerator() == 4, "V2C: default timeSigNumerator should be 4");
+    ok &= expect(section.getTimeSigDenominator() == 4, "V2C: default timeSigDenominator should be 4");
+    return ok;
+}
+
+bool testT1TimeSignatureXmlRoundtrip()
+{
+    using namespace setle::model;
+
+    auto song = Song::create("T1 Test");
+    auto section = Section::create("A");
+    section.setTimeSigNumerator(11);
+    section.setTimeSigDenominator(8);
+    song.addSection(section);
+
+    const auto xml = song.valueTree().toXmlString();
+    auto tree = juce::ValueTree::fromXml(xml);
+    auto loaded = Song(tree);
+
+    bool ok = true;
+    const auto sections = loaded.getSections();
+    ok &= expect(!sections.empty(), "T1: loaded song should have sections");
+    if (!sections.empty())
+    {
+        ok &= expect(sections[0].getTimeSigNumerator() == 11, "T1: numerator should be 11");
+        ok &= expect(sections[0].getTimeSigDenominator() == 8, "T1: denominator should be 8");
+    }
+    return ok;
+}
+
+bool testT2MeterContextBeatsPerBar()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(std::abs(MeterContext{4, 4}.beatsPerBar() - 4.0) < 0.001, "T2: 4/4 beatsPerBar should be 4.0");
+    ok &= expect(std::abs(MeterContext{11, 8}.beatsPerBar() - 5.5) < 0.001, "T2: 11/8 beatsPerBar should be 5.5");
+    ok &= expect(std::abs(MeterContext{7, 8}.beatsPerBar() - 3.5) < 0.001, "T2: 7/8 beatsPerBar should be 3.5");
+    ok &= expect(std::abs(MeterContext{5, 4}.beatsPerBar() - 5.0) < 0.001, "T2: 5/4 beatsPerBar should be 5.0");
+    ok &= expect(std::abs(MeterContext{6, 8}.beatsPerBar() - 3.0) < 0.001, "T2: 6/8 beatsPerBar should be 3.0");
+    
+    ok &= expect(MeterContext{11, 8}.stepsPerBarEighths() == 11, "T2: 11/8 stepsPerBarEighths should be 11");
+    ok &= expect(MeterContext{7, 8}.stepsPerBarEighths() == 7, "T2: 7/8 stepsPerBarEighths should be 7");
+    ok &= expect(MeterContext{5, 4}.stepsPerBarEighths() == 10, "T2: 5/4 stepsPerBarEighths should be 10");
+    
+    return ok;
+}
+
+bool testT3SnapInElevenEight()
+{
+    using namespace setle::theory;
+
+    MeterContext meter{11, 8};
+    
+    // In 11/8: bar = 5.5 beats, beat unit = 0.5 beats (eighth note)
+    bool ok = true;
+    ok &= expect(std::abs(meter.beatsPerBar() - 5.5) < 0.001, "T3: 11/8 bar should be 5.5 beats");
+    ok &= expect(std::abs(meter.beatUnit() - 0.5) < 0.001, "T3: 11/8 beat unit should be 0.5 beats");
+    
+    // Snap values in 11/8:
+    // WholeBar: 5.5 beats
+    // HalfBar: 2.75 beats
+    // OneBeat: 0.5 beats
+    // HalfBeat: 0.25 beats
+    // Eighth: 0.5 beats
+    // Sixteenth: 0.25 beats
+    
+    const double wholeBarSnap = meter.beatsPerBar();
+    const double halfBarSnap = meter.beatsPerBar() / 2.0;
+    const double oneBeatsSnap = meter.beatUnit();
+    const double halfBeatSnap = meter.beatUnit() / 2.0;
+    
+    ok &= expect(std::abs(wholeBarSnap - 5.5) < 0.001, "T3: whole bar snap in 11/8 should be 5.5");
+    ok &= expect(std::abs(halfBarSnap - 2.75) < 0.001, "T3: half bar snap in 11/8 should be 2.75");
+    ok &= expect(std::abs(oneBeatsSnap - 0.5) < 0.001, "T3: one beat snap in 11/8 should be 0.5");
+    ok &= expect(std::abs(halfBeatSnap - 0.25) < 0.001, "T3: half beat snap in 11/8 should be 0.25");
+    
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -932,6 +1241,15 @@ int main()
     ok &= testSessionKeyModeSurvivesBinaryRoundtrip(); // 10B
     ok &= testSessionKeyModeSurvivesGzipRoundtrip(); // 10B
     ok &= testSessionKeyModeDefaultsOnMigration();   // 10B
+    ok &= testChordSourceAndConfidenceRoundtripAllFormats();
+    ok &= testProgressionVariantOfRoundtripAllFormats();
+    ok &= testChordSourceConfidenceDefaultOnMigration();
+    ok &= testSectionColorTimeSigXmlRoundtrip();          // V2A
+    ok &= testSchemaV1ToV2MigrationBackfillsColorAndTimeSig(); // V2B
+    ok &= testSectionDefaultColorAndTimeSig();            // V2C
+    ok &= testT1TimeSignatureXmlRoundtrip();              // T1
+    ok &= testT2MeterContextBeatsPerBar();                // T2
+    ok &= testT3SnapInElevenEight();                      // T3
 
     if (!ok)
         return 1;

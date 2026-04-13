@@ -1,0 +1,116 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Erinnrung zum Bach",
+  "category": "Classical",
+  "source": "erinnrung-zum-bach.spl.prg",
+  "chords": [
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "D majorvii\u00f843",
+      "quality": "diminished",
+      "rootMidi": 62,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "D majorvii\u00f843",
+      "quality": "diminished",
+      "rootMidi": 62,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 6.0
+    }
+  ]
+}

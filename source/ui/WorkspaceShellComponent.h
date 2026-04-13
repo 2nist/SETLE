@@ -3,14 +3,26 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+#include <map>
 #include <memory>
 #include <vector>
 
 #include "../capture/GrabSamplerQueue.h"
 #include "../capture/HistoryBuffer.h"
+#include "../instruments/InstrumentSlot.h"
 #include "../model/SetleSongModel.h"
+#include "../timeline/TimelineTracksComponent.h"
+#include "../timeline/TrackManager.h"
+#include "../gridroll/GridRollComponent.h"
+#include "../eff/EffBuilderComponent.h"
+#include "../eff/EffSerializer.h"
+#include "../state/AppPreferences.h"
+#include "../theme/SetleLookAndFeel.h"
+#include "../theme/ThemeEditorPanel.h"
+#include "../theme/ThemeManager.h"
 #include "ProgressionLibraryBrowser.h"
 #include "ProgressionChordPalette.h"
+#include "ToolPaletteComponent.h"
 
 namespace te = tracktion::engine;
 
@@ -18,17 +30,22 @@ namespace setle::ui
 {
 
 class WorkspaceShellComponent final : public juce::Component,
-                                      private juce::Timer
+                                      public juce::DragAndDropContainer,
+                                      private juce::Timer,
+                                      public ThemeManager::Listener
 {
 public:
     explicit WorkspaceShellComponent(te::Engine& engine);
     ~WorkspaceShellComponent() override;
 
     bool keyPressed(const juce::KeyPress& key) override;
+    void mouseDown(const juce::MouseEvent& event) override;
     void resized() override;
+    void themeChanged() override;
 
 private:
     class LabelPanel;
+    class OutPanelHost;
     class TimelineShell;
     class DragBar;
     class InDevicePanel;
@@ -78,7 +95,8 @@ private:
     void loadProgressionToEdit();
     void loadProgressionToEdit(const juce::String& progressionId,
                                double startTimeSeconds,
-                               bool preferNonSystemTrack);
+                               bool preferNonSystemTrack,
+                               te::Track* preferredTrack = nullptr);
     juce::File getSongStateFile() const;
     void loadSongState();
     void seedSongStateIfNeeded();
@@ -91,6 +109,8 @@ private:
     void updateUndoRedoButtonState();
     void configureTheoryEditorPanel();
     void openTheoryEditor(TheoryMenuTarget target, int actionId, const juce::String& actionName);
+    void switchWorkTab(int tabIndex); // 0=Theory, 1=GridRoll, 2=FX
+    void switchWorkTab(bool showGridRoll) { switchWorkTab(showGridRoll ? 1 : 0); }
     void populateTheoryObjectSelector();
     void populateTheoryFieldsForCurrentSelection();
     void commitTheoryEditorAction();
@@ -105,11 +125,31 @@ private:
 
     juce::String summarizeSongState() const;
 
+    // Meter-aware snap calculation helper
+    double getSnapBeats(double atBeat) const;
+
     void refreshTimelineData();
+    void refreshTheoryLanes() { refreshTimelineData(); }
+    void syncTimeSignaturesToEdit();
+    void ensureInstrumentSlots();
+    void applyPersistedInstrumentSlotAssignments();
+    void persistInstrumentSlotAssignments();
+    void rebuildOutPanelStrips();
+    void applyDrumPatternToSlots(const std::vector<setle::gridroll::GridRollCell>& cells,
+                                 const juce::String& progressionId);
+    juce::String getTrackIdForTrack(const te::Track& track) const;
     void clampLayoutValues(int totalTopWidth, int totalBodyHeight);
     void loadLayoutState();
     void saveLayoutState();
     void timerCallback() override;
+    void repaintEntireTree();
+    void showThemeEditor(bool shouldShow);
+
+    // FX chain persistence
+    juce::File getEffectsFolder() const;
+    juce::File getEffFileForTrack(const juce::String& trackId) const;
+    void saveEffChains();
+    void loadEffChains();
 
     te::Engine& engineRef;
     std::unique_ptr<te::Edit> edit;
@@ -117,8 +157,10 @@ private:
     juce::Component topStrip;
     juce::Component* inPanel;
     LabelPanel* workPanel;
-    LabelPanel* outPanel;
+    std::unique_ptr<OutPanelHost> outPanelHost;
     TimelineShell* timelineShell;
+    setle::timeline::TimelineTracksComponent* timelineTracks { nullptr };
+    std::unique_ptr<ToolPaletteComponent> toolPalette;
 
     DragBar* leftResizeBar;
     DragBar* rightResizeBar;
@@ -128,6 +170,7 @@ private:
     juce::TextButton stopButton   { juce::CharPointer_UTF8("\xe2\x96\xa0") };  // ■
     juce::TextButton recordButton { juce::CharPointer_UTF8("\xe2\x97\x8f") };  // ●
     juce::Label     bpmLabel;
+    juce::Label     transportPositionLabel;
     juce::TextEditor bpmEditor;
     juce::Label captureSourceLabel;
     juce::ComboBox captureSourceSelector;
@@ -139,6 +182,7 @@ private:
     juce::TextButton focusOutButton { "Focus OUT" };
     juce::TextButton undoTheoryButton { "Undo Theory" };
     juce::TextButton redoTheoryButton { "Redo Theory" };
+    juce::TextButton themeButton { "Theme" };
 
     juce::Label sessionKeyLabel;
     juce::ComboBox sessionKeySelector;
@@ -148,9 +192,13 @@ private:
     juce::Label topTitle;
     juce::Label interactionStatus;
 
-    juce::ApplicationProperties appProperties;
+    SetleLookAndFeel setleLookAndFeel;
+    std::unique_ptr<ThemeEditorPanel> themeEditorPanel;
+    juce::Component themeDismissOverlay;
     std::unique_ptr<setle::capture::GrabSamplerQueue> grabSamplerQueue;
     std::unique_ptr<setle::capture::HistoryBuffer> historyBuffer;
+    std::unique_ptr<setle::timeline::TrackManager> trackManager;
+    std::map<juce::String, std::unique_ptr<setle::instruments::InstrumentSlot>> instrumentSlots;
     model::Song songState;
     std::vector<juce::String> undoSnapshots;
     std::vector<juce::String> redoSnapshots;
@@ -184,8 +232,16 @@ private:
     juce::TextEditor theoryFieldEditor5;
     juce::TextButton applyTheoryEditorButton { "Apply Edit" };
     juce::TextButton reloadTheoryEditorButton { "Reload" };
+    juce::TextButton workTabTheoryButton   { "Theory Editor" };
+    juce::TextButton workTabGridRollButton { "GridRoll" };
+    juce::TextButton workTabFxButton       { "FX" };
+    int workPanelTabIndex { 0 };  // 0=Theory, 1=GridRoll, 2=FX
+    bool workPanelShowGridRoll { false };
     std::unique_ptr<ProgressionLibraryBrowser> libraryBrowser;
     std::unique_ptr<ProgressionChordPalette> chordPalette;
+    std::unique_ptr<setle::gridroll::GridRollComponent> gridRollComponent;
+    std::unique_ptr<setle::eff::EffBuilderComponent> effBuilderComponent;
+    juce::String selectedFxTrackId;
     TheoryMenuTarget activeEditorTarget { TheoryMenuTarget::section };
     int activeEditorActionId = 0;
 
@@ -200,7 +256,7 @@ private:
     static constexpr int minSideWidth = 72;
     static constexpr int maxSideWidth = 700;
     static constexpr int minCenterWidth = 360;
-    static constexpr int minTimelineHeight = 160;
+    static constexpr int minTimelineHeight = 248;
     static constexpr int minTopWorkHeight = 220;
     static constexpr int maxUndoDepth = 64;
 };

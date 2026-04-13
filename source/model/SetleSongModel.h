@@ -18,7 +18,7 @@ enum class StorageFormat
 
 struct Schema
 {
-    static constexpr int version = 1;
+    static constexpr int version = 2;
 
     static inline const juce::Identifier songType { "setleSong" };
     static inline const juce::Identifier noteType { "note" };
@@ -47,6 +47,7 @@ struct Schema
     static inline const juce::Identifier qualityProp { "quality" };
     static inline const juce::Identifier functionProp { "function" };
     static inline const juce::Identifier sourceProp { "source" };
+    static inline const juce::Identifier confidenceProp { "confidence" };
     static inline const juce::Identifier rootMidiProp { "rootMidi" };
     static inline const juce::Identifier tensionProp { "tension" };
 
@@ -72,6 +73,11 @@ struct Schema
     static inline const juce::Identifier bpmProp { "bpm" };
     static inline const juce::Identifier sessionKeyProp { "sessionKey" };
     static inline const juce::Identifier sessionModeProp { "sessionMode" };
+
+    // v2 additions
+    static inline const juce::Identifier colorProp { "color" };
+    static inline const juce::Identifier timeSigNumeratorProp { "timeSigNumerator" };
+    static inline const juce::Identifier timeSigDenominatorProp { "timeSigDenominator" };
 };
 
 class Note
@@ -119,6 +125,7 @@ public:
     juce::String getQuality() const;
     juce::String getFunction() const;
     juce::String getSource() const;
+    float getConfidence() const;
     int getRootMidi() const;
     double getStartBeats() const;
     double getDurationBeats() const;
@@ -129,6 +136,7 @@ public:
     void setQuality(const juce::String& quality);
     void setFunction(const juce::String& chordFunction);
     void setSource(const juce::String& source);
+    void setConfidence(float confidence);
     void setRootMidi(int rootMidi);
     void setStartBeats(double beats);
     void setDurationBeats(double beats);
@@ -167,6 +175,7 @@ public:
 
     void addChord(const Chord& chord);
     std::vector<Chord> getChords() const;
+    void removeChord(const juce::String& chordId);
 
 private:
     juce::ValueTree state;
@@ -215,9 +224,15 @@ public:
     juce::String getId() const;
     juce::String getName() const;
     int getRepeatCount() const;
+    juce::String getColor() const;
+    int getTimeSigNumerator() const;
+    int getTimeSigDenominator() const;
 
     void setName(const juce::String& name);
     void setRepeatCount(int repeats);
+    void setColor(const juce::String& color);
+    void setTimeSigNumerator(int numerator);
+    void setTimeSigDenominator(int denominator);
 
     void addProgressionRef(const SectionProgressionRef& progressionRef);
     std::vector<SectionProgressionRef> getProgressionRefs() const;
@@ -280,6 +295,7 @@ public:
     void addProgression(const Progression& progression);
     void addSection(const Section& section);
     void addTransition(const Transition& transition);
+    void removeSection(const juce::String& id);
 
     std::vector<Progression> getProgressions() const;
     std::vector<Section> getSections() const;

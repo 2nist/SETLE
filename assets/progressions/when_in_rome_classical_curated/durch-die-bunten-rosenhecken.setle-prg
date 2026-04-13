@@ -1,0 +1,104 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Durch die bunten Rosenhecken",
+  "category": "Classical",
+  "source": "durch-die-bunten-rosenhecken.spl.prg",
+  "chords": [
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "VI6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "F minorii\u00f865",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "F minorviio7/V",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V9",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "viio43",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "i6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "iv",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "F minorCad64",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 8.0
+    }
+  ]
+}

@@ -5,6 +5,10 @@ project(SETLE VERSION 0.0.1)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+if(MSVC)
+    add_compile_options(/FS)
+endif()
+
 
 # Third-party module paths
 set(SETLE_FONTAUDIO_MODULE_PATH modules/fontaudio/wrappers/juce/module/fontaudio)
@@ -127,20 +131,128 @@ target_sources(SETLE PRIVATE
     source/capture/GrabSlot.h
     source/capture/HistoryBuffer.cpp
     source/capture/HistoryBuffer.h
+    source/instruments/drum/DrumMachineProcessor.cpp
+    source/instruments/drum/DrumMachineProcessor.h
+    source/instruments/drum/DrumMachineEditorComponent.cpp
+    source/instruments/drum/DrumMachineEditorComponent.h
+    source/instruments/drum/DrumVoiceDSP.cpp
+    source/instruments/drum/DrumVoiceDSP.h
+    source/instruments/drum/DrumVoiceParams.h
+    source/instruments/drum/FmDrumVoice.cpp
+    source/instruments/drum/FmDrumVoice.h
+    source/instruments/drum/DrumKitPatch.h
+    source/instruments/drum/DrumModuleState.h
+    source/instruments/drum/TracktionDrumMachinePlugin.cpp
+    source/instruments/drum/TracktionDrumMachinePlugin.h
+    source/instruments/InstrumentSlot.cpp
+    source/instruments/InstrumentSlot.h
+    source/instruments/reel/ReelBuffer.cpp
+    source/instruments/reel/ReelBuffer.h
+    source/instruments/reel/ReelGranular.cpp
+    source/instruments/reel/ReelGranular.h
+    source/instruments/reel/ReelLoopPlayer.cpp
+    source/instruments/reel/ReelLoopPlayer.h
+    source/instruments/reel/ReelParams.h
+    source/instruments/reel/ReelProcessor.cpp
+    source/instruments/reel/ReelProcessor.h
+    source/instruments/reel/ReelEditorComponent.cpp
+    source/instruments/reel/ReelEditorComponent.h
+    source/instruments/reel/ReelSampler.cpp
+    source/instruments/reel/ReelSampler.h
+    source/instruments/reel/ReelSlicer.cpp
+    source/instruments/reel/ReelSlicer.h
+    source/instruments/reel/TracktionReelPlugin.cpp
+    source/instruments/reel/TracktionReelPlugin.h
+    source/module/ModuleProcessor.h
+    source/instruments/polysynth/PolySynthProcessor.cpp
+    source/instruments/polysynth/PolySynthProcessor.h
+    source/instruments/polysynth/PolySynthEditorComponent.cpp
+    source/instruments/polysynth/PolySynthEditorComponent.h
+    source/instruments/polysynth/PolyVoice.h
+    source/instruments/polysynth/SineOscNode.h
+    source/instruments/polysynth/TracktionPolySynthPlugin.cpp
+    source/instruments/polysynth/TracktionPolySynthPlugin.h
+    source/gridroll/GridRollCell.h
+    source/gridroll/ChordGridView.cpp
+    source/gridroll/ChordGridView.h
+    source/gridroll/NoteDetailView.cpp
+    source/gridroll/NoteDetailView.h
+    source/gridroll/DrumGridView.cpp
+    source/gridroll/DrumGridView.h
+    source/gridroll/GroovePanel.cpp
+    source/gridroll/GroovePanel.h
+    source/gridroll/DrumPatternLibrary.cpp
+    source/gridroll/DrumPatternLibrary.h
+    source/gridroll/DrumPatternBrowser.cpp
+    source/gridroll/DrumPatternBrowser.h
+    source/gridroll/DrumPatternMidiReader.cpp
+    source/gridroll/DrumPatternMidiReader.h
+    source/gridroll/GridRollComponent.cpp
+    source/gridroll/GridRollComponent.h
+    source/midi/MidiConstraintEngine.cpp
+    source/midi/MidiConstraintEngine.h
+    source/theory/DiatonicHarmony.cpp
+    source/theory/DiatonicHarmony.h
+    source/theory/MeterContext.cpp
+    source/theory/MeterContext.h
+    source/theory/TheoryAdapter.cpp
+    source/theory/TheoryAdapter.h
+    source/theory/BachTheory.cpp
+    source/theory/BachTheory.h
+    source/state/AppPreferences.cpp
+    source/state/AppPreferences.h
+    source/theme/ThemeData.h
+    source/theme/ThemeManager.cpp
+    source/theme/ThemeManager.h
+    source/theme/ThemePresets.cpp
+    source/theme/ThemePresets.h
+    source/theme/SetleLookAndFeel.h
+    source/theme/ThemeEditorPanel.cpp
+    source/theme/ThemeEditorPanel.h
     source/model/SetleSongModel.cpp
     source/model/SetleSongModel.h
+    source/mixer/BusManager.cpp
+    source/mixer/BusManager.h
+    source/mixer/MasterStrip.cpp
+    source/mixer/MasterStrip.h
+    source/mixer/MixerComponent.cpp
+    source/mixer/MixerComponent.h
+    source/mixer/MixerStrip.cpp
+    source/mixer/MixerStrip.h
+    source/timeline/TrackManager.cpp
+    source/timeline/TrackManager.h
+    source/timeline/TrackLane.cpp
+    source/timeline/TrackLane.h
+    source/timeline/TimelineTracksComponent.cpp
+    source/timeline/TimelineTracksComponent.h
     source/ui/WorkspaceShellComponent.cpp
     source/ui/WorkspaceShellComponent.h
+    source/ui/EditToolManager.cpp
+    source/ui/EditToolManager.h
+    source/ui/ToolPaletteComponent.cpp
+    source/ui/ToolPaletteComponent.h
     source/ui/ProgressionLibraryBrowser.cpp
     source/ui/ProgressionLibraryBrowser.h
     source/ui/ProgressionChordPalette.cpp
     source/ui/ProgressionChordPalette.h
+    source/eff/EffModel.h
+    source/eff/EffSerializer.h
+    source/eff/EffSerializer.cpp
+    source/eff/EffProcessor.h
+    source/eff/EffProcessor.cpp
+    source/eff/EffTemplates.h
+    source/eff/EffTemplates.cpp
+    source/eff/EffBlockPickerOverlay.h
+    source/eff/EffBlockPickerOverlay.cpp
+    source/eff/EffBuilderComponent.h
+    source/eff/EffBuilderComponent.cpp
 )
 
 # Compile definitions
 target_compile_definitions(SETLE PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
+    JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SETLE,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SETLE,JUCE_VERSION>"
 )

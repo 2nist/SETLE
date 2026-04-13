@@ -1,0 +1,236 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Blue Bayou",
+  "category": "Pop",
+  "source": "blue-bayou.spl.prg",
+  "chords": [
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 18.0
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 18.25
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "Dmaj",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 16.25
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 20.25
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "Dmaj",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 13.25
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 20.25
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 20.25
+    },
+    {
+      "symbol": "Amaj",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 5.25
+    },
+    {
+      "symbol": "Amin",
+      "quality": "minor",
+      "rootMidi": 69,
+      "durationBeats": 5.25
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 5.25
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "Dmaj",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 16.5
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 20.25
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "Dmaj",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 13.5
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 20.0
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 15.5
+    },
+    {
+      "symbol": "E7",
+      "quality": "dominant7",
+      "rootMidi": 64,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "Amaj",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "Amin",
+      "quality": "minor",
+      "rootMidi": 69,
+      "durationBeats": 5.25
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 5.0
+    },
+    {
+      "symbol": "Dmaj",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 3.25
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 22.75
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 31.5
+    },
+    {
+      "symbol": "Dmaj",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 0.75
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "Dmaj",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 0.75
+    },
+    {
+      "symbol": "Emaj",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 32.0
+    }
+  ]
+}

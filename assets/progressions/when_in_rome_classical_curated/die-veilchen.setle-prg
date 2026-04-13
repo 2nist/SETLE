@@ -1,0 +1,200 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Die Veilchen",
+  "category": "Classical",
+  "source": "die-veilchen.spl.prg",
+  "chords": [
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V42",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V43",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "ii65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "G majorV65/V",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "G majorV7/V",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G majorV7/ii",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "ii",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "G majorV7/ii",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "ii",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "G majorV7/ii",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "ii",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "ii6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "G majorCad64",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    }
+  ]
+}

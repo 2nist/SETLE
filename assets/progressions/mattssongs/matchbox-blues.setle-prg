@@ -1,0 +1,68 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Matchbox Blues",
+  "category": "Folk",
+  "source": "matchbox-blues.spl.prg",
+  "chords": [
+    {
+      "symbol": "Amaj",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 6.0
+    },
+    {
+      "symbol": "A(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 69,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "D(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "Amaj",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "E(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 64,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "D(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Amaj",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "D(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "Amaj",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "E(3,5,b7)",
+      "quality": "dominant7",
+      "rootMidi": 64,
+      "durationBeats": 8.0
+    }
+  ]
+}

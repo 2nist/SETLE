@@ -1,0 +1,140 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Uninvited",
+  "category": "Pop",
+  "source": "uninvited.spl.prg",
+  "chords": [
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 15.0
+    },
+    {
+      "symbol": "Gmin",
+      "quality": "minor",
+      "rootMidi": 67,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "D7(*3)",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 7.25
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 45.75
+    },
+    {
+      "symbol": "Gmin",
+      "quality": "minor",
+      "rootMidi": 67,
+      "durationBeats": 7.25
+    },
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 22.5
+    },
+    {
+      "symbol": "Gmin",
+      "quality": "minor",
+      "rootMidi": 67,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 60.25
+    },
+    {
+      "symbol": "Gmin",
+      "quality": "minor",
+      "rootMidi": 67,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 23.25
+    },
+    {
+      "symbol": "Gmin",
+      "quality": "minor",
+      "rootMidi": 67,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Gmaj",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 84.5
+    },
+    {
+      "symbol": "Dmaj",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Dmin6(*b3)",
+      "quality": "minor",
+      "rootMidi": 62,
+      "durationBeats": 88.25
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Der Spinnerin Nachtlied",
+  "category": "Classical",
+  "source": "der-spinnerin-nachtlied.spl.prg",
+  "chords": [
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V43",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "VI6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "F minorviio43/V",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i64",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V43",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "VI6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "F minorviio43/V",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i64",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    }
+  ]
+}

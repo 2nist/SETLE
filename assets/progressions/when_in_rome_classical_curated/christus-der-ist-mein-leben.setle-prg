@@ -1,0 +1,182 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Christus, der ist mein Leben",
+  "category": "Classical",
+  "source": "christus-der-ist-mein-leben.spl.prg",
+  "chords": [
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "F majorV2/IV",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "IV6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "IV",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "ii7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "viio6",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.5
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "C majorV6/5",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "ii",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "vi",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "C majorii6/5",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "IV",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "viio6",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "F majorii6/5",
+      "quality": "diminished",
+      "rootMidi": 65,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 0.5
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 8.0
+    }
+  ]
+}

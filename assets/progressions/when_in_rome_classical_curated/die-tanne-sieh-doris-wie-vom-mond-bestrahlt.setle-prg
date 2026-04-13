@@ -1,0 +1,176 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Die Tanne (Sieh Doris, wie vom Mond bestrahlt )",
+  "category": "Classical",
+  "source": "die-tanne-sieh-doris-wie-vom-mond-bestrahlt.spl.prg",
+  "chords": [
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "G majorviio64/ii",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V42",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "G majorCad64",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "ii6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G majorviio6/IV",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G majorviio6/IV",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "IV6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "IV",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "ii6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "G majorCad64",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 3.0
+    }
+  ]
+}

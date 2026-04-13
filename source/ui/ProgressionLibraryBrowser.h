@@ -15,6 +15,7 @@ public:
     void resized() override;
     
     void setOnRowClicked(std::function<void(const juce::String&)> callback);
+    void setOnRowContextRequested(std::function<void(const juce::String&, juce::Component&)> callback);
     void updateSessionKey(const juce::String& newKey);
     void updateSessionMode(const juce::String& newMode);
 
@@ -23,9 +24,11 @@ private:
     {
         juce::String templateId;
         juce::String name;
+        juce::String category;
         juce::String degreeSummary;
         juce::String chord1, chord2, chord3, chord4;
         juce::String mode; // "major", "minor", "dorian", "mixolydian"
+        bool isBundled { false };
     };
 
     class BrowserRow final : public juce::Component
@@ -39,16 +42,19 @@ private:
         void mouseExit(const juce::MouseEvent& event) override;
         
         void setOnClicked(std::function<void()> callback) { onClicked = callback; }
+        void setOnContextRequested(std::function<void(juce::Component&)> callback) { onContextRequested = callback; }
         const juce::String& getTemplateId() const { return template_.templateId; }
         
     private:
         ProgressionTemplate template_;
         std::function<void()> onClicked;
+        std::function<void(juce::Component&)> onContextRequested;
         bool isHovering { false };
     };
 
     void rebuildBrowserRows();
     std::vector<ProgressionTemplate> getProgressionTemplates() const;
+    std::vector<ProgressionTemplate> getBundledProgressions() const;
     juce::String transposeChordToKey(const juce::String& chordSymbol, int degreesFromC) const;
     
     juce::Label filterLabel;
@@ -58,6 +64,7 @@ private:
     juce::Component scrollableContainer;
     std::vector<std::unique_ptr<BrowserRow>> browserRows;
     std::function<void(const juce::String&)> onRowClicked;
+    std::function<void(const juce::String&, juce::Component&)> onRowContextRequested;
     
     juce::String currentSessionKey { "C" };
     juce::String currentSessionMode { "ionian" };

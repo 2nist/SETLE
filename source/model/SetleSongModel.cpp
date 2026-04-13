@@ -77,6 +77,7 @@ Chord Chord::create(const juce::String& symbol, const juce::String& quality, int
     tree.setProperty(Schema::qualityProp, quality, nullptr);
     tree.setProperty(Schema::functionProp, "", nullptr);
     tree.setProperty(Schema::sourceProp, "manual", nullptr);
+    tree.setProperty(Schema::confidenceProp, 0.0f, nullptr);
     tree.setProperty(Schema::rootMidiProp, rootMidi, nullptr);
     tree.setProperty(Schema::startBeatsProp, 0.0, nullptr);
     tree.setProperty(Schema::durationBeatsProp, 4.0, nullptr);
@@ -93,6 +94,7 @@ juce::String Chord::getSymbol() const { return getString(state, Schema::symbolPr
 juce::String Chord::getQuality() const { return getString(state, Schema::qualityProp); }
 juce::String Chord::getFunction() const { return getString(state, Schema::functionProp); }
 juce::String Chord::getSource() const { return getString(state, Schema::sourceProp, "manual"); }
+float Chord::getConfidence() const { return getFloat(state, Schema::confidenceProp, 0.0f); }
 int Chord::getRootMidi() const { return getInt(state, Schema::rootMidiProp, 60); }
 double Chord::getStartBeats() const { return getDouble(state, Schema::startBeatsProp, 0.0); }
 double Chord::getDurationBeats() const { return getDouble(state, Schema::durationBeatsProp, 4.0); }
@@ -103,6 +105,7 @@ void Chord::setSymbol(const juce::String& symbol) { state.setProperty(Schema::sy
 void Chord::setQuality(const juce::String& quality) { state.setProperty(Schema::qualityProp, quality, nullptr); }
 void Chord::setFunction(const juce::String& chordFunction) { state.setProperty(Schema::functionProp, chordFunction, nullptr); }
 void Chord::setSource(const juce::String& source) { state.setProperty(Schema::sourceProp, source, nullptr); }
+void Chord::setConfidence(float confidence) { state.setProperty(Schema::confidenceProp, juce::jlimit(0.0f, 1.0f, confidence), nullptr); }
 void Chord::setRootMidi(int rootMidi) { state.setProperty(Schema::rootMidiProp, rootMidi, nullptr); }
 void Chord::setStartBeats(double beats) { state.setProperty(Schema::startBeatsProp, beats, nullptr); }
 void Chord::setDurationBeats(double beats) { state.setProperty(Schema::durationBeatsProp, beats, nullptr); }
@@ -185,6 +188,26 @@ std::vector<Chord> Progression::getChords() const
     return chords;
 }
 
+void Progression::removeChord(const juce::String& chordId)
+{
+    if (!isValid() || chordId.isEmpty())
+        return;
+
+    for (const auto& child : state)
+    {
+        if (child.hasType(Schema::chordType))
+        {
+            const auto id = child.getProperty(Schema::idProp).toString();
+            if (id == chordId)
+            {
+                state.removeChild(child, nullptr);
+                return;
+            }
+        }
+    }
+}
+
+
 SectionProgressionRef::SectionProgressionRef(juce::ValueTree tree)
     : state(std::move(tree))
 {
@@ -239,9 +262,15 @@ juce::ValueTree Section::valueTree() const { return state; }
 juce::String Section::getId() const { return getString(state, Schema::idProp); }
 juce::String Section::getName() const { return getString(state, Schema::nameProp); }
 int Section::getRepeatCount() const { return getInt(state, Schema::repeatCountProp, 1); }
+juce::String Section::getColor() const { return getString(state, Schema::colorProp, ""); }
+int Section::getTimeSigNumerator() const { return getInt(state, Schema::timeSigNumeratorProp, 4); }
+int Section::getTimeSigDenominator() const { return getInt(state, Schema::timeSigDenominatorProp, 4); }
 
 void Section::setName(const juce::String& name) { state.setProperty(Schema::nameProp, name, nullptr); }
 void Section::setRepeatCount(int repeats) { state.setProperty(Schema::repeatCountProp, repeats, nullptr); }
+void Section::setColor(const juce::String& color) { state.setProperty(Schema::colorProp, color, nullptr); }
+void Section::setTimeSigNumerator(int numerator) { state.setProperty(Schema::timeSigNumeratorProp, numerator, nullptr); }
+void Section::setTimeSigDenominator(int denominator) { state.setProperty(Schema::timeSigDenominatorProp, denominator, nullptr); }
 
 void Section::addProgressionRef(const SectionProgressionRef& progressionRef)
 {
@@ -387,6 +416,20 @@ void Song::addTransition(const Transition& transition)
         return;
 
     getOrCreateContainer(Schema::transitionsContainerType).appendChild(transition.valueTree().createCopy(), nullptr);
+}
+
+void Song::removeSection(const juce::String& id)
+{
+    if (!isValid() || id.isEmpty())
+        return;
+
+    auto container = getOrCreateContainer(Schema::sectionsContainerType);
+    for (int i = container.getNumChildren(); --i >= 0;)
+    {
+        auto child = container.getChild(i);
+        if (child.hasType(Schema::sectionType) && getString(child, Schema::idProp) == id)
+            container.removeChild(i, nullptr);
+    }
 }
 
 std::vector<Progression> Song::getProgressions() const
@@ -574,6 +617,25 @@ void Song::ensureSchema()
                     sectionRefNode.setProperty(Schema::repeatIndicesProp, "", nullptr);
             }
         }
+
+        auto progressionsContainer = getOrCreateContainer(Schema::progressionsContainerType);
+        for (auto progressionNode : progressionsContainer)
+        {
+            if (!progressionNode.hasType(Schema::progressionType))
+                continue;
+
+            for (auto chordNode : progressionNode)
+            {
+                if (!chordNode.hasType(Schema::chordType))
+                    continue;
+
+                if (!chordNode.hasProperty(Schema::sourceProp))
+                    chordNode.setProperty(Schema::sourceProp, "manual", nullptr);
+
+                if (!chordNode.hasProperty(Schema::confidenceProp))
+                    chordNode.setProperty(Schema::confidenceProp, 0.0f, nullptr);
+            }
+        }
     }
     else
     {
@@ -592,7 +654,27 @@ void Song::ensureSchema()
     }
 
     // Future migration blocks go here:
-    // if (persistedVersion < 2) { ... }
+    // if (persistedVersion < 3) { ... }
+
+    // v1 → v2: Add color and time signature fields to all Section nodes.
+    if (persistedVersion < 2)
+    {
+        auto sectionsContainer = getOrCreateContainer(Schema::sectionsContainerType);
+        for (auto sectionNode : sectionsContainer)
+        {
+            if (!sectionNode.hasType(Schema::sectionType))
+                continue;
+
+            if (!sectionNode.hasProperty(Schema::colorProp))
+                sectionNode.setProperty(Schema::colorProp, "", nullptr);
+
+            if (!sectionNode.hasProperty(Schema::timeSigNumeratorProp))
+                sectionNode.setProperty(Schema::timeSigNumeratorProp, 4, nullptr);
+
+            if (!sectionNode.hasProperty(Schema::timeSigDenominatorProp))
+                sectionNode.setProperty(Schema::timeSigDenominatorProp, 4, nullptr);
+        }
+    }
 
     state.setProperty(Schema::schemaVersionProp, Schema::version, nullptr);
 }

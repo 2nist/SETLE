@@ -1,0 +1,74 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "We Will Rock You",
+  "category": "Folk",
+  "source": "we-will-rock-you.spl.prg",
+  "chords": [
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 5.75
+    },
+    {
+      "symbol": "A",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 7.25
+    },
+    {
+      "symbol": "D",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "A",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 3.0
+    },
+    {
+      "symbol": "D",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 3.0
+    },
+    {
+      "symbol": "A",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 4.25
+    },
+    {
+      "symbol": "Asus4",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 1.25
+    },
+    {
+      "symbol": "D",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 2.75
+    },
+    {
+      "symbol": "A",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 4.5
+    },
+    {
+      "symbol": "Asus4",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "A",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 23.0
+    }
+  ]
+}

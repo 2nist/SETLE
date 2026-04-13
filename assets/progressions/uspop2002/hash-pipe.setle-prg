@@ -1,0 +1,188 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Hash Pipe",
+  "category": "Pop",
+  "source": "hash-pipe.spl.prg",
+  "chords": [
+    {
+      "symbol": "Amaj(*3)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 45.75
+    },
+    {
+      "symbol": "Dmaj(*3)",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Amaj(*3)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Dmaj(*3)",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Fmaj(*3)",
+      "quality": "major",
+      "rootMidi": 65,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Emaj(*3)",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Dmaj(*3)",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Cmaj(*3)",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Bmaj(*3)",
+      "quality": "major",
+      "rootMidi": 71,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Amaj(*3)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 45.75
+    },
+    {
+      "symbol": "Dmaj(*3)",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Amaj(*3)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Dmaj(*3)",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Fmaj(*3)",
+      "quality": "major",
+      "rootMidi": 65,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Emaj(*3)",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Dmaj(*3)",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Cmaj(*3)",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Bmaj(*3)",
+      "quality": "major",
+      "rootMidi": 71,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Gmaj(*3)",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Amaj(*3)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 45.75
+    },
+    {
+      "symbol": "Dmaj(*3)",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Amaj(*3)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Dmaj(*3)",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Fmaj(*3)",
+      "quality": "major",
+      "rootMidi": 65,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Emaj(*3)",
+      "quality": "major",
+      "rootMidi": 64,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Dmaj(*3)",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Cmaj(*3)",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Bmaj(*3)",
+      "quality": "major",
+      "rootMidi": 71,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "Gmaj(*3)",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 7.5
+    },
+    {
+      "symbol": "Amaj(*3)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 32.0
+    }
+  ]
+}

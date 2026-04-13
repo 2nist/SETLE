@@ -1,0 +1,212 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Die fr\u00fchen Gr\u00e4ber",
+  "category": "Classical",
+  "source": "die-fr-hen-gr-ber.spl.prg",
+  "chords": [
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Ab majorviio/42",
+      "quality": "diminished",
+      "rootMidi": 68,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "IV6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "Ab majorii65/IV",
+      "quality": "diminished",
+      "rootMidi": 68,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "Ab majorV42/IV",
+      "quality": "diminished",
+      "rootMidi": 68,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "IV6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.5
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "iv7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "i6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "iv",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "iv6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "Ab majorV65/ii",
+      "quality": "diminished",
+      "rootMidi": 68,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "ii",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "viio6",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "iii",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "IV",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.25
+    },
+    {
+      "symbol": "ii65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.75
+    },
+    {
+      "symbol": "vi6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "viio6",
+      "quality": "diminished",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.5
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "ii65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "I64",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 0.5
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 1.5
+    },
+    {
+      "symbol": "I",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 8.0
+    }
+  ]
+}

@@ -1,0 +1,158 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Ferne",
+  "category": "Classical",
+  "source": "ferne.spl.prg",
+  "chords": [
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "VI6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G minorviio43/V",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G minorii\u00f865",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G minorV43/iv",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "iv6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "iv6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "iv6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "iv6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G minorGer65",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V65",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G minorbII65",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G minorV43/iv",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "iv6",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G minorV7[add4]",
+      "quality": "diminished",
+      "rootMidi": 67,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "V7",
+      "quality": "dominant7",
+      "rootMidi": 60,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "i",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 6.0
+    }
+  ]
+}

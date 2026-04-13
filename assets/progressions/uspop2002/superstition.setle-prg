@@ -1,0 +1,182 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Superstition",
+  "category": "Pop",
+  "source": "superstition.spl.prg",
+  "chords": [
+    {
+      "symbol": "Ebmin",
+      "quality": "minor",
+      "rootMidi": 63,
+      "durationBeats": 19.5
+    },
+    {
+      "symbol": "Ebmin7",
+      "quality": "dominant7",
+      "rootMidi": 63,
+      "durationBeats": 96.25
+    },
+    {
+      "symbol": "Bb7",
+      "quality": "dominant7",
+      "rootMidi": 70,
+      "durationBeats": 2.5
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "Bb7",
+      "quality": "dominant7",
+      "rootMidi": 70,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "A(1,b3,b5,6)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "Ab7",
+      "quality": "dominant7",
+      "rootMidi": 68,
+      "durationBeats": 4.75
+    },
+    {
+      "symbol": "Bbaug(7)",
+      "quality": "augmented",
+      "rootMidi": 70,
+      "durationBeats": 4.5
+    },
+    {
+      "symbol": "Ebmin7",
+      "quality": "dominant7",
+      "rootMidi": 63,
+      "durationBeats": 95.25
+    },
+    {
+      "symbol": "Bb7",
+      "quality": "dominant7",
+      "rootMidi": 70,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "Bb7",
+      "quality": "dominant7",
+      "rootMidi": 70,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "A(1,b3,b5,6)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "Ab7",
+      "quality": "dominant7",
+      "rootMidi": 68,
+      "durationBeats": 4.75
+    },
+    {
+      "symbol": "Bbaug(7)",
+      "quality": "augmented",
+      "rootMidi": 70,
+      "durationBeats": 4.5
+    },
+    {
+      "symbol": "Ebmin7",
+      "quality": "dominant7",
+      "rootMidi": 63,
+      "durationBeats": 18.75
+    },
+    {
+      "symbol": "Bb7",
+      "quality": "dominant7",
+      "rootMidi": 70,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "Bb7",
+      "quality": "dominant7",
+      "rootMidi": 70,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "A(1,b3,b5,6)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "Ab7",
+      "quality": "dominant7",
+      "rootMidi": 68,
+      "durationBeats": 9.0
+    },
+    {
+      "symbol": "Ebmin7",
+      "quality": "dominant7",
+      "rootMidi": 63,
+      "durationBeats": 95.0
+    },
+    {
+      "symbol": "Bb7",
+      "quality": "dominant7",
+      "rootMidi": 70,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "B7",
+      "quality": "dominant7",
+      "rootMidi": 71,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "Bb7",
+      "quality": "dominant7",
+      "rootMidi": 70,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "A(1,b3,b5,6)",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 2.25
+    },
+    {
+      "symbol": "Ab7",
+      "quality": "dominant7",
+      "rootMidi": 68,
+      "durationBeats": 4.5
+    },
+    {
+      "symbol": "Bbaug(7)",
+      "quality": "augmented",
+      "rootMidi": 70,
+      "durationBeats": 4.5
+    },
+    {
+      "symbol": "Ebmin7",
+      "quality": "dominant7",
+      "rootMidi": 63,
+      "durationBeats": 111.25
+    }
+  ]
+}

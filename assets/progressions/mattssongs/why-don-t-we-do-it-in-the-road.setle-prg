@@ -1,0 +1,110 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Why Don't We Do It In The Road",
+  "category": "Folk",
+  "source": "why-don-t-we-do-it-in-the-road.spl.prg",
+  "chords": [
+    {
+      "symbol": "D",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 12.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "A",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 24.25
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "A",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 3.75
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 24.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "A",
+      "quality": "major",
+      "rootMidi": 69,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "D7",
+      "quality": "dominant7",
+      "rootMidi": 62,
+      "durationBeats": 3.5
+    }
+  ]
+}

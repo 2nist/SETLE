@@ -1,0 +1,80 @@
+{
+  "schema": "setle.progression.v1",
+  "name": "Maggie Mae",
+  "category": "Folk",
+  "source": "maggie-mae.spl.prg",
+  "chords": [
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 3.75
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 7.75
+    },
+    {
+      "symbol": "D",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "D/5",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "D",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 2.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "C",
+      "quality": "major",
+      "rootMidi": 60,
+      "durationBeats": 4.0
+    },
+    {
+      "symbol": "G",
+      "quality": "major",
+      "rootMidi": 67,
+      "durationBeats": 8.0
+    },
+    {
+      "symbol": "D",
+      "quality": "major",
+      "rootMidi": 62,
+      "durationBeats": 5.5
+    }
+  ]
+}
