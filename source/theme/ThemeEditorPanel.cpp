@@ -15,6 +15,9 @@ public:
     {
         normalButton.setButtonText("Button");
 
+        disabledButton.setButtonText("Disabled");
+        disabledButton.setEnabled(false);
+
         toggledButton.setButtonText("Toggled");
         toggledButton.setClickingTogglesState(true);
         toggledButton.setToggleState(true, juce::dontSendNotification);
@@ -35,6 +38,7 @@ public:
         combo.setSelectedId(2, juce::dontSendNotification);
 
         addAndMakeVisible(normalButton);
+        addAndMakeVisible(disabledButton);
         addAndMakeVisible(toggledButton);
         addAndMakeVisible(horizontalSlider);
         addAndMakeVisible(rotaryKnob);
@@ -46,6 +50,8 @@ public:
         const auto& t = ThemeManager::get().theme();
         normalButton.setColour(juce::TextButton::buttonColourId, t.controlBg);
         normalButton.setColour(juce::TextButton::textColourOffId, t.controlText);
+        disabledButton.setColour(juce::TextButton::buttonColourId, t.controlBg);
+        disabledButton.setColour(juce::TextButton::textColourOffId, t.controlText);
         toggledButton.setColour(juce::TextButton::buttonColourId, t.controlOnBg);
         toggledButton.setColour(juce::TextButton::textColourOnId, t.controlTextOn);
         combo.setColour(juce::ComboBox::backgroundColourId, t.controlBg);
@@ -158,9 +164,11 @@ public:
         area.removeFromTop(22);
 
         auto topRow = area.removeFromTop(26);
-        normalButton.setBounds(topRow.removeFromLeft(88));
+        normalButton.setBounds(topRow.removeFromLeft(72));
         topRow.removeFromLeft(6);
-        toggledButton.setBounds(topRow.removeFromLeft(88));
+        disabledButton.setBounds(topRow.removeFromLeft(78));
+        topRow.removeFromLeft(6);
+        toggledButton.setBounds(topRow.removeFromLeft(78));
         topRow.removeFromLeft(6);
         combo.setBounds(topRow.removeFromLeft(110));
 
@@ -173,6 +181,7 @@ public:
 
 private:
     juce::TextButton normalButton;
+    juce::TextButton disabledButton;
     juce::TextButton toggledButton;
     juce::Slider horizontalSlider;
     juce::Slider rotaryKnob;
