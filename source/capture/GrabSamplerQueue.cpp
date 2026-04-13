@@ -154,7 +154,18 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
         }
 
         if (reel != nullptr && slot.coupledAudio != nullptr)
+        {
+            reel->setEnabled(true);
+            reel->getProcessor().setMode(ReelMode::sample);
+            reel->getProcessor().setParam("sample.oneshot", 1.0f);
             reel->getProcessor().loadFromBuffer(*slot.coupledAudio, slot.coupledSampleRate);
+        }
+
+        // Explicitly disable polysynth on coupled-audio playback so the queue
+        // routes through Reel only.
+        for (auto* p : track->pluginList.getPlugins())
+            if (auto* poly = dynamic_cast<setle::instruments::polysynth::TracktionPolySynthPlugin*>(p))
+                poly->setEnabled(false);
 
         const auto durationSeconds = static_cast<double>(slot.coupledAudio->getNumSamples()) / slot.coupledSampleRate;
         rebuildSamplerClipForAudioSlot(*track, juce::jmax(0.2, durationSeconds));
@@ -178,7 +189,10 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
             }
 
             if (auto* reel = dynamic_cast<setle::instruments::reel::TracktionReelPlugin*>(p))
+            {
+                reel->setEnabled(false);
                 reel->getProcessor().clearBuffer();
+            }
         }
 
         if (poly == nullptr)
@@ -191,7 +205,8 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
             }
         }
 
-        (void) poly;
+        if (poly != nullptr)
+            poly->setEnabled(true);
         rebuildSamplerClipForSlot(edit, slotIndex, *track);
     }
 

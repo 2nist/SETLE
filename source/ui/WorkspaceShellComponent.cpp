@@ -482,8 +482,10 @@ private:
 
             if (slot != nullptr && slot->state == capture::GrabSlot::State::Playing)
                 playButton.setButtonText("Stop");
+            else if (slot != nullptr && slot->hasCoupledAudio())
+                playButton.setButtonText("Play Reel");
             else
-                playButton.setButtonText("Play");
+                playButton.setButtonText("Play MIDI");
 
             repaint();
         }
@@ -492,7 +494,7 @@ private:
         {
             auto area = getLocalBounds().reduced(8, 6);
             auto buttonRow = area.removeFromBottom(24);
-            playButton.setBounds(buttonRow.removeFromLeft(56));
+            playButton.setBounds(buttonRow.removeFromLeft(72));
             buttonRow.removeFromLeft(6);
             editButton.setBounds(buttonRow.removeFromLeft(56));
             buttonRow.removeFromLeft(6);
@@ -616,11 +618,13 @@ private:
             g.drawRoundedRectangle(bounds.toFloat(), style.radius, playing ? 2.2f : style.stroke);
 
             auto textArea = bounds.reduced(8, 4);
-            auto row1 = textArea.removeFromTop(16);
-            auto row2 = textArea.removeFromTop(16);
+            auto reservedButtons = getLocalBounds().reduced(8, 6).removeFromBottom(24);
+            textArea = textArea.withBottom(juce::jmax(textArea.getY() + 12, reservedButtons.getY() - 2));
+            auto row1 = textArea.removeFromTop(14);
+            auto row2 = textArea.removeFromTop(12);
 
             const auto marker = playing ? juce::String("▶") : juce::String(" ");
-            g.setFont(juce::FontOptions(12.5f));
+            g.setFont(juce::FontOptions(11.8f));
             g.setColour(style.text);
 
             auto firstThree = juce::String();
@@ -655,13 +659,63 @@ private:
                        true);
 
             g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::muted).withAlpha(0.95f));
-            g.setFont(juce::FontOptions(11.5f));
+            g.setFont(juce::FontOptions(10.5f));
             const auto confidenceText = juce::String(juce::roundToInt(slot->confidence * 100.0f)) + "%";
             g.drawText("    " + keyMode + "  •  " + juce::String(chordCount) + " chords  •  "
                            + juce::String(beatCount, 1) + " beats  •  " + confidenceText,
                        row2,
                        juce::Justification::centredLeft,
                        true);
+
+            if (slot->hasCoupledAudio())
+            {
+                auto waveArea = textArea.removeFromTop(8);
+                if (waveArea.getWidth() > 10 && waveArea.getHeight() > 2 && slot->coupledAudio != nullptr)
+                {
+                    g.setColour(themeData.surface0.withAlpha(0.55f));
+                    g.fillRoundedRectangle(waveArea.toFloat(), 2.0f);
+                    g.setColour(themeData.surfaceEdge.withAlpha(0.60f));
+                    g.drawRoundedRectangle(waveArea.toFloat(), 2.0f, 0.8f);
+
+                    const auto* audio = slot->coupledAudio.get();
+                    const int samples = audio->getNumSamples();
+                    const int width = waveArea.getWidth();
+                    if (samples > 1 && width > 1)
+                    {
+                        g.setColour(themeData.signalAudio.withAlpha(0.88f));
+                        const float midY = static_cast<float>(waveArea.getCentreY());
+                        const float halfH = static_cast<float>(waveArea.getHeight()) * 0.45f;
+
+                        for (int x = 0; x < width; ++x)
+                        {
+                            const int s0 = (x * samples) / width;
+                            const int s1 = juce::jmax(s0 + 1, ((x + 1) * samples) / width);
+                            float peak = 0.0f;
+
+                            for (int s = s0; s < s1; ++s)
+                            {
+                                peak = juce::jmax(peak, std::abs(audio->getSample(0, s)));
+                                if (audio->getNumChannels() > 1)
+                                    peak = juce::jmax(peak, std::abs(audio->getSample(1, s)));
+                            }
+
+                            const float amp = juce::jlimit(0.0f, 1.0f, peak) * halfH;
+                            const float px = static_cast<float>(waveArea.getX() + x);
+                            g.drawLine(px, midY - amp, px, midY + amp, 1.0f);
+                        }
+                    }
+                }
+            }
+
+            if (slot->hasCoupledAudio())
+            {
+                auto modeBadge = bounds.removeFromRight(72).removeFromTop(14).reduced(4, 2);
+                g.setColour(themeData.signalAudio.withAlpha(0.24f));
+                g.fillRoundedRectangle(modeBadge.toFloat(), 2.0f);
+                g.setColour(themeData.signalAudio.withAlpha(0.92f));
+                g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+                g.drawText("AUDIO", modeBadge, juce::Justification::centred, false);
+            }
         }
 
     private:
@@ -5768,9 +5822,13 @@ void WorkspaceShellComponent::playQueueSlot(int slotIndex)
     if (grabSamplerQueue == nullptr || edit == nullptr)
         return;
 
+    const auto& slot = grabSamplerQueue->getSlot(slotIndex);
     grabSamplerQueue->playSlot(slotIndex, *edit);
     updateInPanelQueueView();
-    interactionStatus.setText("Playing sampler slot " + juce::String(slotIndex + 1), juce::dontSendNotification);
+    const auto playbackMode = slot.hasCoupledAudio() ? "Reel sampler" : "MIDI synth";
+    interactionStatus.setText("Playing sampler slot " + juce::String(slotIndex + 1)
+                                  + " (" + playbackMode + ")",
+                              juce::dontSendNotification);
 }
 
 void WorkspaceShellComponent::stopQueuePlayback()
