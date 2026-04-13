@@ -31,6 +31,7 @@ public:
 
     void scrollToBeat(double beat, bool centreBeat);
     void scrollByBeats(double deltaBeats);
+    void refreshFromEdit();
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -94,13 +95,14 @@ private:
     int noteRightEdgeX(const NoteEntry& note) const;
 
     const ChordBoundary* findChordBoundaryForBeat(double beat) const;
-    bool deleteNoteById(const juce::String& chordId, const juce::String& noteId);
-    bool updateNoteInModel(const juce::String& sourceChordId,
-                           const juce::String& noteId,
-                           double absoluteStartBeat,
-                           double durationBeats,
-                           int midiNote,
-                           float velocity);
+    te::MidiClip* findClipForProgression() const;
+    static juce::String makeNoteId(const te::MidiClip* clip, const te::MidiNote* note);
+    bool deleteNoteById(const juce::String& noteId);
+    bool updateNoteInClip(const juce::String& noteId,
+                          double absoluteStartBeat,
+                          double durationBeats,
+                          int midiNote,
+                          float velocity);
     juce::String createNoteAtBeatAndPitch(double beat, int midiNote);
     void auditionNote(int midiNote);
 
@@ -133,7 +135,6 @@ private:
     double dragOrigDuration { 0.25 };
     int dragOrigMidiNote { 60 };
     juce::String dragNoteId;
-    juce::String dragSourceChordId;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NoteModeView)
 };

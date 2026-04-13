@@ -12,6 +12,7 @@
 #include <set>
 
 #include "../theme/ThemePresets.h"
+#include "../theory/BachTheory.h"
 
 namespace te = tracktion::engine;
 
@@ -5699,6 +5700,7 @@ void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progress
     if (clip == nullptr)
         return;
 
+    clip->setName(progressionId);
     clip->state.setProperty("progressionId", progressionId, nullptr);
     clip->state.setProperty("progressionName", progressionOpt->getName(), nullptr);
     juce::String symbols;
@@ -5725,12 +5727,7 @@ void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progress
         const auto beatLen   = tracktion::BeatDuration::fromBeats(d * 0.95);
 
         const auto notes = chord.getNotes();
-        if (notes.empty())
-        {
-            // Fall back to root-only note
-            seq.addNote(chord.getRootMidi(), startBeat, beatLen, 80, 0, nullptr);
-        }
-        else
+        if (!notes.empty())
         {
             for (const auto& note : notes)
                 seq.addNote(note.getPitch(),
@@ -5740,8 +5737,43 @@ void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progress
                             0,
                             nullptr);
         }
+        else
+        {
+            auto chordPitchClasses = setle::theory::BachTheory::getChordPitchClasses(chord.getSymbol());
+            if (chordPitchClasses.empty())
+                chordPitchClasses = { (juce::jlimit(0, 127, chord.getRootMidi()) % 12 + 12) % 12 };
+
+            int rootMidi = chord.getRootMidi();
+            if (rootMidi <= 0 || rootMidi > 127)
+                rootMidi = 60 + chordPitchClasses.front();
+
+            for (auto pc : chordPitchClasses)
+            {
+                int noteNum = juce::jlimit(0, 127, rootMidi);
+                int guard = 0;
+                while (((noteNum % 12) + 12) % 12 != pc && guard++ < 24)
+                    ++noteNum;
+
+                while (noteNum > rootMidi + 12)
+                    noteNum -= 12;
+
+                seq.addNote(juce::jlimit(0, 127, noteNum),
+                            startBeat,
+                            beatLen,
+                            90,
+                            0,
+                            nullptr);
+            }
+        }
 
         beatPos += d;
+    }
+
+    if (gridRollComponent != nullptr
+        && selectedProgressionId == progressionId
+        && gridRollComponent->isNoteMode())
+    {
+        gridRollComponent->refreshNoteModeCache();
     }
 }
 

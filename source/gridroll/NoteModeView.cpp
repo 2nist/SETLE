@@ -123,6 +123,13 @@ void NoteModeView::scrollByBeats(double deltaBeats)
     setVisibleBeatRange(visibleStartBeat + deltaBeats, visibleEndBeat + deltaBeats);
 }
 
+void NoteModeView::refreshFromEdit()
+{
+    rebuildNoteCache();
+    updateActiveChordPitchClasses();
+    repaint();
+}
+
 void NoteModeView::timerCallback()
 {
     const auto bpm = juce::jmax(1.0, song.getBpm());
@@ -168,21 +175,54 @@ void NoteModeView::rebuildNoteCache()
         boundary.romanNumeral = chord.getName();
         boundary.function = chord.getFunction();
         chordBoundaries.push_back(boundary);
+    }
 
-        const auto chordPcs = theory::BachTheory::getChordPitchClasses(chord.getSymbol());
-        for (const auto& note : chord.getNotes())
+    for (auto* track : te::getAudioTracks(edit))
+    {
+        if (track == nullptr)
+            continue;
+
+        for (auto* clipBase : track->getClips())
         {
-            NoteEntry entry;
-            entry.noteId = note.getId();
-            entry.startBeat = boundary.startBeat + note.getStartBeats();
-            entry.durationBeats = juce::jmax(0.0625, note.getDurationBeats());
-            entry.midiNote = note.getPitch();
-            entry.velocity = note.getVelocity();
-            entry.chordId = chord.getId();
-            entry.chordSymbol = chord.getSymbol();
-            entry.isChordTone = containsPitchClass(chordPcs, note.getPitch());
-            entry.isScaleTone = containsPitchClass(scalePitchClasses, note.getPitch());
-            notes.push_back(std::move(entry));
+            auto* clip = dynamic_cast<te::MidiClip*>(clipBase);
+            if (clip == nullptr)
+                continue;
+
+            const auto clipPropId = clip->state.getProperty("progressionId").toString();
+            const auto clipName = clip->getName();
+            if (clipPropId != progressionId && clipName != progressionId)
+                continue;
+
+            const auto clipStartBeat = edit.tempoSequence.toBeats(clip->getPosition().getStart()).inBeats();
+            auto& seq = clip->getSequence();
+            for (auto* note : seq.getNotes())
+            {
+                if (note == nullptr)
+                    continue;
+
+                NoteEntry entry;
+                entry.noteId = makeNoteId(clip, note);
+                entry.startBeat = clipStartBeat + note->getStartBeat().inBeats();
+                entry.durationBeats = juce::jmax(0.0625, note->getLengthBeats().inBeats());
+                entry.midiNote = note->getNoteNumber();
+                entry.velocity = juce::jlimit(0.0f, 1.0f, static_cast<float>(note->getVelocity()) / 127.0f);
+
+                const auto* boundary = findChordBoundaryForBeat(entry.startBeat);
+                if (boundary != nullptr)
+                {
+                    entry.chordId = boundary->chordId;
+                    entry.chordSymbol = boundary->symbol;
+                }
+
+                entry.isScaleTone = containsPitchClass(scalePitchClasses, entry.midiNote);
+                if (entry.chordSymbol.isNotEmpty())
+                {
+                    const auto chordPcs = theory::BachTheory::getChordPitchClasses(entry.chordSymbol);
+                    entry.isChordTone = containsPitchClass(chordPcs, entry.midiNote);
+                }
+
+                notes.push_back(std::move(entry));
+            }
         }
     }
 
@@ -359,65 +399,84 @@ const NoteModeView::ChordBoundary* NoteModeView::findChordBoundaryForBeat(double
     return nullptr;
 }
 
-juce::String NoteModeView::createNoteAtBeatAndPitch(double beat, int midiNote)
+te::MidiClip* NoteModeView::findClipForProgression() const
 {
-    const auto* boundary = findChordBoundaryForBeat(beat);
-    if (boundary == nullptr)
-        return {};
+    te::MidiClip* fallback = nullptr;
 
-    const auto progression = song.findProgressionById(progressionId);
-    if (!progression.has_value())
-        return {};
-
-    auto chords = progression->getChords();
-    for (auto& chord : chords)
+    for (auto* track : te::getAudioTracks(edit))
     {
-        if (chord.getId() != boundary->chordId)
+        if (track == nullptr)
             continue;
 
-        const auto relativeStart = juce::jlimit(0.0,
-                                                juce::jmax(0.0, boundary->endBeat - boundary->startBeat - 0.0625),
-                                                beat - boundary->startBeat);
-        const auto maxDur = juce::jmax(0.0625, boundary->endBeat - (boundary->startBeat + relativeStart));
-        const auto duration = juce::jmin(0.5, maxDur);
+        for (auto* clipBase : track->getClips())
+        {
+            auto* clip = dynamic_cast<te::MidiClip*>(clipBase);
+            if (clip == nullptr)
+                continue;
 
-        auto note = model::Note::create(juce::jlimit(0, 127, midiNote),
-                                        0.8f,
-                                        relativeStart,
-                                        duration);
-        const auto id = note.getId();
-        chord.addNote(note);
-        return id;
+            const auto clipPropId = clip->state.getProperty("progressionId").toString();
+            const auto clipName = clip->getName();
+            if (clipPropId == progressionId)
+                return clip;
+
+            if (fallback == nullptr && clipName == progressionId)
+                fallback = clip;
+        }
     }
+
+    return fallback;
+}
+
+juce::String NoteModeView::makeNoteId(const te::MidiClip* clip, const te::MidiNote* note)
+{
+    const auto clipPtr = reinterpret_cast<juce::pointer_sized_int>(clip);
+    const auto notePtr = reinterpret_cast<juce::pointer_sized_int>(note);
+    return juce::String::toHexString(clipPtr) + ":" + juce::String::toHexString(notePtr);
+}
+
+juce::String NoteModeView::createNoteAtBeatAndPitch(double beat, int midiNote)
+{
+    auto* clip = findClipForProgression();
+    if (clip == nullptr)
+        return {};
+
+    const auto clipStartBeat = edit.tempoSequence.toBeats(clip->getPosition().getStart()).inBeats();
+    const auto bpm = juce::jmax(1.0, song.getBpm());
+    const auto clipLengthBeats = clip->getPosition().getLength().inSeconds() / (60.0 / bpm);
+    auto relativeStart = juce::jmax(0.0, beat - clipStartBeat);
+    relativeStart = juce::jlimit(0.0, juce::jmax(0.0, clipLengthBeats - 0.0625), relativeStart);
+    auto duration = 0.5;
+    duration = juce::jlimit(0.0625, juce::jmax(0.0625, clipLengthBeats - relativeStart), duration);
+
+    auto& seq = clip->getSequence();
+    if (auto* added = seq.addNote(juce::jlimit(0, 127, midiNote),
+                                  tracktion::BeatPosition::fromBeats(relativeStart),
+                                  tracktion::BeatDuration::fromBeats(duration),
+                                  static_cast<int>(0.8f * 127.0f),
+                                  0,
+                                  nullptr))
+        return makeNoteId(clip, added);
 
     return {};
 }
 
-bool NoteModeView::deleteNoteById(const juce::String& chordId, const juce::String& noteId)
+bool NoteModeView::deleteNoteById(const juce::String& noteId)
 {
     if (noteId.isEmpty())
         return false;
 
-    const auto progression = song.findProgressionById(progressionId);
-    if (!progression.has_value())
+    auto* clip = findClipForProgression();
+    if (clip == nullptr)
         return false;
 
-    const auto chords = progression->getChords();
-    for (const auto& chord : chords)
+    auto& seq = clip->getSequence();
+    for (auto* note : seq.getNotes())
     {
-        if (chordId.isNotEmpty() && chord.getId() != chordId)
+        if (note == nullptr)
             continue;
-
-        auto chordTree = chord.valueTree();
-        for (int i = chordTree.getNumChildren() - 1; i >= 0; --i)
+        if (makeNoteId(clip, note) == noteId)
         {
-            auto noteTree = chordTree.getChild(i);
-            if (!noteTree.hasType(model::Schema::noteType))
-                continue;
-            if (noteTree.getProperty(model::Schema::idProp).toString() != noteId)
-                continue;
-
-            chordTree.removeChild(i, nullptr);
+            seq.removeNote(*note, nullptr);
             return true;
         }
     }
@@ -425,129 +484,45 @@ bool NoteModeView::deleteNoteById(const juce::String& chordId, const juce::Strin
     return false;
 }
 
-bool NoteModeView::updateNoteInModel(const juce::String& sourceChordId,
-                                     const juce::String& noteId,
-                                     double absoluteStartBeat,
-                                     double durationBeats,
-                                     int midiNote,
-                                     float velocity)
+bool NoteModeView::updateNoteInClip(const juce::String& noteId,
+                                    double absoluteStartBeat,
+                                    double durationBeats,
+                                    int midiNote,
+                                    float velocity)
 {
-    if (noteId.isEmpty())
+    auto* clip = findClipForProgression();
+    if (clip == nullptr || noteId.isEmpty())
         return false;
 
-    const auto progression = song.findProgressionById(progressionId);
-    if (!progression.has_value())
-        return false;
-
-    const auto chords = progression->getChords();
-    juce::ValueTree sourceChordTree;
-    juce::ValueTree sourceNoteTree;
-    juce::String sourceChordIdResolved = sourceChordId;
-
-    auto findNoteInChord = [&noteId](const juce::ValueTree& chordTree) -> juce::ValueTree
+    auto& seq = clip->getSequence();
+    te::MidiNote* target = nullptr;
+    for (auto* note : seq.getNotes())
     {
-        for (const auto& child : chordTree)
+        if (note != nullptr && makeNoteId(clip, note) == noteId)
         {
-            if (!child.hasType(model::Schema::noteType))
-                continue;
-            if (child.getProperty(model::Schema::idProp).toString() == noteId)
-                return child;
-        }
-        return {};
-    };
-
-    for (const auto& chord : chords)
-    {
-        if (sourceChordIdResolved.isNotEmpty() && chord.getId() != sourceChordIdResolved)
-            continue;
-
-        auto candidate = chord.valueTree();
-        auto candidateNote = findNoteInChord(candidate);
-        if (candidateNote.isValid())
-        {
-            sourceChordTree = candidate;
-            sourceNoteTree = candidateNote;
-            sourceChordIdResolved = chord.getId();
+            target = note;
             break;
         }
     }
-
-    if (!sourceNoteTree.isValid())
-    {
-        for (const auto& chord : chords)
-        {
-            auto candidate = chord.valueTree();
-            auto candidateNote = findNoteInChord(candidate);
-            if (candidateNote.isValid())
-            {
-                sourceChordTree = candidate;
-                sourceNoteTree = candidateNote;
-                sourceChordIdResolved = chord.getId();
-                break;
-            }
-        }
-    }
-
-    if (!sourceNoteTree.isValid() || !sourceChordTree.isValid())
+    if (target == nullptr)
         return false;
 
-    const auto* targetBoundary = findChordBoundaryForBeat(absoluteStartBeat);
-    if (targetBoundary == nullptr)
-    {
-        for (const auto& boundary : chordBoundaries)
-        {
-            if (boundary.chordId == sourceChordIdResolved)
-            {
-                targetBoundary = &boundary;
-                break;
-            }
-        }
-    }
+    const auto clipStartBeat = edit.tempoSequence.toBeats(clip->getPosition().getStart()).inBeats();
+    const auto bpm = juce::jmax(1.0, song.getBpm());
+    const auto clipLengthBeats = clip->getPosition().getLength().inSeconds() / (60.0 / bpm);
+    auto relativeStart = juce::jmax(0.0, absoluteStartBeat - clipStartBeat);
+    relativeStart = juce::jlimit(0.0, juce::jmax(0.0, clipLengthBeats - 0.0625), relativeStart);
 
-    if (targetBoundary == nullptr)
-        return false;
-
-    juce::ValueTree targetChordTree;
-    for (const auto& chord : chords)
-    {
-        if (chord.getId() == targetBoundary->chordId)
-        {
-            targetChordTree = chord.valueTree();
-            break;
-        }
-    }
-
-    if (!targetChordTree.isValid())
-        targetChordTree = sourceChordTree;
-
-    auto start = juce::jlimit(targetBoundary->startBeat,
-                              juce::jmax(targetBoundary->startBeat, targetBoundary->endBeat - 0.0625),
-                              absoluteStartBeat);
     auto dur = juce::jmax(0.0625, durationBeats);
-    const auto maxDur = juce::jmax(0.0625, targetBoundary->endBeat - start);
-    dur = juce::jmin(dur, maxDur);
-
-    const auto relativeStart = juce::jmax(0.0, start - targetBoundary->startBeat);
+    dur = juce::jlimit(0.0625, juce::jmax(0.0625, clipLengthBeats - relativeStart), dur);
     const auto clampedPitch = juce::jlimit(0, 127, midiNote);
-    const auto clampedVelocity = juce::jlimit(0.0f, 1.0f, velocity);
+    const auto clampedVelocity = juce::jlimit(1, 127, juce::roundToInt(juce::jlimit(0.0f, 1.0f, velocity) * 127.0f));
 
-    if (targetChordTree == sourceChordTree)
-    {
-        sourceNoteTree.setProperty(model::Schema::startBeatsProp, relativeStart, nullptr);
-        sourceNoteTree.setProperty(model::Schema::durationBeatsProp, dur, nullptr);
-        sourceNoteTree.setProperty(model::Schema::pitchProp, clampedPitch, nullptr);
-        sourceNoteTree.setProperty(model::Schema::velocityProp, clampedVelocity, nullptr);
-        return true;
-    }
-
-    auto movedNote = sourceNoteTree.createCopy();
-    movedNote.setProperty(model::Schema::startBeatsProp, relativeStart, nullptr);
-    movedNote.setProperty(model::Schema::durationBeatsProp, dur, nullptr);
-    movedNote.setProperty(model::Schema::pitchProp, clampedPitch, nullptr);
-    movedNote.setProperty(model::Schema::velocityProp, clampedVelocity, nullptr);
-
-    sourceChordTree.removeChild(sourceNoteTree, nullptr);
-    targetChordTree.appendChild(movedNote, nullptr);
+    target->setStartAndLength(tracktion::BeatPosition::fromBeats(relativeStart),
+                              tracktion::BeatDuration::fromBeats(dur),
+                              nullptr);
+    target->setNoteNumber(clampedPitch, nullptr);
+    target->setVelocity(clampedVelocity, nullptr);
     return true;
 }
 
@@ -765,7 +740,6 @@ void NoteModeView::mouseDown(const juce::MouseEvent& e)
     isResizing = false;
     dragChanged = false;
     dragNoteId.clear();
-    dragSourceChordId.clear();
 
     if (e.position.x < static_cast<float>(kPianoKeyWidth))
     {
@@ -802,7 +776,6 @@ void NoteModeView::mouseDown(const juce::MouseEvent& e)
             dragOrigStartBeat = note.startBeat;
             dragOrigDuration = note.durationBeats;
             dragOrigMidiNote = note.midiNote;
-            dragSourceChordId = note.chordId;
             break;
         }
 
@@ -818,7 +791,7 @@ void NoteModeView::mouseDown(const juce::MouseEvent& e)
         if (noteIndex >= 0)
         {
             const auto& note = notes[static_cast<size_t>(noteIndex)];
-            if (deleteNoteById(note.chordId, note.noteId))
+            if (deleteNoteById(note.noteId))
             {
                 selectedNoteId.clear();
                 rebuildNoteCache();
@@ -843,7 +816,6 @@ void NoteModeView::mouseDown(const juce::MouseEvent& e)
         const auto& note = notes[static_cast<size_t>(noteIndex)];
         selectedNoteId = note.noteId;
         dragNoteId = note.noteId;
-        dragSourceChordId = note.chordId;
         dragOrigStartBeat = note.startBeat;
         dragOrigDuration = note.durationBeats;
         dragOrigMidiNote = note.midiNote;
@@ -887,7 +859,7 @@ void NoteModeView::mouseDrag(const juce::MouseEvent& e)
             newMidi = snapMidiToScale(newMidi);
     }
 
-    if (updateNoteInModel(dragSourceChordId, dragNoteId, newStart, newDuration, newMidi, currentNoteIt->velocity))
+    if (updateNoteInClip(dragNoteId, newStart, newDuration, newMidi, currentNoteIt->velocity))
     {
         dragChanged = true;
         rebuildNoteCache();

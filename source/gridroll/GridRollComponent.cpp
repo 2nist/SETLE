@@ -184,6 +184,12 @@ void GridRollComponent::setPlayheadBeat(double beat)
     noteModeView->setPlayheadBeat(beat);
 }
 
+void GridRollComponent::refreshNoteModeCache()
+{
+    if (noteModeView != nullptr)
+        noteModeView->refreshFromEdit();
+}
+
 void GridRollComponent::setTheorySnap(const juce::String& snap)
 {
     chordGrid->setTheorySnap(snap);

@@ -37,6 +37,8 @@ public:
 
     /** Drive the playhead from the transport (30 Hz). */
     void setPlayheadBeat(double beat);
+    bool isNoteMode() const noexcept { return currentMode == Mode::NoteMode || currentMode == Mode::Split; }
+    void refreshNoteModeCache();
 
     /** Propagate the theory snap setting from the workspace. */
     void setTheorySnap(const juce::String& snap);
