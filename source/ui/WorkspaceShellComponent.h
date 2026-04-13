@@ -176,6 +176,8 @@ private:
     juce::ComboBox captureSourceSelector;
     std::vector<juce::String> captureSourceIdentifiers;
     juce::String midiDeviceSignature;
+    float captureSourceActivity { 0.0f };
+    int lastHistoryEventCount { 0 };
 
     juce::TextButton focusInButton { "Focus IN" };
     juce::TextButton focusBalancedButton { "Focus Balanced" };

@@ -17,7 +17,8 @@ namespace setle::gridroll
  * a velocity bar. Supports drag-resize, drag-reorder, Ctrl+drag-duplicate, and
  * a right-click context menu.
  */
-class ChordGridView : public juce::Component
+class ChordGridView : public juce::Component,
+                      private juce::Timer
 {
 public:
     static constexpr int kHeight = 80;
@@ -47,6 +48,7 @@ public:
 
     /** Return the current cell list (reflects edits). */
     const std::vector<GridRollCell>& getCells() const { return cells; }
+    double getTotalBeats() const;
 
     /** Where the playhead is, as a fraction 0–1 across the total beat range. */
     void setPlayheadBeat(double beat);
@@ -57,6 +59,7 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+    void mouseMove(const juce::MouseEvent& e) override;
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
@@ -84,8 +87,10 @@ private:
     void   handleAddChordPopoverResult(int result, int rootSemitone);
     void   divideCells(int cellIndex, int n);
     juce::Colour functionColour(const juce::String& fn) const;
+    juce::String functionTag(const juce::String& fn) const;
     void   paintCell(juce::Graphics& g, const GridRollCell& cell,
-                     juce::Rectangle<int> bounds, bool selected) const;
+                     juce::Rectangle<int> bounds, bool selected, bool active) const;
+    void timerCallback() override;
 
     // ---------------------------------------------------------------
     // State
@@ -109,6 +114,8 @@ private:
     double       dragOrigStart    { 0.0 };
     bool         dragIsDuplicate  { false };
     juce::Point<int> dragStartPos;
+    bool hoverResizeHandle { false };
+    float pulsePhase { 0.0f };
 
     // Add-chord "+" button
     juce::TextButton addChordButton { "+" };

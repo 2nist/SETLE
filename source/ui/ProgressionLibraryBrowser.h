@@ -61,7 +61,8 @@ private:
     juce::ComboBox modeFilter;
     juce::Label searchLabel;
     juce::TextEditor searchEditor;
-    juce::Component scrollableContainer;
+    juce::Viewport rowsViewport;
+    juce::Component rowsContent;
     std::vector<std::unique_ptr<BrowserRow>> browserRows;
     std::function<void(const juce::String&)> onRowClicked;
     std::function<void(const juce::String&, juce::Component&)> onRowContextRequested;

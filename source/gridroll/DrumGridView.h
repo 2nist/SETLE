@@ -77,6 +77,8 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
@@ -101,7 +103,9 @@ private:
     void paintRow(juce::Graphics& g, int rowIndex);
     void paintHeader(juce::Graphics& g, int rowIndex, juce::Rectangle<int> bounds);
     void paintStep(juce::Graphics& g, const GridRollCell& cell,
-                   juce::Rectangle<int> bounds, bool active) const;
+                   juce::Rectangle<int> bounds, bool active, bool hovered) const;
+    juce::Rectangle<int> patternLengthMarkerBounds(int rowIndex) const;
+    bool isBeatGroupStart(const DrumRow& row, int stepIndex) const;
 
     void showRowContextMenu(int rowIndex, juce::Point<int> screenPos);
     void showStepContextMenu(int rowIndex, int stepIndex, juce::Point<int> screenPos);
@@ -123,6 +127,11 @@ private:
     int  dragStepIndex { -1 };
     float dragStartVel { 0.8f };
     juce::Point<int> dragStartPos;
+    int hoverRowIndex { -1 };
+    int hoverStepIndex { -1 };
+    int patternResizeRowIndex { -1 };
+    int patternResizeStartBars { 1 };
+    juce::Point<int> patternResizeStartPos;
 
     juce::TextButton fillButton { "Fill" };
     juce::TextButton patternsButton { "Patterns" };

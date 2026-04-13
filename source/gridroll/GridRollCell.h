@@ -25,6 +25,8 @@ struct GridRollCell
     juce::String chordSymbol;
     juce::String chordFunction;  // T / PD / D
     juce::String romanNumeral;
+    juce::String source;         // e.g. "midi", "user"
+    float confidence { 1.0f };   // 0.0-1.0, usually from identifier
     std::vector<int> pitchClasses;
 
     // Drum / note mode content

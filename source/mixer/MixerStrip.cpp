@@ -1,5 +1,6 @@
 #include "MixerStrip.h"
 #include "../theme/ThemeManager.h"
+#include <array>
 
 namespace setle::mixer
 {
@@ -79,6 +80,17 @@ MixerStrip::MixerStrip(te::AudioTrack& t,
         if (auto* vp = track.getVolumePlugin())
             vp->setVolumeDb(static_cast<float>(volumeFader.getValue()));
         volumeFader.setTooltip(juce::String(volumeFader.getValue(), 1) + " dB");
+        repaint();
+    };
+    volumeFader.onDragStart = [this]
+    {
+        faderDragging = true;
+        repaint();
+    };
+    volumeFader.onDragEnd = [this]
+    {
+        faderDragging = false;
+        repaint();
     };
 
     panKnob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
@@ -173,12 +185,23 @@ void MixerStrip::resized()
 
 void MixerStrip::paint(juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat();
     const auto& theme = ThemeManager::get().theme();
+    auto r = getLocalBounds().toFloat();
+    auto headerTint = theme.surface2;
+    auto colorText = track.state.getProperty("setleTrackColor").toString().trim();
+    if (colorText.startsWith("#"))
+        colorText = colorText.substring(1);
+    if (colorText.length() == 6)
+        colorText = "ff" + colorText;
+    if (colorText.length() == 8)
+        headerTint = juce::Colour::fromString(colorText).withMultipliedSaturation(0.7f);
+
     g.setColour(theme.surface1);
     g.fillRoundedRectangle(r, 4.0f);
+    g.setColour(headerTint.withAlpha(0.35f));
+    g.fillRoundedRectangle(r.removeFromTop(40.0f), 4.0f);
     g.setColour(theme.surfaceEdge);
-    g.drawRoundedRectangle(r.reduced(0.5f), 4.0f, 1.0f);
+    g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 4.0f, 1.0f);
 
     auto meterBounds = getLocalBounds().reduced(8).withTrimmedTop(20 + 24 + 16).removeFromTop(80);
     const int barGap = 3;
@@ -187,7 +210,16 @@ void MixerStrip::paint(juce::Graphics& g)
 
     auto drawMeter = [&g, &theme](juce::Rectangle<int> area, float level, float hold)
     {
-        g.setColour(theme.surface2);
+        // Meter background zones (green/yellow/red).
+        g.setColour(theme.zoneC.withAlpha(0.25f));
+        g.fillRect(area.withY(area.getY() + static_cast<int>(area.getHeight() * 0.36f))
+                       .withHeight(static_cast<int>(area.getHeight() * 0.64f)));
+        g.setColour(theme.zoneD.withAlpha(0.30f));
+        g.fillRect(area.withY(area.getY() + static_cast<int>(area.getHeight() * 0.20f))
+                       .withHeight(static_cast<int>(area.getHeight() * 0.16f)));
+        g.setColour(theme.accentWarm.withAlpha(0.30f));
+        g.fillRect(area.withHeight(static_cast<int>(area.getHeight() * 0.20f)));
+        g.setColour(theme.surfaceEdge.withAlpha(0.6f));
         g.fillRect(area);
 
         const int fill = juce::roundToInt(static_cast<float>(area.getHeight()) * juce::jlimit(0.0f, 1.0f, level));
@@ -205,6 +237,90 @@ void MixerStrip::paint(juce::Graphics& g)
 
     drawMeter(leftBar, peakLeft, peakHoldLeft);
     drawMeter(rightBar, peakRight, peakHoldRight);
+
+    // Meter scale labels.
+    g.setColour(theme.inkMuted.withAlpha(0.85f));
+    g.setFont(juce::FontOptions(8.5f));
+    const std::array<std::pair<const char*, float>, 5> meterMarks { {
+        { "0", 1.0f }, { "-3", 0.82f }, { "-6", 0.70f }, { "-12", 0.50f }, { "-inf", 0.0f }
+    } };
+    for (const auto& mark : meterMarks)
+    {
+        const int y = meterBounds.getBottom() - static_cast<int>(meterBounds.getHeight() * mark.second);
+        g.drawText(mark.first, meterBounds.getRight() + 2, y - 5, 22, 10, juce::Justification::centredLeft, false);
+    }
+
+    // Volume fader dB ticks.
+    const auto faderBounds = volumeFader.getBounds();
+    const std::array<double, 6> dbTicks { 0.0, -6.0, -12.0, -18.0, -24.0, -100.0 };
+    for (double db : dbTicks)
+    {
+        const double minDb = volumeFader.getMinimum();
+        const double maxDb = volumeFader.getMaximum();
+        const double frac = juce::jlimit(0.0, 1.0, (db - minDb) / (maxDb - minDb));
+        const int y = faderBounds.getBottom() - static_cast<int>(frac * faderBounds.getHeight());
+        g.setColour(theme.surfaceEdge.withAlpha(0.75f));
+        g.drawLine(static_cast<float>(faderBounds.getX() - 6), static_cast<float>(y),
+                   static_cast<float>(faderBounds.getX() - 1), static_cast<float>(y), 1.0f);
+        g.setColour(theme.inkMuted.withAlpha(0.82f));
+        g.setFont(juce::FontOptions(8.0f));
+        const auto label = (db <= -99.0) ? "-inf" : juce::String(juce::roundToInt(db));
+        g.drawText(label, faderBounds.getX() - 30, y - 5, 22, 10, juce::Justification::centredRight, false);
+    }
+
+    if (faderDragging)
+    {
+        const auto dbText = juce::String(volumeFader.getValue(), 1) + " dB";
+        auto bubble = faderBounds.withY(faderBounds.getY() - 18).withHeight(14).expanded(6, 0);
+        g.setColour(theme.surface3.withAlpha(0.9f));
+        g.fillRoundedRectangle(bubble.toFloat(), 3.0f);
+        g.setColour(theme.inkLight.withAlpha(0.95f));
+        g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+        g.drawText(dbText, bubble, juce::Justification::centred, false);
+    }
+
+    // Pan labels and center detent.
+    const auto panBounds = panKnob.getBounds();
+    g.setColour(theme.inkMuted.withAlpha(0.85f));
+    g.setFont(juce::FontOptions(8.5f));
+    g.drawText("L", panBounds.getX() - 2, panBounds.getCentreY() - 5, 8, 10, juce::Justification::centred, false);
+    g.drawText("R", panBounds.getRight() - 6, panBounds.getCentreY() - 5, 8, 10, juce::Justification::centred, false);
+    g.setColour(theme.surfaceEdge.withAlpha(0.9f));
+    g.drawLine(static_cast<float>(panBounds.getCentreX()), static_cast<float>(panBounds.getBottom() - 3),
+               static_cast<float>(panBounds.getCentreX()), static_cast<float>(panBounds.getBottom() - 9), 1.0f);
+
+    // Instrument indicator dot + icon near slot label.
+    const auto slotBounds = slotTypeLabel.getBounds();
+    const auto slotText = slotTypeLabel.getText().toLowerCase();
+    juce::Colour typeDot = theme.signalMidi;
+    if (slotText.contains("reel") || slotText.contains("sampler"))
+        typeDot = theme.signalAudio;
+    else if (slotText.contains("vst"))
+        typeDot = theme.zoneA;
+
+    g.setColour(typeDot.withAlpha(0.95f));
+    g.fillEllipse(static_cast<float>(slotBounds.getX() + 2), static_cast<float>(slotBounds.getCentreY() - 2), 4.0f, 4.0f);
+
+    if (slotText.contains("reel"))
+    {
+        juce::Path wave;
+        wave.startNewSubPath(static_cast<float>(slotBounds.getX() + 10), static_cast<float>(slotBounds.getCentreY()));
+        wave.lineTo(static_cast<float>(slotBounds.getX() + 13), static_cast<float>(slotBounds.getCentreY() - 2));
+        wave.lineTo(static_cast<float>(slotBounds.getX() + 16), static_cast<float>(slotBounds.getCentreY() + 2));
+        wave.lineTo(static_cast<float>(slotBounds.getX() + 19), static_cast<float>(slotBounds.getCentreY() - 1));
+        g.setColour(theme.inkMid.withAlpha(0.9f));
+        g.strokePath(wave, juce::PathStrokeType(1.0f));
+    }
+    else if (slotText.contains("vst"))
+    {
+        auto plug = juce::Rectangle<int>(slotBounds.getX() + 10, slotBounds.getY() + 4, 8, 8);
+        g.setColour(theme.inkMid.withAlpha(0.9f));
+        g.drawRect(plug);
+        g.drawLine(static_cast<float>(plug.getX() + 2), static_cast<float>(plug.getY() - 2),
+                   static_cast<float>(plug.getX() + 2), static_cast<float>(plug.getY()), 1.0f);
+        g.drawLine(static_cast<float>(plug.getX() + 6), static_cast<float>(plug.getY() - 2),
+                   static_cast<float>(plug.getX() + 6), static_cast<float>(plug.getY()), 1.0f);
+    }
 }
 
 void MixerStrip::timerCallback()

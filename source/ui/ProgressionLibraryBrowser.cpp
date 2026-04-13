@@ -32,7 +32,9 @@ ProgressionLibraryBrowser::ProgressionLibraryBrowser(const juce::String& session
     searchEditor.onTextChange = [this] { rebuildBrowserRows(); };
     addAndMakeVisible(searchEditor);
 
-    addAndMakeVisible(scrollableContainer);
+    addAndMakeVisible(rowsViewport);
+    rowsViewport.setViewedComponent(&rowsContent, false);
+    rowsViewport.setScrollBarsShown(true, true);
     rebuildBrowserRows();
 }
 
@@ -56,14 +58,15 @@ void ProgressionLibraryBrowser::resized()
     searchEditor.setBounds(searchRow);
 
     bounds.removeFromTop(8);
-    scrollableContainer.setBounds(bounds);
+    rowsViewport.setBounds(bounds);
 
     int y = 0;
     for (auto& row : browserRows)
     {
-        row->setBounds(0, y, scrollableContainer.getWidth(), 40);
+        row->setBounds(0, y, juce::jmax(120, rowsViewport.getMaximumVisibleWidth() - 8), 40);
         y += 42;
     }
+    rowsContent.setSize(juce::jmax(120, rowsViewport.getMaximumVisibleWidth() - 8), juce::jmax(y, rowsViewport.getMaximumVisibleHeight()));
 }
 
 void ProgressionLibraryBrowser::setOnRowClicked(std::function<void(const juce::String&)> callback)
@@ -97,7 +100,7 @@ void ProgressionLibraryBrowser::updateSessionMode(const juce::String& newMode)
 void ProgressionLibraryBrowser::rebuildBrowserRows()
 {
     for (auto& row : browserRows)
-        scrollableContainer.removeChildComponent(row.get());
+        rowsContent.removeChildComponent(row.get());
     browserRows.clear();
 
     auto templates = getProgressionTemplates();
@@ -134,7 +137,7 @@ void ProgressionLibraryBrowser::rebuildBrowserRows()
                 onRowContextRequested(id, target);
         });
 
-        scrollableContainer.addAndMakeVisible(*row);
+        rowsContent.addAndMakeVisible(*row);
         browserRows.push_back(std::move(row));
     }
 

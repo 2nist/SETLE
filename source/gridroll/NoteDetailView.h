@@ -46,6 +46,7 @@ public:
                   const juce::String& sessionMode);
 
     const std::vector<model::Note>& getNotes() const { return notes; }
+    void setPlayheadBeat(double beat);
     void setScaleLock(bool enabled);
     void setChordLock(bool enabled);
     bool getScaleLock() const noexcept;
@@ -101,6 +102,7 @@ private:
     std::vector<int> scaleIntervals; // 0–11 pitch classes in key
     std::vector<int> chordTones;     // pitch class indices from cell
     juce::String currentChordSymbol;
+    double playheadBeat { -1.0 };
 
     midi::MidiConstraintEngine constraintEngine;
 

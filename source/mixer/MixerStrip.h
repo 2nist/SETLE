@@ -60,6 +60,7 @@ private:
 
     te::LevelMeasurer::Client meterClient;
     te::LevelMeterPlugin* meterPlugin { nullptr };
+    bool faderDragging { false };
 
     static constexpr int kMeterWidth = 6;
     static constexpr int kFaderHeight = 120;

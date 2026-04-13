@@ -77,6 +77,8 @@ private:
     std::unique_ptr<ChordGridView> chordGrid;
     std::unique_ptr<DrumGridView>  drumGrid;
     std::unique_ptr<NoteDetailView> noteDetail;
+    juce::Viewport chordViewport;
+    juce::Viewport drumViewport;
 
     Mode   currentMode     { Mode::ChordGrid };
     int    expandedCellIdx { -1 };   // -1 = no detail open

@@ -1,5 +1,6 @@
 #include "DrumGridView.h"
 #include "DrumPatternMidiReader.h"
+#include "../theme/ThemeManager.h"
 
 #include <algorithm>
 #include <cmath>
@@ -321,42 +322,114 @@ juce::Colour DrumGridView::rowColour(int midiNote) const
     return gmDrumColour(midiNote);
 }
 
+juce::Rectangle<int> DrumGridView::patternLengthMarkerBounds(int rowIndex) const
+{
+    const auto grid = gridBounds(rowIndex);
+    return { grid.getRight() - 9, grid.getCentreY() - 4, 8, 8 };
+}
+
+bool DrumGridView::isBeatGroupStart(const DrumRow& row, int stepIndex) const
+{
+    if (stepIndex <= 0 || row.steps <= 0 || currentMeter.numerator <= 0)
+        return stepIndex == 0;
+
+    // Map row steps to denominator-unit groups using meter context.
+    const int stepsPerBarAtMeterUnit = currentMeter.denominator == 8
+                                           ? currentMeter.stepsPerBarEighths()
+                                           : currentMeter.numerator;
+    if (stepsPerBarAtMeterUnit <= 0)
+        return false;
+
+    const float scale = static_cast<float>(row.steps) / static_cast<float>(stepsPerBarAtMeterUnit);
+    std::vector<int> groups;
+    if (currentMeter.denominator == 8 && currentMeter.numerator > 3)
+    {
+        int remaining = currentMeter.numerator;
+        while (remaining > 0)
+        {
+            int group = (remaining == 2 || remaining == 4) ? 2 : juce::jmin(3, remaining);
+            groups.push_back(group);
+            remaining -= group;
+        }
+    }
+    else
+    {
+        groups.assign(currentMeter.numerator, 1);
+    }
+
+    int cursor = 0;
+    for (int group : groups)
+    {
+        const int rowStep = static_cast<int>(std::round(cursor * scale));
+        if (stepIndex == rowStep)
+            return true;
+        cursor += group;
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------
 void DrumGridView::paintStep(juce::Graphics& g,
                               const GridRollCell& cell,
                               juce::Rectangle<int> bounds,
-                              bool active) const
+                              bool active,
+                              bool hovered) const
 {
-    if (!active) return;
-
+    const auto& theme = ThemeManager::get().theme();
     const auto centre = bounds.getCentre().toFloat();
-    const float maxR  = static_cast<float>(std::min(bounds.getWidth(), bounds.getHeight())) * 0.44f;
-    const float r     = maxR * juce::jlimit(0.3f, 1.0f, cell.velocity);
+    const float maxR = static_cast<float>(std::min(bounds.getWidth(), bounds.getHeight())) * 0.45f;
 
+    if (!active)
+    {
+        g.setColour(theme.surfaceEdge.withAlpha(hovered ? 0.70f : 0.40f));
+        g.drawEllipse(centre.getX() - maxR * 0.42f, centre.getY() - maxR * 0.42f,
+                      maxR * 0.84f, maxR * 0.84f, 1.1f);
+        return;
+    }
+
+    const float vel = juce::jlimit(0.0f, 1.0f, cell.velocity);
+    float diameterScale = juce::jmap(vel, 0.5f, 1.0f, 0.60f, 0.90f);
+    diameterScale = juce::jlimit(0.40f, 0.90f, diameterScale);
+    if (vel <= 0.35f)
+        diameterScale = 0.40f;
+
+    const float r = maxR * diameterScale;
     juce::Colour col = gmDrumColour(cell.midiNote);
-    if (cell.muted)    col = col.withAlpha(0.3f);
-    if (cell.accented) col = col.brighter(0.5f);
+    if (cell.muted)
+        col = col.withAlpha(0.4f);
 
     g.setColour(col);
     g.fillEllipse(centre.getX() - r, centre.getY() - r, r * 2.0f, r * 2.0f);
 
     if (cell.probability < 0.99f)
     {
-        g.setColour(juce::Colours::white.withAlpha(0.5f));
-        g.drawEllipse(centre.getX() - maxR, centre.getY() - maxR,
-                      maxR * 2.0f, maxR * 2.0f, 1.0f);
+        juce::Path ringPath;
+        ringPath.addEllipse(centre.getX() - maxR * 0.9f, centre.getY() - maxR * 0.9f,
+                            maxR * 1.8f, maxR * 1.8f);
+        juce::Path dashed;
+        const float dashes[] = { 2.0f, 2.0f };
+        juce::PathStrokeType(1.1f).createDashedStroke(dashed, ringPath, dashes, 2);
+        g.setColour(theme.inkLight.withAlpha(0.70f));
+        g.fillPath(dashed);
+    }
+
+    if (cell.accented)
+    {
+        g.setColour(theme.inkLight.withAlpha(0.90f));
+        g.drawEllipse(centre.getX() - (r + 2.2f), centre.getY() - (r + 2.2f),
+                      (r + 2.2f) * 2.0f, (r + 2.2f) * 2.0f, 1.6f);
     }
 
     if (cell.ratchetCount > 1)
     {
-        const float subR = r * 0.25f;
-        const int n = juce::jmin(cell.ratchetCount, 4);
+        const float subR = juce::jmax(1.3f, r * 0.20f);
+        const int n = juce::jmin(cell.ratchetCount, 6);
         for (int i = 0; i < n; ++i)
         {
             const float angle = static_cast<float>(i) * juce::MathConstants<float>::twoPi / static_cast<float>(n);
-            const float cx = centre.getX() + (r * 0.6f) * std::cos(angle);
-            const float cy = centre.getY() + (r * 0.6f) * std::sin(angle);
-            g.setColour(juce::Colours::white.withAlpha(0.6f));
+            const float cx = centre.getX() + (r * 0.55f) * std::cos(angle);
+            const float cy = centre.getY() + (r * 0.55f) * std::sin(angle);
+            g.setColour(theme.inkLight.withAlpha(0.85f));
             g.fillEllipse(cx - subR, cy - subR, subR * 2.0f, subR * 2.0f);
         }
     }
@@ -365,27 +438,30 @@ void DrumGridView::paintStep(juce::Graphics& g,
 void DrumGridView::paintHeader(juce::Graphics& g, int rowIndex, juce::Rectangle<int> bounds)
 {
     const auto& row = rows[static_cast<size_t>(rowIndex)];
+    const auto& theme = ThemeManager::get().theme();
     const juce::Colour col = rowColour(row.midiNote);
 
-    g.setColour(col.withAlpha(0.25f));
+    g.setColour(theme.surface2);
     g.fillRect(bounds);
+    g.setColour(col.withAlpha(0.92f));
+    g.fillRect(bounds.removeFromLeft(3));
 
-    g.setColour(col.withAlpha(0.9f));
+    g.setColour(theme.inkMid.withAlpha(0.95f));
     g.setFont(juce::FontOptions(12.0f));
     g.drawText(row.name,
-               bounds.getX() + 4, bounds.getY(), 72, bounds.getHeight(),
+               bounds.getX() + 6, bounds.getY(), 72, bounds.getHeight(),
                juce::Justification::centredLeft, true);
 
-    // M & S buttons (12×12 each, right side of header)
-    juce::Rectangle<int> mBtn(bounds.getRight() - 28, bounds.getCentreY() - 7, 12, 14);
-    juce::Rectangle<int> sBtn(bounds.getRight() - 14, bounds.getCentreY() - 7, 12, 14);
+    // M & S buttons (16x16 each, right side of header)
+    juce::Rectangle<int> mBtn(bounds.getRight() - 38, bounds.getCentreY() - 8, 16, 16);
+    juce::Rectangle<int> sBtn(bounds.getRight() - 20, bounds.getCentreY() - 8, 16, 16);
 
-    g.setColour(row.muted  ? juce::Colour(0xffcc4444) : juce::Colour(0xff334455));
+    g.setColour(row.muted ? theme.accentWarm.withAlpha(0.9f) : theme.surface3);
     g.fillRect(mBtn);
-    g.setColour(row.soloed ? juce::Colour(0xffddaa22) : juce::Colour(0xff334455));
+    g.setColour(row.soloed ? theme.zoneD.withAlpha(0.95f) : theme.surface3);
     g.fillRect(sBtn);
 
-    g.setColour(juce::Colours::white.withAlpha(0.85f));
+    g.setColour(theme.inkLight.withAlpha(0.90f));
     g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
     g.drawText("M", mBtn, juce::Justification::centred, false);
     g.drawText("S", sBtn, juce::Justification::centred, false);
@@ -394,20 +470,25 @@ void DrumGridView::paintHeader(juce::Graphics& g, int rowIndex, juce::Rectangle<
 void DrumGridView::paintRow(juce::Graphics& g, int rowIndex)
 {
     const auto& row = rows[static_cast<size_t>(rowIndex)];
+    const auto& theme = ThemeManager::get().theme();
     const auto grid = gridBounds(rowIndex);
     const int total = row.steps * row.patternBars;
 
     // Background
-    g.setColour(juce::Colour(0xff1a2332));
+    g.setColour(theme.surface1);
     g.fillRect(grid);
 
-    // Beat separator lines
-    g.setColour(juce::Colours::white.withAlpha(0.06f));
+    // Beat separator lines + meter-group emphasis.
     for (int i = 0; i <= total; ++i)
     {
         const int x = grid.getX() + (grid.getWidth() * i) / juce::jmax(1, total);
-        const float alpha = (i % row.steps == 0) ? 0.2f : 0.06f;
-        g.setColour(juce::Colours::white.withAlpha(alpha));
+        float alpha = 0.08f;
+        if (i % juce::jmax(1, row.steps) == 0)
+            alpha = 0.24f;
+        else if (isBeatGroupStart(row, i))
+            alpha = 0.16f;
+
+        g.setColour(theme.surfaceEdge.withAlpha(alpha));
         g.fillRect(x, grid.getY(), 1, kRowHeight);
     }
 
@@ -416,22 +497,50 @@ void DrumGridView::paintRow(juce::Graphics& g, int rowIndex)
     for (int s = 0; s < total && s < static_cast<int>(activeCells.size()); ++s)
     {
         const auto bounds = stepCellBounds(rowIndex, s);
+        if (isBeatGroupStart(row, s))
+        {
+            g.setColour(theme.surface3.withAlpha(0.22f));
+            g.fillRect(bounds);
+        }
+
         const bool active = !activeCells[static_cast<size_t>(s)].muted;
-        if (active)
-            paintStep(g, activeCells[static_cast<size_t>(s)], bounds, true);
+        paintStep(g,
+                  activeCells[static_cast<size_t>(s)],
+                  bounds,
+                  active,
+                  hoverRowIndex == rowIndex && hoverStepIndex == s);
+    }
+
+    // Pattern length marker.
+    {
+        const auto marker = patternLengthMarkerBounds(rowIndex);
+        juce::Path tri;
+        tri.startNewSubPath(static_cast<float>(marker.getX()), static_cast<float>(marker.getY()));
+        tri.lineTo(static_cast<float>(marker.getRight()), static_cast<float>(marker.getCentreY()));
+        tri.lineTo(static_cast<float>(marker.getX()), static_cast<float>(marker.getBottom()));
+        tri.closeSubPath();
+        g.setColour(theme.accent.withAlpha(0.95f));
+        g.fillPath(tri);
     }
 
     // Header
     paintHeader(g, rowIndex, headerBounds(rowIndex));
+
+    if (row.muted)
+    {
+        g.setColour(juce::Colours::black.withAlpha(0.40f));
+        g.fillRect(headerBounds(rowIndex).getUnion(gridBounds(rowIndex)));
+    }
 }
 
 // ---------------------------------------------------------------
 void DrumGridView::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff141e2a));
+    const auto& theme = ThemeManager::get().theme();
+    g.fillAll(theme.surface0);
 
     // Top controls area
-    g.setColour(juce::Colour(0xff1a2332));
+    g.setColour(theme.surface2);
     g.fillRect(0, 0, getWidth(), kHeaderControlH);
 
     // LCM cycle indicator
@@ -444,7 +553,7 @@ void DrumGridView::paint(juce::Graphics& g)
             const int n = row.steps * row.patternBars;
             lcm = std::lcm(lcm, n);
         }
-        g.setColour(juce::Colours::white.withAlpha(0.5f));
+        g.setColour(theme.inkMuted.withAlpha(0.7f));
         g.setFont(juce::FontOptions(11.0f));
         g.drawText("Cycle: " + juce::String(lcm) + " steps",
                    getWidth() - 120, 4, 116, 16,
@@ -462,7 +571,7 @@ void DrumGridView::paint(juce::Graphics& g)
     const double beatsTotal = static_cast<double>(total) / static_cast<double>(firstRow.steps);
     const double fraction = (beatsTotal > 0.0) ? playheadBeat / beatsTotal : 0.0;
     const int px = kHeaderWidth + static_cast<int>(fraction * (getWidth() - kHeaderWidth));
-    g.setColour(juce::Colour(0xffeeee22));
+    g.setColour(theme.playheadColor.brighter(0.45f));
     g.fillRect(px, kHeaderControlH, 2, totalHeight());
 }
 
@@ -484,20 +593,54 @@ void DrumGridView::resized()
 }
 
 // ---------------------------------------------------------------
+void DrumGridView::mouseMove(const juce::MouseEvent& e)
+{
+    const auto hit = hitTest(e.getPosition());
+    hoverRowIndex = hit.rowIndex;
+    hoverStepIndex = hit.stepIndex;
+
+    bool overPatternHandle = false;
+    if (hit.rowIndex >= 0)
+        overPatternHandle = patternLengthMarkerBounds(hit.rowIndex).contains(e.getPosition());
+
+    setMouseCursor(overPatternHandle
+                       ? juce::MouseCursor::LeftRightResizeCursor
+                       : juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+void DrumGridView::mouseExit(const juce::MouseEvent&)
+{
+    hoverRowIndex = -1;
+    hoverStepIndex = -1;
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+// ---------------------------------------------------------------
 void DrumGridView::mouseDown(const juce::MouseEvent& e)
 {
     dragRowIndex  = -1;
     dragStepIndex = -1;
+    patternResizeRowIndex = -1;
 
     const auto hit = hitTest(e.getPosition());
     if (hit.rowIndex < 0) return;
+
+    if (patternLengthMarkerBounds(hit.rowIndex).contains(e.getPosition()))
+    {
+        patternResizeRowIndex = hit.rowIndex;
+        patternResizeStartBars = rows[static_cast<size_t>(hit.rowIndex)].patternBars;
+        patternResizeStartPos = e.getPosition();
+        return;
+    }
 
     if (hit.inHeader)
     {
         // Check M/S buttons
         const auto hb = headerBounds(hit.rowIndex);
-        juce::Rectangle<int> mBtn(hb.getRight() - 28, hb.getCentreY() - 7, 12, 14);
-        juce::Rectangle<int> sBtn(hb.getRight() - 14, hb.getCentreY() - 7, 12, 14);
+        juce::Rectangle<int> mBtn(hb.getRight() - 38, hb.getCentreY() - 8, 16, 16);
+        juce::Rectangle<int> sBtn(hb.getRight() - 20, hb.getCentreY() - 8, 16, 16);
 
         if (mBtn.contains(e.getPosition()))
         {
@@ -560,6 +703,24 @@ void DrumGridView::mouseDown(const juce::MouseEvent& e)
 // ---------------------------------------------------------------
 void DrumGridView::mouseDrag(const juce::MouseEvent& e)
 {
+    if (patternResizeRowIndex >= 0)
+    {
+        auto& row = rows[static_cast<size_t>(patternResizeRowIndex)];
+        const auto grid = gridBounds(patternResizeRowIndex);
+        const int barWidthPx = juce::jmax(8, grid.getWidth() / juce::jmax(1, patternResizeStartBars));
+        const int deltaX = e.getPosition().getX() - patternResizeStartPos.getX();
+        const int deltaBars = juce::roundToInt(static_cast<float>(deltaX) / static_cast<float>(barWidthPx));
+        const int newBars = juce::jlimit(1, 8, patternResizeStartBars + deltaBars);
+        if (newBars != row.patternBars)
+        {
+            row.patternBars = newBars;
+            ensureSteps(row);
+            resized();
+            repaint();
+        }
+        return;
+    }
+
     if (dragRowIndex < 0 || dragStepIndex < 0) return;
 
     auto& row   = rows[static_cast<size_t>(dragRowIndex)];
@@ -575,6 +736,13 @@ void DrumGridView::mouseDrag(const juce::MouseEvent& e)
 // ---------------------------------------------------------------
 void DrumGridView::mouseUp(const juce::MouseEvent&)
 {
+    if (patternResizeRowIndex >= 0)
+    {
+        patternResizeRowIndex = -1;
+        if (onCellsChanged)
+            onCellsChanged();
+    }
+
     if (dragRowIndex >= 0 && onCellsChanged)
         onCellsChanged();
     dragRowIndex  = -1;

@@ -42,6 +42,7 @@ ChordGridView::ChordGridView(model::Song& songRef)
         showAddChordPopover(addChordButton.getScreenBounds().getBottomLeft());
     };
     setSize(400, kHeight);
+    startTimerHz(30);
 }
 
 // ---------------------------------------------------------------
@@ -72,6 +73,8 @@ void ChordGridView::loadProgression(const juce::String& id)
         cell.chordSymbol   = chord.getSymbol();
         cell.chordFunction = chord.getFunction();
         cell.romanNumeral  = chord.getName();   // name stores Roman numeral
+        cell.source        = chord.getSource();
+        cell.confidence    = chord.getConfidence();
         cell.midiNote      = chord.getRootMidi();
         cursor += cell.durationBeats;
         cells.push_back(std::move(cell));
@@ -108,6 +111,11 @@ double ChordGridView::totalBeats() const
     for (const auto& c : cells)
         total += c.durationBeats;
     return total > 0.0 ? total : 4.0;
+}
+
+double ChordGridView::getTotalBeats() const
+{
+    return totalBeats();
 }
 
 double ChordGridView::beatsPerPixel() const
@@ -161,103 +169,152 @@ juce::Colour ChordGridView::functionColour(const juce::String& fn) const
     return theme.surfaceEdge;
 }
 
+juce::String ChordGridView::functionTag(const juce::String& fn) const
+{
+    if (fn.equalsIgnoreCase("tonic") || fn.equalsIgnoreCase("t"))
+        return "T";
+    if (fn.equalsIgnoreCase("subdominant") || fn.equalsIgnoreCase("pd"))
+        return "PD";
+    if (fn.equalsIgnoreCase("dominant") || fn.equalsIgnoreCase("d"))
+        return "D";
+
+    return fn.toUpperCase().trim();
+}
+
 // ---------------------------------------------------------------
 void ChordGridView::paintCell(juce::Graphics& g,
                                const GridRollCell& cell,
                                juce::Rectangle<int> bounds,
-                               bool selected) const
+                               bool selected,
+                               bool active) const
 {
-    const bool muted = cell.muted;
-    const float alpha = muted ? 0.35f : 1.0f;
+    const auto& theme = ThemeManager::get().theme();
+    const auto base = functionColour(cell.chordFunction);
+    const auto body = bounds.toFloat().reduced(1.0f);
+    const float pulse = 0.5f + 0.5f * std::sin(pulsePhase);
 
-    juce::Colour base = functionColour(cell.chordFunction).withAlpha(alpha);
+    juce::Colour bg = theme.surface3.interpolatedWith(base, 0.38f);
+    if (active)
+        bg = bg.brighter(0.20f);
+    g.setColour(bg);
+    g.fillRoundedRectangle(body, 4.0f);
 
-    // Background
-    g.setColour(base.darker(0.3f));
-    g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 4.0f);
+    // Keep function tint behavior from the existing implementation.
+    g.setColour(base.withAlpha(active ? 0.46f : 0.36f));
+    g.fillRoundedRectangle(body, 4.0f);
 
-    // Function color tint on top
-    g.setColour(base.withAlpha(0.38f));
-    g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 4.0f);
-
-    // Selection highlight
-    if (selected)
-    {
-        g.setColour(juce::Colours::white.withAlpha(0.25f));
-        g.drawRoundedRectangle(bounds.toFloat().reduced(1.0f), 4.0f, 2.0f);
-    }
-
-    // Accent: bright top border
     if (cell.accented)
     {
-        g.setColour(juce::Colours::yellow.withAlpha(0.9f * alpha));
-        g.fillRect(bounds.getX() + 2, bounds.getY() + 2, bounds.getWidth() - 4, 3);
+        g.setColour(theme.accentWarm.withAlpha(0.95f));
+        g.fillRect(bounds.getX() + 1, bounds.getY() + 1, bounds.getWidth() - 2, 3);
     }
 
-    // Probability overlay
-    if (cell.probability < 0.99f)
+    if (selected)
     {
-        const float dashLen = 4.0f;
-        g.setColour(juce::Colours::white.withAlpha(0.5f * alpha));
-        juce::Path dash;
-        float px = static_cast<float>(bounds.getX()) + 2.0f;
-        const float right = static_cast<float>(bounds.getRight()) - 2.0f;
-        const float top   = static_cast<float>(bounds.getY()) + 1.0f;
-        const float bot   = static_cast<float>(bounds.getBottom()) - 1.0f;
-        while (px < right)
-        {
-            dash.addRectangle(px, top, std::min(dashLen, right - px), 1.0f);
-            dash.addRectangle(px, bot, std::min(dashLen, right - px), 1.0f);
-            px += dashLen * 2.0f;
-        }
-        g.fillPath(dash);
+        g.setColour(theme.accent);
+        g.drawRoundedRectangle(body, 4.0f, 2.0f);
     }
-
-    // Cross-hatch for muted cells
-    if (muted)
+    else
     {
-        g.setColour(juce::Colours::white.withAlpha(0.07f));
-        auto clip = bounds.reduced(2);
-        for (int y = clip.getY(); y < clip.getBottom(); y += 4)
-        {
-            for (int x2 = clip.getX(); x2 < clip.getRight(); x2 += 4)
-                g.fillRect(x2, y, 1, 1);
-        }
+        g.setColour(theme.surfaceEdge.withAlpha(0.55f));
+        g.drawRoundedRectangle(body, 4.0f, 1.0f);
     }
 
-    // Text area
-    auto inner = bounds.reduced(4, 2);
-    if (inner.getWidth() >= 14)
+    if (active)
     {
-        const juce::String roman = cell.romanNumeral.isNotEmpty() ? cell.romanNumeral : "-";
-        const juce::String sym   = cell.chordSymbol.isNotEmpty()  ? cell.chordSymbol  : "";
-
-        g.setColour(juce::Colours::white.withAlpha(0.95f * alpha));
-        g.setFont(juce::FontOptions(std::min(14.0f, static_cast<float>(inner.getWidth()) * 0.35f)).withStyle("Bold"));
-        g.drawText(roman, inner.removeFromTop(inner.getHeight() / 2), juce::Justification::centred, true);
-
-        g.setFont(juce::FontOptions(std::min(12.0f, static_cast<float>(inner.getWidth()) * 0.28f)));
-        g.drawText(sym, inner, juce::Justification::centred, true);
+        g.setColour(theme.accent.withAlpha(0.45f + 0.45f * pulse));
+        g.drawRoundedRectangle(body.expanded(0.5f), 4.0f, 1.8f);
     }
 
-    // Velocity bar (bottom strip)
-    const int barH = juce::jmax(2, static_cast<int>(5.0f * cell.velocity));
-    g.setColour(base.brighter(0.4f).withAlpha(0.8f * alpha));
-    g.fillRect(bounds.getX() + 2,
-               bounds.getBottom() - barH - 2,
-               bounds.getWidth() - 4,
-               barH);
+    auto content = bounds.reduced(6, 4);
+    auto velocityStrip = content.removeFromBottom(10);
+    auto topRow = content.removeFromTop(14);
+    auto arpRow = content.removeFromBottom(14);
+    auto symbolArea = content;
 
-    // Ratchet badge
+    const auto fn = functionTag(cell.chordFunction);
+    juce::String leftText = cell.romanNumeral.isNotEmpty() ? cell.romanNumeral : "-";
+    if (fn.isNotEmpty())
+        leftText << "  [" << fn << "]";
+    g.setColour(theme.inkLight.withAlpha(0.92f));
+    g.setFont(juce::FontOptions(11.0f).withStyle("Bold"));
+    g.drawText(leftText, topRow.removeFromLeft(juce::jmax(36, topRow.getWidth() - 72)),
+               juce::Justification::centredLeft, true);
+
+    juce::String rightText;
     if (cell.ratchetCount > 1)
+        rightText << juce::String::fromUTF8("\xc3\x97") << juce::String(cell.ratchetCount);
+    if (cell.probability < 0.999f)
     {
-        const juce::String badge = juce::String::fromUTF8("\xc3\x97") + juce::String(cell.ratchetCount);
-        g.setColour(juce::Colours::white.withAlpha(0.8f * alpha));
-        g.setFont(juce::FontOptions(9.0f));
-        g.drawText(badge,
-                   bounds.getRight() - 22, bounds.getY() + 2, 20, 12,
-                   juce::Justification::right, false);
+        if (rightText.isNotEmpty())
+            rightText << "  ";
+        rightText << juce::String(juce::roundToInt(cell.probability * 100.0f)) << "%";
     }
+    g.setColour(theme.inkLight.withAlpha(0.78f));
+    g.setFont(juce::FontOptions(10.0f));
+    g.drawText(rightText, topRow, juce::Justification::centredRight, false);
+
+    g.setColour(theme.inkLight.withAlpha(0.96f));
+    g.setFont(juce::FontOptions(std::min(22.0f, static_cast<float>(symbolArea.getHeight()) * 0.75f)).withStyle("Bold"));
+    g.drawText(cell.chordSymbol, symbolArea, juce::Justification::centred, true);
+
+    if (cell.arpMode != GridRollCell::ArpMode::Off)
+    {
+        juce::String arpText = "♪ ";
+        switch (cell.arpMode)
+        {
+            case GridRollCell::ArpMode::Up: arpText += "Up"; break;
+            case GridRollCell::ArpMode::Down: arpText += "Down"; break;
+            case GridRollCell::ArpMode::UpDown: arpText += "UpDown"; break;
+            case GridRollCell::ArpMode::Random: arpText += "Random"; break;
+            case GridRollCell::ArpMode::Off: break;
+        }
+        g.setColour(theme.inkMid.withAlpha(0.92f));
+        g.setFont(juce::FontOptions(10.5f));
+        g.drawText(arpText, arpRow, juce::Justification::centredLeft, true);
+    }
+
+    g.setColour(theme.surfaceEdge.withAlpha(0.45f));
+    g.fillRect(velocityStrip);
+    auto filledVelocity = velocityStrip.withWidth(static_cast<int>(velocityStrip.getWidth() * juce::jlimit(0.0f, 1.0f, cell.velocity)));
+    g.setColour(base.brighter(0.35f).withAlpha(0.9f));
+    g.fillRect(filledVelocity);
+
+    // Confidence dot: shown for MIDI-derived content.
+    if (cell.source.equalsIgnoreCase("midi"))
+    {
+        auto dotArea = juce::Rectangle<float>(static_cast<float>(bounds.getRight() - 8),
+                                              static_cast<float>(bounds.getY() + 4),
+                                              4.0f, 4.0f);
+        const auto dotColor = cell.confidence >= 0.9f ? theme.zoneC : theme.zoneD;
+        g.setColour(dotColor.withAlpha(0.95f));
+        g.fillEllipse(dotArea);
+    }
+
+    // Muted cells are visually suppressed with overlay + diagonal hatch.
+    if (cell.muted)
+    {
+        g.setColour(juce::Colours::black.withAlpha(0.40f));
+        g.fillRoundedRectangle(body, 4.0f);
+
+        g.setColour(theme.inkLight.withAlpha(0.08f));
+        const auto clip = bounds.reduced(2);
+        for (int x = clip.getX() - clip.getHeight(); x < clip.getRight(); x += 6)
+            g.drawLine(static_cast<float>(x), static_cast<float>(clip.getBottom()),
+                       static_cast<float>(x + clip.getHeight()), static_cast<float>(clip.getY()),
+                       1.0f);
+    }
+
+    // Resize handle triangle in the bottom-right corner.
+    juce::Path handle;
+    const float hx = static_cast<float>(bounds.getRight() - 2);
+    const float hy = static_cast<float>(bounds.getBottom() - 2);
+    handle.startNewSubPath(hx - 8.0f, hy);
+    handle.lineTo(hx, hy - 8.0f);
+    handle.lineTo(hx, hy);
+    handle.closeSubPath();
+    g.setColour(theme.inkGhost.withAlpha(0.85f));
+    g.fillPath(handle);
 }
 
 // ---------------------------------------------------------------
@@ -288,8 +345,26 @@ void ChordGridView::paint(juce::Graphics& g)
 
     // Cells
     const size_t n = cells.size();
+    double cellBeatStart = 0.0;
     for (size_t i = 0; i < n && i < cellBounds.size(); ++i)
-        paintCell(g, cells[i], cellBounds[i], static_cast<int>(i) == selectedCellIndex);
+    {
+        const auto& cell = cells[i];
+        const bool active = playheadBeat >= cellBeatStart
+                            && playheadBeat < (cellBeatStart + juce::jmax(0.001, cell.durationBeats));
+        paintCell(g,
+                  cell,
+                  cellBounds[i],
+                  static_cast<int>(i) == selectedCellIndex,
+                  active);
+
+        if (i + 1 < cellBounds.size())
+        {
+            g.setColour(theme.surfaceEdge.withAlpha(0.85f));
+            g.fillRect(cellBounds[i].getRight() - 1, 0, 1, getHeight());
+        }
+
+        cellBeatStart += cell.durationBeats;
+    }
 
     // Playhead
     if (playheadBeat >= 0.0)
@@ -320,6 +395,20 @@ void ChordGridView::resized()
     rebuildLayoutCache();
     // Place + button at the right
     addChordButton.setBounds(getWidth() - 28, 4, 24, getHeight() - 8);
+}
+
+// ---------------------------------------------------------------
+void ChordGridView::mouseMove(const juce::MouseEvent& e)
+{
+    const auto hit = hitTest(e.getPosition());
+    const bool shouldResize = hit.cellIndex >= 0 && hit.isRightEdge;
+    if (hoverResizeHandle == shouldResize)
+        return;
+
+    hoverResizeHandle = shouldResize;
+    setMouseCursor(hoverResizeHandle
+                       ? juce::MouseCursor::LeftRightResizeCursor
+                       : juce::MouseCursor::NormalCursor);
 }
 
 // ---------------------------------------------------------------
@@ -782,6 +871,16 @@ void ChordGridView::handleAddChordPopoverResult(int result, int rootSemitone)
                 onCellsChanged();
         }
     }
+}
+
+void ChordGridView::timerCallback()
+{
+    pulsePhase += 0.17f;
+    if (pulsePhase >= juce::MathConstants<float>::twoPi)
+        pulsePhase -= juce::MathConstants<float>::twoPi;
+
+    if (playheadBeat >= 0.0)
+        repaint();
 }
 
 } // namespace setle::gridroll

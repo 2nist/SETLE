@@ -13,6 +13,10 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
     chordGrid  = std::make_unique<ChordGridView>(song);
     drumGrid   = std::make_unique<DrumGridView>();
     noteDetail = std::make_unique<NoteDetailView>(song);
+    chordViewport.setViewedComponent(chordGrid.get(), false);
+    chordViewport.setScrollBarsShown(true, false, true, false);
+    drumViewport.setViewedComponent(drumGrid.get(), false);
+    drumViewport.setScrollBarsShown(false, true, true, false);
 
     drumGrid->buildDefaultRows();
 
@@ -51,8 +55,8 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
     };
 
     // ---- make visible ----
-    addAndMakeVisible(*chordGrid);
-    addAndMakeVisible(*drumGrid);
+    addAndMakeVisible(chordViewport);
+    addAndMakeVisible(drumViewport);
     addChildComponent(*noteDetail);
 
     // ---- header buttons ----
@@ -168,6 +172,8 @@ void GridRollComponent::setPlayheadBeat(double beat)
 
     chordGrid->setPlayheadBeat(beat);
     drumGrid->setPlayheadBeat(beat);
+    if (noteDetail != nullptr)
+        noteDetail->setPlayheadBeat(beat);
 }
 
 // ---------------------------------------------------------------
@@ -195,8 +201,8 @@ void GridRollComponent::applyMode()
     drumModeButton.setToggleState (currentMode == Mode::DrumGrid,  juce::dontSendNotification);
     splitModeButton.setToggleState(currentMode == Mode::Split,     juce::dontSendNotification);
 
-    chordGrid->setVisible(currentMode == Mode::ChordGrid || currentMode == Mode::Split);
-    drumGrid->setVisible(currentMode == Mode::DrumGrid  || currentMode == Mode::Split);
+    chordViewport.setVisible(currentMode == Mode::ChordGrid || currentMode == Mode::Split);
+    drumViewport.setVisible(currentMode == Mode::DrumGrid  || currentMode == Mode::Split);
 }
 
 // ---------------------------------------------------------------
@@ -235,18 +241,24 @@ void GridRollComponent::resized()
     // Content area
     if (currentMode == Mode::ChordGrid)
     {
-        chordGrid->setBounds(area);
+        chordViewport.setBounds(area);
+        const int chordContentWidth = juce::jmax(chordViewport.getWidth(),
+                                                 static_cast<int>(chordGrid->getTotalBeats() * 72.0) + 32);
+        chordGrid->setSize(chordContentWidth, chordViewport.getHeight());
+
         if (noteDetail->isVisible())
         {
             const int chordH  = ChordGridView::kHeight;
             const int detailH = NoteDetailView::kHeight;
-            chordGrid->setBounds(area.removeFromTop(chordH));
+            chordViewport.setBounds(area.removeFromTop(chordH));
+            chordGrid->setSize(chordContentWidth, chordH);
             noteDetail->setBounds(area.removeFromTop(detailH));
         }
     }
     else if (currentMode == Mode::DrumGrid)
     {
-        drumGrid->setBounds(area);
+        drumViewport.setBounds(area);
+        drumGrid->setSize(drumViewport.getWidth(), juce::jmax(drumGrid->getHeight(), drumViewport.getHeight()));
     }
     else  // Split
     {
@@ -259,14 +271,21 @@ void GridRollComponent::resized()
         auto chordArea = area.removeFromTop(chordH);
         if (noteDetail->isVisible())
         {
-            chordGrid->setBounds(chordArea.removeFromTop(ChordGridView::kHeight));
+            chordViewport.setBounds(chordArea.removeFromTop(ChordGridView::kHeight));
+            const int chordContentWidth = juce::jmax(chordViewport.getWidth(),
+                                                     static_cast<int>(chordGrid->getTotalBeats() * 72.0) + 32);
+            chordGrid->setSize(chordContentWidth, chordViewport.getHeight());
             noteDetail->setBounds(chordArea.removeFromTop(NoteDetailView::kHeight));
         }
         else
         {
-            chordGrid->setBounds(chordArea);
+            chordViewport.setBounds(chordArea);
+            const int chordContentWidth = juce::jmax(chordViewport.getWidth(),
+                                                     static_cast<int>(chordGrid->getTotalBeats() * 72.0) + 32);
+            chordGrid->setSize(chordContentWidth, chordViewport.getHeight());
         }
-        drumGrid->setBounds(area.removeFromTop(drumH));
+        drumViewport.setBounds(area.removeFromTop(drumH));
+        drumGrid->setSize(drumViewport.getWidth(), juce::jmax(drumGrid->getHeight(), drumViewport.getHeight()));
     }
 }
 

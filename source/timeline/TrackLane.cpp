@@ -9,6 +9,21 @@ namespace
 {
 constexpr const char* kTrackKindProperty = "setleTrackKind";
 constexpr const char* kTrackKindMidi = "midi";
+constexpr const char* kTrackArmedProperty = "setleArmed";
+constexpr const char* kTrackColorProperty = "setleTrackColor";
+
+juce::Colour colourFromTrackState(const te::Track& track, const ThemeData& theme, bool isMidi)
+{
+    auto colorText = track.state.getProperty(kTrackColorProperty).toString().trim();
+    if (colorText.startsWith("#"))
+        colorText = colorText.substring(1);
+    if (colorText.length() == 6)
+        colorText = "ff" + colorText;
+    if (colorText.length() == 8)
+        return juce::Colour::fromString(colorText);
+
+    return isMidi ? theme.signalMidi : theme.signalAudio;
+}
 }
 
 TrackLane::TrackLane(te::Track& track)
@@ -61,13 +76,23 @@ void TrackLane::paint(juce::Graphics& g)
     auto clipArea = bounds;
 
     const auto isMidi = trackRef.state.getProperty(kTrackKindProperty).toString() == kTrackKindMidi;
+    const bool isArmed = static_cast<bool>(trackRef.state.getProperty(kTrackArmedProperty, false));
 
     const auto& theme = ThemeManager::get().theme();
+    const auto trackColour = colourFromTrackState(trackRef, theme, isMidi).withMultipliedSaturation(0.7f);
 
-    g.setColour(theme.surface2);
+    g.setColour(isArmed ? theme.accentWarm.withAlpha(0.32f) : theme.surface2);
     g.fillRect(headerArea);
     g.setColour(theme.surfaceEdge.withAlpha(0.35f));
     g.drawRect(headerArea);
+    if (isArmed)
+    {
+        g.setColour(theme.accentWarm.withAlpha(0.95f));
+        g.fillEllipse(static_cast<float>(headerArea.getRight() - 12),
+                      static_cast<float>(headerArea.getY() + 6),
+                      6.0f,
+                      6.0f);
+    }
 
     g.setColour(theme.surface1);
     g.fillRect(clipArea);
@@ -80,8 +105,10 @@ void TrackLane::paint(juce::Graphics& g)
     {
         const auto frac = (static_cast<double>(beat) - visibleStartBeat) / beatSpan;
         const auto x = clipArea.getX() + static_cast<int>(std::round(frac * clipArea.getWidth()));
-        const bool major = (beat % 4) == 0;
-        g.setColour(theme.inkLight.withAlpha(major ? 0.20f : 0.08f));
+        const bool barLine = (beat % 4) == 0;
+        const bool fourBars = (beat % 16) == 0;
+        const float alpha = fourBars ? 0.45f : (barLine ? 0.30f : 0.15f);
+        g.setColour(theme.surfaceEdge.withAlpha(alpha));
         g.drawVerticalLine(x, static_cast<float>(clipArea.getY()), static_cast<float>(clipArea.getBottom()));
     }
 
@@ -92,18 +119,87 @@ void TrackLane::paint(juce::Graphics& g)
         if (painted.clip == nullptr)
             continue;
 
-        g.setColour(isMidi ? theme.zoneC.withAlpha(0.85f) : theme.zoneA.withAlpha(0.85f));
+        g.setColour(trackColour.withAlpha(0.88f));
         g.fillRoundedRectangle(painted.bounds.toFloat().reduced(1.0f), 4.0f);
         g.setColour(theme.inkLight.withAlpha(0.40f));
         g.drawRoundedRectangle(painted.bounds.toFloat().reduced(1.0f), 4.0f, 1.0f);
 
-        g.setColour(theme.inkLight.withAlpha(0.90f));
-        g.setFont(juce::FontOptions(11.0f));
-        g.drawText(painted.clip->getName(), painted.bounds.reduced(6, 2), juce::Justification::centredLeft, true);
+        auto clipRect = painted.bounds.reduced(4, 3);
+
+        if (isMidi)
+        {
+            if (auto* midiClip = dynamic_cast<te::MidiClip*>(painted.clip))
+            {
+                auto notes = midiClip->getSequence().getNotes();
+                if (!notes.isEmpty())
+                {
+                    int minNote = 127;
+                    int maxNote = 0;
+                    for (auto* note : notes)
+                    {
+                        if (note == nullptr) continue;
+                        minNote = juce::jmin(minNote, note->getNoteNumber());
+                        maxNote = juce::jmax(maxNote, note->getNoteNumber());
+                    }
+
+                    const int noteRange = juce::jmax(1, maxNote - minNote);
+                    const auto* tempo = trackRef.edit.tempoSequence.getTempo(0);
+                    const auto bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
+                    const auto secPerBeat = 60.0 / juce::jmax(1.0, bpm);
+                    const auto pos = painted.clip->getPosition();
+                    const auto clipDurBeats = juce::jmax(0.001, pos.getLength().inSeconds() / secPerBeat);
+
+                    g.setColour(theme.inkLight.withAlpha(0.55f));
+                    for (auto* note : notes)
+                    {
+                        if (note == nullptr) continue;
+                        const double startFrac = note->getStartBeat().inBeats() / clipDurBeats;
+                        const double endFrac = (note->getStartBeat().inBeats() + note->getLengthBeats().inBeats()) / clipDurBeats;
+                        const int x1 = clipRect.getX() + static_cast<int>(startFrac * clipRect.getWidth());
+                        const int x2 = clipRect.getX() + static_cast<int>(endFrac * clipRect.getWidth());
+                        const float noteNorm = static_cast<float>(note->getNoteNumber() - minNote) / static_cast<float>(noteRange);
+                        const int y = clipRect.getBottom() - 8 - static_cast<int>(noteNorm * juce::jmax(1, clipRect.getHeight() - 14));
+                        g.drawLine(static_cast<float>(x1), static_cast<float>(y),
+                                   static_cast<float>(juce::jmax(x1 + 1, x2)), static_cast<float>(y), 1.0f);
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Lightweight waveform-like thumbnail for audio clips.
+            g.setColour(theme.inkLight.withAlpha(0.35f));
+            const int mid = clipRect.getCentreY();
+            for (int x = clipRect.getX(); x < clipRect.getRight(); x += 3)
+            {
+                const float phase = static_cast<float>((x - clipRect.getX()) * 0.13);
+                const float amp = 0.15f + 0.85f * std::abs(std::sin(phase));
+                const int h = static_cast<int>(amp * (clipRect.getHeight() * 0.4f));
+                g.drawVerticalLine(x, static_cast<float>(mid - h), static_cast<float>(mid + h));
+            }
+        }
+
+        const auto progressionSymbols = painted.clip->state.getProperty("progressionSymbols").toString();
+        if (progressionSymbols.isNotEmpty())
+        {
+            g.setColour(theme.inkLight.withAlpha(0.60f));
+            g.setFont(juce::FontOptions(9.0f));
+            g.drawText(progressionSymbols,
+                       painted.bounds.reduced(5, 2).removeFromTop(10),
+                       juce::Justification::centredLeft,
+                       true);
+        }
+
+        g.setColour(theme.inkMuted.withAlpha(0.96f));
+        g.setFont(juce::FontOptions(10.5f));
+        g.drawText(painted.clip->getName(),
+                   painted.bounds.reduced(6, 3).removeFromBottom(12),
+                   juce::Justification::centredLeft,
+                   true);
     }
 
     const auto playheadX = clipArea.getX() + static_cast<int>(std::round(playheadFraction * clipArea.getWidth()));
-    g.setColour(theme.playheadColor.withAlpha(0.9f));
+    g.setColour(juce::Colours::white.withAlpha(0.95f));
     g.drawVerticalLine(playheadX, static_cast<float>(clipArea.getY()), static_cast<float>(clipArea.getBottom()));
 }
 

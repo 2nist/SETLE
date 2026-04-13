@@ -1,4 +1,5 @@
 #include "NoteDetailView.h"
+#include "../theme/ThemeManager.h"
 
 #include <algorithm>
 #include <array>
@@ -62,6 +63,15 @@ static bool promptTextInput(const juce::String& title,
     return true;
 }
 
+static juce::String noteNameForPitch(int midiNote)
+{
+    static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    const int pitch = juce::jlimit(0, 127, midiNote);
+    const int pc = pitch % 12;
+    const int octave = (pitch / 12) - 1;
+    return juce::String(names[pc]) + juce::String(octave);
+}
+
 NoteDetailView::NoteDetailView(model::Song& songRef)
     : song(songRef)
 {
@@ -72,6 +82,15 @@ NoteDetailView::NoteDetailView(model::Song& songRef)
     addAndMakeVisible(chordLockButton);
     scaleLockButton.onClick = [this] { setScaleLock(scaleLockButton.getToggleState()); };
     chordLockButton.onClick = [this] { setChordLock(chordLockButton.getToggleState()); };
+}
+
+void NoteDetailView::setPlayheadBeat(double beat)
+{
+    if (std::abs(playheadBeat - beat) < 0.0001)
+        return;
+
+    playheadBeat = beat;
+    repaint();
 }
 
 void NoteDetailView::loadCell(const GridRollCell& cell,
@@ -192,15 +211,32 @@ void NoteDetailView::rebuildNoteRects()
 
 void NoteDetailView::paint(juce::Graphics& g)
 {
+    const auto& theme = ThemeManager::get().theme();
     const auto header = getLocalBounds().removeFromTop(kHeaderHeight);
-    g.setColour(juce::Colour(0xff1a2430));
+    g.setColour(theme.surface2);
     g.fillRect(header);
 
     const auto grid = noteGridBounds();
     const int rowHeight = juce::jmax(1, grid.getHeight() / kNoteRows);
 
-    g.setColour(juce::Colour(0xff1a2030));
+    g.setColour(theme.surface1);
     g.fillRect(keyBounds());
+
+    const auto localPlayhead = playheadBeat - sourceCell.startBeat;
+    auto pitchIsActive = [this, localPlayhead](int pitch)
+    {
+        if (localPlayhead < 0.0)
+            return false;
+        for (const auto& note : notes)
+        {
+            if (note.getPitch() != pitch)
+                continue;
+            if (localPlayhead >= note.getStartBeats()
+                && localPlayhead <= note.getStartBeats() + note.getDurationBeats())
+                return true;
+        }
+        return false;
+    };
 
     static const int blackKeys[] = { 1, 3, 6, 8, 10 };
     for (int row = 0; row < kNoteRows; ++row)
@@ -210,28 +246,48 @@ void NoteDetailView::paint(juce::Graphics& g)
         const bool black = std::find(std::begin(blackKeys), std::end(blackKeys), pitchClass) != std::end(blackKeys);
         const auto analysis = constraintEngine.analyzeNote(pitch, 0.0);
 
-        juce::Colour key = black ? juce::Colour(0xff2a2a2a) : juce::Colour(0xffe8e8e8);
-        if (analysis.inChord) key = juce::Colour(0xffdd9933);
-        else if (analysis.inScale) key = juce::Colour(0xff44aa44);
+        juce::Colour key = black ? theme.surface0 : theme.inkLight;
+        if (analysis.inScale)
+            key = key.interpolatedWith(theme.zoneC, 0.16f);
+        if (analysis.inChord)
+            key = key.interpolatedWith(theme.zoneB, 0.22f);
+        if (pitchIsActive(pitch))
+            key = theme.accent;
 
+        const auto keyRow = juce::Rectangle<int>(0, grid.getY() + row * rowHeight, kKeyWidth - 1, rowHeight - 1);
         g.setColour(key);
-        g.fillRect(0, grid.getY() + row * rowHeight, kKeyWidth - 1, rowHeight - 1);
+        g.fillRect(keyRow);
+
+        if (pitchClass == 0 && rowHeight >= 8)
+        {
+            g.setColour(theme.inkGhost.withAlpha(0.9f));
+            g.setFont(juce::FontOptions(9.0f));
+            g.drawText(noteNameForPitch(pitch), keyRow.reduced(2, 0), juce::Justification::centredLeft, false);
+        }
     }
 
     for (int row = 0; row < kNoteRows; ++row)
     {
         const int pitch = rowToPitch(row);
         const auto analysis = constraintEngine.analyzeNote(pitch, 0.0);
-        juce::Colour background(0xff1e2936);
-        if (analysis.inChord) background = juce::Colour(0x22d4a057);
-        else if (analysis.inScale) background = juce::Colour(0x1144aa44);
+        juce::Colour background = theme.surface1.darker(0.10f);
+        if (analysis.inScale)
+            background = theme.zoneC.withAlpha(0.08f);
+        if (analysis.inChord)
+            background = theme.zoneB.withAlpha(0.12f);
 
         g.setColour(background);
         g.fillRect(grid.getX(), grid.getY() + row * rowHeight, grid.getWidth(), rowHeight - 1);
     }
 
-    g.setColour(juce::Colours::white.withAlpha(0.06f));
-    for (double t = 0.0; t <= sourceCell.durationBeats; t += 0.25)
+    const double beatStep = 0.25;
+    const double barStep = 1.0;
+    g.setColour(theme.surfaceEdge.withAlpha(0.20f));
+    for (double t = 0.0; t <= sourceCell.durationBeats + 0.0001; t += beatStep)
+        g.fillRect(timeToPx(t), grid.getY(), 1, grid.getHeight());
+
+    g.setColour(theme.surfaceEdge.withAlpha(0.40f));
+    for (double t = 0.0; t <= sourceCell.durationBeats + 0.0001; t += barStep)
         g.fillRect(timeToPx(t), grid.getY(), 1, grid.getHeight());
 
     for (size_t i = 0; i < notes.size() && i < noteRects.size(); ++i)
@@ -244,17 +300,35 @@ void NoteDetailView::paint(juce::Graphics& g)
         const bool selected = static_cast<int>(i) == selectedNoteIdx;
 
         juce::Colour colour;
-        if (analysis.inChord) colour = juce::Colour(0xffdd9933);
-        else if (analysis.inScale) colour = juce::Colour(0xff44aa44).withAlpha(0.7f);
-        else colour = juce::Colour(0xffcc4444);
+        if (analysis.inChord) colour = theme.accent;
+        else if (analysis.inScale) colour = theme.zoneC;
+        else colour = theme.accentWarm;
 
+        const auto brightness = juce::jmap(note.getVelocity(), 0.0f, 1.0f, 0.52f, 1.0f);
+        colour = colour.withMultipliedBrightness(brightness);
+
+        auto rect = noteRects[i].toFloat().reduced(0.5f);
         g.setColour(colour);
-        g.fillRoundedRectangle(noteRects[i].toFloat().reduced(0.5f), 2.0f);
+        g.fillRoundedRectangle(rect, 3.0f);
 
         if (selected)
         {
-            g.setColour(juce::Colours::white.withAlpha(0.4f));
-            g.drawRoundedRectangle(noteRects[i].toFloat().reduced(0.5f), 2.0f, 1.5f);
+            g.setColour(theme.inkLight.withAlpha(0.95f));
+            g.drawRoundedRectangle(rect, 3.0f, 1.5f);
+        }
+
+        // Resize handle strip (4 px) on right edge.
+        g.setColour(colour.darker(0.35f));
+        g.fillRect(noteRects[i].getRight() - 4, noteRects[i].getY(), 4, noteRects[i].getHeight());
+
+        if (noteRects[i].getWidth() >= 28)
+        {
+            g.setColour(theme.inkDark.withAlpha(0.92f));
+            g.setFont(juce::FontOptions(10.0f).withStyle("Bold"));
+            g.drawText(noteNameForPitch(note.getPitch()),
+                       noteRects[i].reduced(4, 0),
+                       juce::Justification::centredLeft,
+                       true);
         }
     }
 }

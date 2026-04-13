@@ -113,6 +113,38 @@ public:
         g.drawRoundedRectangle(bounds, t.btnCornerRadius, t.strokeNormal);
     }
 
+    void drawScrollbar(juce::Graphics& g,
+                       juce::ScrollBar& scrollbar,
+                       int x, int y, int width, int height,
+                       bool isScrollbarVertical,
+                       int thumbStartPosition,
+                       int thumbSize,
+                       bool isMouseOver,
+                       bool isMouseDown) override
+    {
+        const auto& t = ThemeManager::get().theme();
+        const auto track = juce::Rectangle<float>((float)x, (float)y, (float)width, (float)height);
+        g.setColour(t.surface2.withAlpha(0.85f));
+        g.fillRect(track);
+
+        juce::Rectangle<float> thumb;
+        if (isScrollbarVertical)
+            thumb = { (float)x + 1.0f, (float)thumbStartPosition, (float)width - 2.0f, (float)thumbSize };
+        else
+            thumb = { (float)thumbStartPosition, (float)y + 1.0f, (float)thumbSize, (float)height - 2.0f };
+
+        auto thumbColour = t.sliderThumb.withAlpha(0.70f);
+        if (isMouseOver)
+            thumbColour = thumbColour.brighter(0.08f);
+        if (isMouseDown)
+            thumbColour = thumbColour.brighter(0.12f);
+        g.setColour(thumbColour);
+        g.fillRoundedRectangle(thumb, 3.0f);
+
+        g.setColour(t.surfaceEdge.withAlpha(0.8f));
+        g.drawRect(x, y, width, height);
+    }
+
     juce::Font getPopupMenuFont() override
     {
         return juce::FontOptions(ThemeManager::get().theme().sizeBody);

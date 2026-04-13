@@ -553,6 +553,7 @@ private:
         void paint(juce::Graphics& g) override
         {
             auto bounds = getLocalBounds().reduced(2);
+            const auto pulse = 0.5f + 0.5f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.01));
 
             const auto* slot = getSlot();
             if (slot == nullptr || slot->state == capture::GrabSlot::State::Empty)
@@ -561,6 +562,10 @@ private:
                 g.fillRoundedRectangle(bounds.toFloat(), 4.0f);
                 g.setColour(juce::Colours::white.withAlpha(0.35f));
                 g.drawRoundedRectangle(bounds.toFloat(), 4.0f, 1.0f);
+                // subtle dashed frame for empty slots
+                g.setColour(juce::Colours::white.withAlpha(0.18f));
+                for (int x = bounds.getX() + 6; x < bounds.getRight() - 6; x += 6)
+                    g.fillRect(x, bounds.getY() + 5, 3, 1);
                 g.setFont(juce::FontOptions(12.0f));
                 g.drawText("[ Empty - drag or grab ]", bounds, juce::Justification::centred, true);
                 return;
@@ -569,8 +574,9 @@ private:
             const bool playing = slot->state == capture::GrabSlot::State::Playing;
             g.setColour(playing ? juce::Colour(0xff224d2a) : juce::Colour(0xff1e2b24));
             g.fillRoundedRectangle(bounds.toFloat(), 4.0f);
-            g.setColour(playing ? juce::Colour(0xff66d27a) : juce::Colours::white.withAlpha(0.35f));
-            g.drawRoundedRectangle(bounds.toFloat(), 4.0f, playing ? 2.0f : 1.0f);
+            g.setColour(playing ? juce::Colour(0xff66d27a).withAlpha(0.6f + 0.4f * pulse)
+                                : juce::Colours::white.withAlpha(0.35f));
+            g.drawRoundedRectangle(bounds.toFloat(), 4.0f, playing ? 2.2f : 1.0f);
 
             auto textArea = bounds.reduced(8, 4);
             auto row1 = textArea.removeFromTop(16);
@@ -583,6 +589,7 @@ private:
             auto firstThree = juce::String();
             auto keyMode = juce::String();
             auto beatCount = 0.0;
+            int chordCount = 0;
 
             if (const auto* song = songProvider())
             {
@@ -601,6 +608,7 @@ private:
 
                     keyMode = progression->getKey() + " " + progression->getMode();
                     beatCount = progression->getLengthBeats();
+                    chordCount = static_cast<int>(progression->getChords().size());
                 }
             }
 
@@ -611,7 +619,9 @@ private:
 
             g.setColour(juce::Colours::white.withAlpha(0.64f));
             g.setFont(juce::FontOptions(11.5f));
-            g.drawText("    " + keyMode + "  •  " + juce::String(beatCount, 1) + " beats",
+            const auto confidenceText = juce::String(juce::roundToInt(slot->confidence * 100.0f)) + "%";
+            g.drawText("    " + keyMode + "  •  " + juce::String(chordCount) + " chords  •  "
+                           + juce::String(beatCount, 1) + " beats  •  " + confidenceText,
                        row2,
                        juce::Justification::centredLeft,
                        true);
@@ -656,7 +666,7 @@ public:
             addAndMakeVisible(*slotCards[static_cast<size_t>(i)]);
         }
 
-        startTimerHz(4);
+        startTimerHz(20);
     }
 
     ~InDevicePanel() override
@@ -698,6 +708,30 @@ public:
                 g.setFont(juce::FontOptions(11.0f));
                 g.drawText(juce::String(sr) + " Hz  |  " + juce::String(bs) + " samples",
                            area.removeFromTop(15), juce::Justification::centredLeft, true);
+
+                const double latencyMs = sr > 0 ? (1000.0 * static_cast<double>(bs) / static_cast<double>(sr)) : 0.0;
+                g.setColour(juce::Colours::white.withAlpha(0.58f));
+                g.drawText("Latency: " + juce::String(latencyMs, 1) + " ms",
+                           area.removeFromTop(14), juce::Justification::centredLeft, true);
+
+                auto meterRow = area.removeFromTop(14).withTrimmedLeft(2);
+                auto meterL = meterRow.removeFromLeft(40);
+                meterRow.removeFromLeft(4);
+                auto meterR = meterRow.removeFromLeft(40);
+
+                auto drawMiniMeter = [&g](juce::Rectangle<int> r, float level, juce::Colour colour)
+                {
+                    g.setColour(juce::Colour(0xff101812));
+                    g.fillRect(r);
+                    const int fill = static_cast<int>(juce::jlimit(0.0f, 1.0f, level) * r.getHeight());
+                    g.setColour(colour.withAlpha(0.9f));
+                    g.fillRect(r.withY(r.getBottom() - fill).withHeight(fill));
+                    g.setColour(juce::Colours::white.withAlpha(0.16f));
+                    g.drawRect(r);
+                };
+
+                drawMiniMeter(meterL, outputMeterLeft, juce::Colour(0xff54d36e));
+                drawMiniMeter(meterR, outputMeterRight, juce::Colour(0xff54d36e));
             }
             else
             {
@@ -725,11 +759,22 @@ public:
                     if (area.getHeight() < 14)
                         break;
                     const bool isOpen = isDeviceOpen(info.identifier);
-                    g.setColour(isOpen ? juce::Colour(0xff6ac87b) : juce::Colours::white.withAlpha(0.45f));
+                    const auto nowSec = juce::Time::getMillisecondCounterHiRes() * 0.001;
+                    const auto it = midiActivitySeconds.find(info.identifier);
+                    const bool active = it != midiActivitySeconds.end() && (nowSec - it->second) < 0.18;
+                    const float pulse = 0.55f + 0.45f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.02));
+
+                    juce::Colour dotColour = juce::Colour(0xff6ac87b).withAlpha(active ? pulse : 0.75f);
+                    juce::Colour textColour = isOpen ? juce::Colours::white.withAlpha(active ? 0.95f : 0.75f)
+                                                     : juce::Colours::white.withAlpha(0.35f);
+                    g.setColour(isOpen ? dotColour : juce::Colours::white.withAlpha(0.25f));
                     g.setFont(juce::FontOptions(12.0f));
                     const auto dot = isOpen ? juce::String(juce::CharPointer_UTF8("\xe2\x97\x8f "))
                                             : juce::String(juce::CharPointer_UTF8("\xe2\x97\x8b "));
-                    g.drawText(dot + info.name, area.removeFromTop(15), juce::Justification::centredLeft, true);
+                    auto row = area.removeFromTop(15);
+                    g.drawText(dot, row.removeFromLeft(14), juce::Justification::centredLeft, false);
+                    g.setColour(textColour);
+                    g.drawText(info.name, row, juce::Justification::centredLeft, true);
                 }
             }
         }
@@ -838,16 +883,37 @@ private:
             if (card != nullptr)
                 card->refresh();
 
+        outputMeterLeft *= 0.86f;
+        outputMeterRight *= 0.86f;
+        outputMeterLeft = juce::jlimit(0.0f, 1.0f, outputMeterLeft);
+        outputMeterRight = juce::jlimit(0.0f, 1.0f, outputMeterRight);
+
         repaint();
     }
 
-    void handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& msg) override
+    void handleIncomingMidiMessage(juce::MidiInput* input, const juce::MidiMessage& msg) override
     {
         if (msg.isController() && setle::state::AppPreferences::get().getMidiLearnActive())
         {
             setle::state::AppPreferences::get().setMidiLearnCC(msg.getControllerNumber());
             setle::state::AppPreferences::get().setMidiLearnChannel(msg.getChannel());
             setle::state::AppPreferences::get().setMidiLearnActive(false);
+        }
+
+        if (input != nullptr)
+            midiActivitySeconds[input->getIdentifier()] = juce::Time::getMillisecondCounterHiRes() * 0.001;
+
+        if (msg.isNoteOn())
+        {
+            const float v = juce::jlimit(0.0f, 1.0f, msg.getFloatVelocity());
+            outputMeterLeft = juce::jmax(outputMeterLeft, v);
+            outputMeterRight = juce::jmax(outputMeterRight, v * 0.92f);
+        }
+        else if (msg.isController())
+        {
+            const float v = juce::jlimit(0.0f, 1.0f, static_cast<float>(msg.getControllerValue()) / 127.0f);
+            outputMeterLeft = juce::jmax(outputMeterLeft, v * 0.55f);
+            outputMeterRight = juce::jmax(outputMeterRight, v * 0.50f);
         }
 
         const juce::ScopedLock sl(logLock);
@@ -862,6 +928,9 @@ private:
     QueueActions queueActions;
     std::array<std::unique_ptr<GrabSlotCard>, 4> slotCards;
     std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
+    std::map<juce::String, double> midiActivitySeconds;
+    float outputMeterLeft { 0.0f };
+    float outputMeterRight { 0.0f };
     juce::CriticalSection logLock;
     juce::Array<juce::MidiMessage> midiLog;
 };
@@ -1236,6 +1305,13 @@ public:
             juce::String id;
             juce::String label;
             float widthFraction { 1.0f };
+            juce::String subtitle;
+            juce::String functionTag;
+            float confidence { -1.0f };
+            bool confidenceFromMidi { false };
+            juce::String timeSigLabel;
+            juce::Colour tint;
+            juce::Colour boundaryScoreColor;
         };
 
         using SelectionCallback = std::function<void(const juce::String&)>;
@@ -1261,33 +1337,181 @@ public:
             repaint();
         }
 
+        void setPlayheadFraction(double fraction)
+        {
+            playheadFraction = juce::jlimit(0.0, 1.0, fraction);
+            repaint();
+        }
+
+        void setBeatGrid(double total, double unit, double bar)
+        {
+            totalBeats = total;
+            beatUnit = unit;
+            beatsPerBar = bar;
+            repaint();
+        }
+
+        void setHistorySourceLabel(juce::String source)
+        {
+            historySourceLabel = std::move(source);
+            repaint();
+        }
+
         void paint(juce::Graphics& g) override
         {
+            const auto& theme = ThemeManager::get().theme();
+            auto bounds = getLocalBounds();
+
+            if (menuTarget == TheoryMenuTarget::historyBuffer)
+            {
+                g.fillAll(theme.surface1);
+
+                auto header = bounds.removeFromTop(24);
+                auto tab = header.removeFromLeft(44).reduced(2, 2);
+                g.setColour(theme.surface3);
+                g.fillRoundedRectangle(tab.toFloat(), 3.0f);
+                g.setColour(theme.inkLight);
+                g.setFont(juce::FontOptions(11.0f).withStyle("Bold"));
+                g.drawText("HIST", tab, juce::Justification::centred, false);
+
+                auto drawGrabButton = [&](juce::Rectangle<int> button, const juce::String& label)
+                {
+                    g.setColour(theme.surface3);
+                    g.fillRoundedRectangle(button.toFloat(), 3.0f);
+                    g.setColour(theme.surfaceEdge.withAlpha(0.8f));
+                    g.drawRoundedRectangle(button.toFloat(), 3.0f, 1.0f);
+                    g.setColour(theme.inkMid.withAlpha(0.92f));
+                    g.setFont(juce::FontOptions(10.0f));
+                    g.drawText(label, button, juce::Justification::centred, false);
+                };
+
+                auto buttons = header.removeFromLeft(130);
+                const auto b4 = buttons.removeFromLeft(40).reduced(2, 3);
+                const auto b8 = buttons.removeFromLeft(40).reduced(2, 3);
+                const auto b16 = buttons.removeFromLeft(50).reduced(2, 3);
+                const auto leftTriangle = juce::String::fromUTF8("\xE2\x97\x80");
+                drawGrabButton(b4, leftTriangle + "4");
+                drawGrabButton(b8, leftTriangle + "8");
+                drawGrabButton(b16, leftTriangle + "16");
+
+                g.setColour(theme.inkMuted.withAlpha(0.88f));
+                g.setFont(juce::FontOptions(10.5f));
+                g.drawText("Source: " + (historySourceLabel.isNotEmpty() ? historySourceLabel : "Off"),
+                           header.reduced(4, 2),
+                           juce::Justification::centredRight,
+                           true);
+
+                auto waveform = bounds.reduced(6, 4);
+                g.setColour(theme.surface0);
+                g.fillRoundedRectangle(waveform.toFloat(), 3.0f);
+                g.setColour(theme.surfaceEdge.withAlpha(0.6f));
+                g.drawRoundedRectangle(waveform.toFloat(), 3.0f, 1.0f);
+
+                const int midY = waveform.getCentreY();
+                g.setColour(theme.inkGhost.withAlpha(0.7f));
+                g.drawLine(static_cast<float>(waveform.getX()), static_cast<float>(midY),
+                           static_cast<float>(waveform.getRight()), static_cast<float>(midY), 1.2f);
+                return;
+            }
+
             if (blocks.empty())
             {
                 LabelPanel::paint(g);
                 return;
             }
 
-            const auto bounds = getLocalBounds();
-            g.fillAll(juce::Colour(0xff1b2535));
+            g.fillAll(theme.surface1);
+
+            if (totalBeats > 0.0 && beatUnit > 0.0)
+            {
+                for (double beat = 0.0; beat <= totalBeats + 0.0001; beat += beatUnit)
+                {
+                    const int x = bounds.getX() + static_cast<int>((beat / totalBeats) * bounds.getWidth());
+                    g.setColour(theme.surfaceEdge.withAlpha(0.20f));
+                    g.fillRect(x, bounds.getY(), 1, bounds.getHeight());
+                }
+            }
+
+            if (totalBeats > 0.0 && beatsPerBar > 0.0)
+            {
+                for (double beat = 0.0; beat <= totalBeats + 0.0001; beat += beatsPerBar)
+                {
+                    const int x = bounds.getX() + static_cast<int>((beat / totalBeats) * bounds.getWidth());
+                    g.setColour(theme.surfaceEdge.withAlpha(0.40f));
+                    g.fillRect(x, bounds.getY(), 1, bounds.getHeight());
+                }
+            }
 
             const float totalWidth = static_cast<float>(bounds.getWidth());
             const float h = static_cast<float>(bounds.getHeight());
+            const float playheadX = static_cast<float>(bounds.getX()) + static_cast<float>(playheadFraction) * totalWidth;
             float x = 0.0f;
 
             for (const auto& block : blocks)
             {
                 const float w = totalWidth * block.widthFraction;
-                const juce::Rectangle<float> blockRect(x + 1.0f, 2.0f, w - 2.0f, h - 4.0f);
+                const juce::Rectangle<float> blockRect(bounds.getX() + x + 1.0f, bounds.getY() + 2.0f, w - 2.0f, h - 4.0f);
                 const bool isSelected = (block.id == selectedId);
+                const bool isActive = playheadX >= blockRect.getX() && playheadX < blockRect.getRight();
 
-                g.setColour(isSelected ? juce::Colour(0xff4a7fa5) : juce::Colour(0xff2c3e50));
+                juce::Colour blockColor = theme.surface3;
+                if (!block.tint.isTransparent())
+                    blockColor = blockColor.interpolatedWith(block.tint, 0.55f);
+                if (isSelected)
+                    blockColor = blockColor.interpolatedWith(theme.zoneA, 0.42f);
+                if (isActive)
+                    blockColor = blockColor.brighter(0.22f);
+
+                g.setColour(blockColor);
                 g.fillRoundedRectangle(blockRect, 3.0f);
 
-                g.setColour(isSelected ? juce::Colours::white : juce::Colours::white.withAlpha(0.70f));
-                g.setFont(juce::FontOptions(12.0f));
-                g.drawText(block.label, blockRect.reduced(4.0f, 0.0f), juce::Justification::centredLeft, true);
+                g.setColour(isActive ? theme.accent : theme.surfaceEdge.withAlpha(0.8f));
+                g.drawRoundedRectangle(blockRect, 3.0f, isActive ? 2.0f : 1.0f);
+
+                auto textBounds = blockRect.toNearestInt().reduced(5, 3);
+                if (block.subtitle.isNotEmpty())
+                {
+                    g.setColour(theme.inkMuted.withAlpha(0.88f));
+                    g.setFont(juce::FontOptions(10.0f));
+                    g.drawText(block.subtitle, textBounds.removeFromTop(10), juce::Justification::centredLeft, true);
+                }
+
+                g.setColour(theme.inkLight.withAlpha(0.96f));
+                g.setFont(juce::FontOptions(12.0f).withStyle("Bold"));
+                g.drawText(block.label, textBounds, juce::Justification::centred, true);
+
+                if (block.functionTag.isNotEmpty())
+                {
+                    auto badge = blockRect.toNearestInt().removeFromBottom(14).removeFromLeft(34).translated(4, -2);
+                    g.setColour(theme.surface2.withAlpha(0.85f));
+                    g.fillRoundedRectangle(badge.toFloat(), 2.0f);
+                    g.setColour(theme.inkMid.withAlpha(0.95f));
+                    g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+                    g.drawText("[" + block.functionTag + "]", badge, juce::Justification::centred, false);
+                }
+
+                if (block.timeSigLabel.isNotEmpty())
+                {
+                    auto sigBounds = blockRect.toNearestInt().removeFromBottom(12).reduced(4, 0);
+                    g.setColour(theme.inkMuted.withAlpha(0.90f));
+                    g.setFont(juce::FontOptions(9.0f));
+                    g.drawText(block.timeSigLabel, sigBounds, juce::Justification::centredLeft, true);
+                }
+
+                if (block.confidenceFromMidi && block.confidence >= 0.0f)
+                {
+                    juce::Colour dot = block.confidence >= 0.9f ? theme.zoneC : theme.zoneD;
+                    auto dotRect = juce::Rectangle<float>(blockRect.getRight() - 7.0f, blockRect.getY() + 4.0f, 4.0f, 4.0f);
+                    g.setColour(dot.withAlpha(0.95f));
+                    g.fillEllipse(dotRect);
+                }
+
+                if (!block.boundaryScoreColor.isTransparent())
+                {
+                    auto edge = blockRect.toNearestInt().removeFromRight(3).reduced(0, 2);
+                    g.setColour(block.boundaryScoreColor);
+                    g.fillRect(edge);
+                }
 
                 x += w;
             }
@@ -1295,6 +1519,26 @@ public:
 
         void mouseUp(const juce::MouseEvent& event) override
         {
+            if (menuTarget == TheoryMenuTarget::historyBuffer && !event.mods.isRightButtonDown())
+            {
+                auto header = getLocalBounds().removeFromTop(24);
+                header.removeFromLeft(44);
+                auto buttons = header.removeFromLeft(130);
+                const auto b4 = buttons.removeFromLeft(40).reduced(2, 3);
+                const auto b8 = buttons.removeFromLeft(40).reduced(2, 3);
+                const auto b16 = buttons.removeFromLeft(50).reduced(2, 3);
+
+                int actionId = 0;
+                if (b4.contains(event.getPosition())) actionId = historyGrab4;
+                else if (b8.contains(event.getPosition())) actionId = historyGrab8;
+                else if (b16.contains(event.getPosition())) actionId = historyGrab16;
+
+                if (actionId > 0 && onAction != nullptr)
+                    onAction(menuTarget, actionId, actionNameFor(actionId));
+
+                return;
+            }
+
             if (!event.mods.isRightButtonDown())
             {
                 if (!blocks.empty() && onSelect != nullptr)
@@ -1529,6 +1773,11 @@ public:
         std::vector<BlockData> blocks;
         juce::String selectedId;
         SelectionCallback onSelect;
+        double playheadFraction { 0.0 };
+        double totalBeats { 0.0 };
+        double beatUnit { 1.0 };
+        double beatsPerBar { 4.0 };
+        juce::String historySourceLabel { "Off" };
     };
 
     void updateSections(const std::vector<model::Section>& sections,
@@ -1543,7 +1792,15 @@ public:
         }
 
         // Compute beat length per section (repeatCount × progression length)
-        struct SectionEntry { juce::String id; juce::String name; double beats; };
+        struct SectionEntry
+        {
+            juce::String id;
+            juce::String name;
+            double beats;
+            juce::String timeSig;
+            juce::Colour tint;
+            juce::Colour boundaryColor;
+        };
         std::vector<SectionEntry> entries;
         double totalBeats = 0.0;
 
@@ -1566,18 +1823,47 @@ public:
             if (sectionBeats <= 0.0) sectionBeats = 8.0;
             const double withRepeats = sectionBeats * juce::jmax(1, section.getRepeatCount());
             totalBeats += withRepeats;
-            entries.push_back({ section.getId(), section.getName(), withRepeats });
+
+            juce::Colour tint;
+            auto colorText = section.getColor().trim();
+            if (colorText.startsWith("#"))
+                colorText = colorText.substring(1);
+            if (colorText.length() == 6)
+                colorText = "ff" + colorText;
+            if (colorText.length() == 8)
+                tint = juce::Colour::fromString(colorText);
+
+            juce::Colour boundary = juce::Colour(0x00000000);
+            const int repeats = juce::jmax(1, section.getRepeatCount());
+            if (repeats <= 2) boundary = ThemeManager::get().theme().zoneC;
+            else if (repeats <= 4) boundary = ThemeManager::get().theme().zoneD;
+            else boundary = ThemeManager::get().theme().accentWarm;
+
+            const auto timeSig = juce::String(section.getTimeSigNumerator()) + "/" + juce::String(section.getTimeSigDenominator());
+            entries.push_back({ section.getId(), section.getName(), withRepeats, timeSig, tint, boundary });
         }
 
         std::vector<ContextLane::BlockData> blockData;
         for (const auto& e : entries)
-            blockData.push_back({ e.id, e.name, static_cast<float>(e.beats / totalBeats) });
+        {
+            ContextLane::BlockData block;
+            block.id = e.id;
+            block.label = e.name;
+            block.widthFraction = static_cast<float>(e.beats / totalBeats);
+            block.timeSigLabel = e.timeSig != "4/4" ? e.timeSig : juce::String();
+            block.tint = e.tint;
+            block.boundaryScoreColor = e.boundaryColor;
+            blockData.push_back(std::move(block));
+        }
 
         sectionLane.setBlocks(std::move(blockData), currentSectionId, std::move(cb));
+        sectionLane.setBeatGrid(totalBeats, 1.0, 4.0);
     }
 
     void updateChords(const std::vector<model::Chord>& chords,
                       const juce::String& currentChordId,
+                      double beatUnitValue,
+                      double beatsPerBarValue,
                       ContextLane::SelectionCallback cb)
     {
         if (chords.empty())
@@ -1598,13 +1884,20 @@ public:
         {
             double d = chord.getDurationBeats();
             if (d <= 0.0) d = 1.0;
-            juce::String label = chord.getSymbol();
-            if (chord.getFunction().isNotEmpty())
-                label += " [" + chord.getFunction() + "]";
-            blockData.push_back({ chord.getId(), label, static_cast<float>(d / totalDuration) });
+
+            ContextLane::BlockData block;
+            block.id = chord.getId();
+            block.label = chord.getSymbol();
+            block.subtitle = chord.getName();
+            block.functionTag = chord.getFunction();
+            block.widthFraction = static_cast<float>(d / totalDuration);
+            block.confidence = chord.getConfidence();
+            block.confidenceFromMidi = chord.getSource().equalsIgnoreCase("midi");
+            blockData.push_back(std::move(block));
         }
 
         theoryLane.setBlocks(std::move(blockData), currentChordId, std::move(cb));
+        theoryLane.setBeatGrid(totalDuration, beatUnitValue, beatsPerBarValue);
     }
 
     explicit TimelineShell(ActionCallback callback)
@@ -1635,7 +1928,15 @@ public:
     void setPlayheadFraction(double fraction)
     {
         playheadFraction = juce::jlimit(0.0, 1.0, fraction);
+        sectionLane.setPlayheadFraction(playheadFraction);
+        theoryLane.setPlayheadFraction(playheadFraction);
+        historyLane.setPlayheadFraction(playheadFraction);
         repaint();
+    }
+
+    void setHistorySourceLabel(const juce::String& sourceLabel)
+    {
+        historyLane.setHistorySourceLabel(sourceLabel);
     }
 
     juce::Rectangle<int> getTrackAreaBoundsInParent() const
@@ -1798,6 +2099,8 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     sessionKeySelector.addItem("Bb", 11);
     sessionKeySelector.addItem("B", 12);
     sessionKeySelector.setSelectedId(1, juce::dontSendNotification);
+    sessionKeySelector.setColour(juce::ComboBox::textColourId, juce::Colours::white.withAlpha(0.95f));
+    sessionKeySelector.setColour(juce::ComboBox::backgroundColourId, ThemeManager::get().theme().surface3.withAlpha(0.78f));
     sessionKeySelector.onChange = [this]()
     {
         auto items = juce::StringArray { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
@@ -1824,6 +2127,8 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     sessionModeSelector.addItem("aeolian", 6);
     sessionModeSelector.addItem("locrian", 7);
     sessionModeSelector.setSelectedId(1, juce::dontSendNotification);
+    sessionModeSelector.setColour(juce::ComboBox::textColourId, juce::Colours::white.withAlpha(0.95f));
+    sessionModeSelector.setColour(juce::ComboBox::backgroundColourId, ThemeManager::get().theme().surface3.withAlpha(0.78f));
     sessionModeSelector.onChange = [this]()
     {
         auto modes = juce::StringArray { "ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian" };
@@ -1930,6 +2235,9 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     focusInButton.onClick = [this] { applyFocusMode(FocusMode::inFocused); };
     focusBalancedButton.onClick = [this] { applyFocusMode(FocusMode::balanced); };
     focusOutButton.onClick = [this] { applyFocusMode(FocusMode::outFocused); };
+    focusInButton.setTooltip("Emphasize the IN panel (capture and queue)");
+    focusBalancedButton.setTooltip("Balanced layout across IN/WORK/OUT");
+    focusOutButton.setTooltip("Emphasize the OUT panel (instruments and mix)");
     undoTheoryButton.onClick = [this] { performUndo(); };
     redoTheoryButton.onClick = [this] { performRedo(); };
 
@@ -1963,6 +2271,8 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     captureSourceLabel.setText("Capture", juce::dontSendNotification);
     captureSourceLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.72f));
     captureSourceLabel.setFont(juce::FontOptions(13.0f));
+    captureSourceSelector.setColour(juce::ComboBox::textColourId, juce::Colours::white.withAlpha(0.95f));
+    captureSourceSelector.setColour(juce::ComboBox::backgroundColourId, ThemeManager::get().theme().surface3.withAlpha(0.78f));
 
     captureSourceSelector.onChange = [this]
     {
@@ -1971,6 +2281,9 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 
     bpmEditor.setInputRestrictions(6, "0123456789.");
     bpmEditor.setJustification(juce::Justification::centred);
+    bpmEditor.setColour(juce::TextEditor::backgroundColourId, ThemeManager::get().theme().surface3.withAlpha(0.75f));
+    bpmEditor.setColour(juce::TextEditor::outlineColourId, ThemeManager::get().theme().surfaceEdge.withAlpha(0.8f));
+    captureSourceSelector.setTooltip("Capture source (pulses when incoming MIDI is detected)");
     bpmEditor.onReturnKey = [this]
     {
         const double bpm = juce::jlimit(20.0, 300.0, bpmEditor.getText().getDoubleValue());
@@ -2164,7 +2477,42 @@ void WorkspaceShellComponent::mouseDown(const juce::MouseEvent& event)
 
 void WorkspaceShellComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(ThemeManager::get().theme().surface0);
+    const auto& theme = ThemeManager::get().theme();
+    g.fillAll(theme.surface0);
+
+    const auto topBounds = juce::Rectangle<int>(0, 0, getWidth(), topStripHeight);
+    g.setColour(theme.headerBg);
+    g.fillRect(topBounds);
+    g.setColour(theme.surfaceEdge.withAlpha(0.85f));
+    g.fillRect(0, topStripHeight - 1, getWidth(), 1);
+
+    auto toRoot = [this](const juce::Rectangle<int>& r)
+    {
+        return r.translated(topStrip.getX(), topStrip.getY());
+    };
+
+    g.setColour(theme.surface3.withAlpha(0.58f));
+    g.fillRoundedRectangle(toRoot(bpmEditor.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
+    g.fillRoundedRectangle(toRoot(sessionKeySelector.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
+    g.fillRoundedRectangle(toRoot(sessionModeSelector.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
+    g.fillRoundedRectangle(toRoot(captureSourceSelector.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
+
+    if (toolPalette != nullptr)
+    {
+        g.setColour(theme.surface2.withAlpha(0.70f));
+        g.fillRoundedRectangle(toRoot(toolPalette->getBounds()).toFloat().expanded(1.0f, 1.0f), 4.0f);
+    }
+
+    if (captureSourceActivity > 0.01f)
+    {
+        const auto cap = toRoot(captureSourceSelector.getBounds());
+        const float pulse = juce::jlimit(0.0f, 1.0f, captureSourceActivity);
+        const auto dot = juce::Rectangle<float>(static_cast<float>(cap.getRight() + 6),
+                                                static_cast<float>(cap.getCentreY() - 3),
+                                                6.0f, 6.0f);
+        g.setColour(theme.zoneC.withAlpha(0.45f + 0.50f * pulse));
+        g.fillEllipse(dot);
+    }
 }
 
 void WorkspaceShellComponent::themeChanged()
@@ -3101,9 +3449,22 @@ void WorkspaceShellComponent::refreshTimelineData()
         break;
     }
 
+    double selectedBeatUnit = 1.0;
+    double selectedBeatsPerBar = 4.0;
+    for (const auto& section : sections)
+    {
+        if (section.getId() != selectedSectionId)
+            continue;
+        selectedBeatUnit = 4.0 / juce::jmax(1, section.getTimeSigDenominator());
+        selectedBeatsPerBar = (section.getTimeSigNumerator() * 4.0) / juce::jmax(1, section.getTimeSigDenominator());
+        break;
+    }
+
     timelineShell->updateChords(
         visibleChords,
         selectedChordId,
+        selectedBeatUnit,
+        selectedBeatsPerBar,
         [this](const juce::String& chordId)
         {
             selectedChordId = chordId;
@@ -3112,6 +3473,13 @@ void WorkspaceShellComponent::refreshTimelineData()
             populateTheoryFieldsForCurrentSelection();
             interactionStatus.setText("Selected chord: " + chordId.substring(0, 8), juce::dontSendNotification);
         });
+
+    if (timelineShell != nullptr)
+    {
+        timelineShell->setHistorySourceLabel(captureSourceSelector.getText().isNotEmpty()
+                                                 ? captureSourceSelector.getText()
+                                                 : "Off");
+    }
 
     syncTimeSignaturesToEdit();
 }
@@ -5095,6 +5463,17 @@ void WorkspaceShellComponent::timerCallback()
     if (edit == nullptr)
         return;
 
+    captureSourceActivity *= 0.88f;
+    if (historyBuffer != nullptr)
+    {
+        const int eventCount = static_cast<int>(historyBuffer->getAll().size());
+        if (eventCount != lastHistoryEventCount)
+        {
+            lastHistoryEventCount = eventCount;
+            captureSourceActivity = 1.0f;
+        }
+    }
+
     const auto* tempo = edit->tempoSequence.getTempo(0);
     const auto bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
     const auto secPerBeat = 60.0 / juce::jmax(1.0, bpm);
@@ -5319,6 +5698,19 @@ void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progress
     if (clip == nullptr)
         return;
 
+    clip->state.setProperty("progressionId", progressionId, nullptr);
+    clip->state.setProperty("progressionName", progressionOpt->getName(), nullptr);
+    juce::String symbols;
+    for (int i = 0; i < static_cast<int>(chords.size()); ++i)
+    {
+        if (i > 0)
+            symbols << " ";
+        symbols << chords[static_cast<size_t>(i)].getSymbol();
+        if (symbols.length() > 48)
+            break;
+    }
+    clip->state.setProperty("progressionSymbols", symbols.trim(), nullptr);
+
     auto& seq = clip->getSequence();
     double beatPos = 0.0;
 
@@ -5373,6 +5765,12 @@ void WorkspaceShellComponent::resized()
     sessionModeSelector.setBounds(buttonArea.removeFromRight(90).reduced(4, 6));
     sessionKeyLabel.setBounds(buttonArea.removeFromRight(35).reduced(4, 6));
     sessionKeySelector.setBounds(buttonArea.removeFromRight(75).reduced(4, 6));
+
+    if (toolPalette != nullptr)
+    {
+        auto toolArea = buttonArea.removeFromRight(228).reduced(4, 6);
+        toolPalette->setBounds(toolArea);
+    }
 
     // Transport controls: BPM + Capture + Play/Stop/Rec
     recordButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));

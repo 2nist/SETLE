@@ -185,8 +185,11 @@ void TimelineTracksComponent::rebuildLanes()
 
         lane->onArmToggle = [this](te::Track& t)
         {
+            const bool armed = static_cast<bool>(t.state.getProperty("setleArmed", false));
+            t.state.setProperty("setleArmed", !armed, nullptr);
             if (onStatusMessage)
-                onStatusMessage("Arm toggle requested for " + t.getName() + " (record-arm hook pending)");
+                onStatusMessage((!armed ? "Armed: " : "Disarmed: ") + t.getName());
+            refreshTracks();
         };
 
         lane->onBounceToAudio = [this](te::Track& t)
