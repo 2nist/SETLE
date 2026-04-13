@@ -12,6 +12,7 @@
 #include <set>
 
 #include "../theme/ThemePresets.h"
+#include "../theme/ThemeStyleHelpers.h"
 #include "../theory/BachTheory.h"
 
 namespace te = tracktion::engine;
@@ -555,29 +556,33 @@ private:
         {
             auto bounds = getLocalBounds().reduced(2);
             const auto pulse = 0.5f + 0.5f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.01));
+            const auto& themeData = ThemeManager::get().theme();
 
             const auto* slot = getSlot();
             if (slot == nullptr || slot->state == capture::GrabSlot::State::Empty)
             {
-                g.setColour(juce::Colour(0xff1e2b24));
-                g.fillRoundedRectangle(bounds.toFloat(), 4.0f);
-                g.setColour(juce::Colours::white.withAlpha(0.35f));
-                g.drawRoundedRectangle(bounds.toFloat(), 4.0f, 1.0f);
+                const auto style = setle::theme::cardStyle(themeData, setle::theme::SurfaceState::muted);
+                g.setColour(style.fill);
+                g.fillRoundedRectangle(bounds.toFloat(), style.radius);
+                g.setColour(style.outline);
+                g.drawRoundedRectangle(bounds.toFloat(), style.radius, style.stroke);
                 // subtle dashed frame for empty slots
-                g.setColour(juce::Colours::white.withAlpha(0.18f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.36f));
                 for (int x = bounds.getX() + 6; x < bounds.getRight() - 6; x += 6)
                     g.fillRect(x, bounds.getY() + 5, 3, 1);
                 g.setFont(juce::FontOptions(12.0f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::muted));
                 g.drawText("[ Empty - drag or grab ]", bounds, juce::Justification::centred, true);
                 return;
             }
 
             const bool playing = slot->state == capture::GrabSlot::State::Playing;
-            g.setColour(playing ? juce::Colour(0xff224d2a) : juce::Colour(0xff1e2b24));
-            g.fillRoundedRectangle(bounds.toFloat(), 4.0f);
-            g.setColour(playing ? juce::Colour(0xff66d27a).withAlpha(0.6f + 0.4f * pulse)
-                                : juce::Colours::white.withAlpha(0.35f));
-            g.drawRoundedRectangle(bounds.toFloat(), 4.0f, playing ? 2.2f : 1.0f);
+            const auto state = playing ? setle::theme::SurfaceState::success : setle::theme::SurfaceState::normal;
+            auto style = setle::theme::cardStyle(themeData, state);
+            g.setColour(style.fill);
+            g.fillRoundedRectangle(bounds.toFloat(), style.radius);
+            g.setColour(playing ? style.outline.withAlpha(0.65f + 0.35f * pulse) : style.outline);
+            g.drawRoundedRectangle(bounds.toFloat(), style.radius, playing ? 2.2f : style.stroke);
 
             auto textArea = bounds.reduced(8, 4);
             auto row1 = textArea.removeFromTop(16);
@@ -585,7 +590,7 @@ private:
 
             const auto marker = playing ? juce::String("▶") : juce::String(" ");
             g.setFont(juce::FontOptions(12.5f));
-            g.setColour(juce::Colours::white.withAlpha(0.92f));
+            g.setColour(style.text);
 
             auto firstThree = juce::String();
             auto keyMode = juce::String();
@@ -618,7 +623,7 @@ private:
                        juce::Justification::centredLeft,
                        true);
 
-            g.setColour(juce::Colours::white.withAlpha(0.64f));
+            g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::muted).withAlpha(0.95f));
             g.setFont(juce::FontOptions(11.5f));
             const auto confidenceText = juce::String(juce::roundToInt(slot->confidence * 100.0f)) + "%";
             g.drawText("    " + keyMode + "  •  " + juce::String(chordCount) + " chords  •  "
@@ -679,15 +684,19 @@ public:
 
     void paint(juce::Graphics& g) override
     {
+        const auto& themeData = ThemeManager::get().theme();
         const auto bounds = getLocalBounds();
-        g.setColour(juce::Colour(0xff22352a));
-        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 5.0f);
+        const auto panelStyle = setle::theme::cardStyle(themeData, setle::theme::SurfaceState::normal);
+        g.setColour(setle::theme::panelBackground(themeData, setle::theme::ZoneRole::inPanel));
+        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), panelStyle.radius);
+        g.setColour(panelStyle.outline);
+        g.drawRoundedRectangle(bounds.toFloat().reduced(1.0f), panelStyle.radius, panelStyle.stroke);
 
         auto area = bounds.reduced(10, 8);
 
         // Title
         g.setFont(juce::FontOptions(16.0f));
-        g.setColour(juce::Colours::white.withAlpha(0.88f));
+        g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(0.92f));
         g.drawText("IN", area.removeFromTop(22), juce::Justification::centredLeft, false);
 
         area.removeFromTop(4);
@@ -853,7 +862,8 @@ public:
 private:
     static void drawSectionLabel(juce::Graphics& g, juce::Rectangle<int>& area, const juce::String& label)
     {
-        g.setColour(juce::Colour(0xff4a8a60).withAlpha(0.85f));
+        const auto& themeData = ThemeManager::get().theme();
+        g.setColour(setle::theme::panelHeaderBackground(themeData, setle::theme::ZoneRole::inPanel).brighter(0.22f));
         g.setFont(juce::FontOptions(10.5f));
         g.drawText(label.toUpperCase(), area.removeFromTop(14), juce::Justification::centredLeft, false);
     }
@@ -1421,14 +1431,14 @@ public:
                 return;
             }
 
-            g.fillAll(theme.surface1);
+            g.fillAll(setle::theme::panelBackground(theme, setle::theme::ZoneRole::timeline));
 
             if (totalBeats > 0.0 && beatUnit > 0.0)
             {
                 for (double beat = 0.0; beat <= totalBeats + 0.0001; beat += beatUnit)
                 {
                     const int x = bounds.getX() + static_cast<int>((beat / totalBeats) * bounds.getWidth());
-                    g.setColour(theme.surfaceEdge.withAlpha(0.20f));
+                    g.setColour(setle::theme::timelineGridLine(theme, false));
                     g.fillRect(x, bounds.getY(), 1, bounds.getHeight());
                 }
             }
@@ -1438,7 +1448,7 @@ public:
                 for (double beat = 0.0; beat <= totalBeats + 0.0001; beat += beatsPerBar)
                 {
                     const int x = bounds.getX() + static_cast<int>((beat / totalBeats) * bounds.getWidth());
-                    g.setColour(theme.surfaceEdge.withAlpha(0.40f));
+                    g.setColour(setle::theme::timelineGridLine(theme, true));
                     g.fillRect(x, bounds.getY(), 1, bounds.getHeight());
                 }
             }
@@ -1455,38 +1465,34 @@ public:
                 const bool isSelected = (block.id == selectedId);
                 const bool isActive = playheadX >= blockRect.getX() && playheadX < blockRect.getRight();
 
-                juce::Colour blockColor = theme.surface3;
-                if (!block.tint.isTransparent())
-                    blockColor = blockColor.interpolatedWith(block.tint, 0.55f);
-                if (isSelected)
-                    blockColor = blockColor.interpolatedWith(theme.zoneA, 0.42f);
-                if (isActive)
-                    blockColor = blockColor.brighter(0.22f);
-
-                g.setColour(blockColor);
+                const auto blockStyle = setle::theme::progressionBlockStyle(theme, isSelected, isActive, block.tint);
+                g.setColour(blockStyle.fill);
                 g.fillRoundedRectangle(blockRect, 3.0f);
 
-                g.setColour(isActive ? theme.accent : theme.surfaceEdge.withAlpha(0.8f));
+                g.setColour(blockStyle.outline);
                 g.drawRoundedRectangle(blockRect, 3.0f, isActive ? 2.0f : 1.0f);
 
                 auto textBounds = blockRect.toNearestInt().reduced(5, 3);
                 if (block.subtitle.isNotEmpty())
                 {
-                    g.setColour(theme.inkMuted.withAlpha(0.88f));
+                    g.setColour(blockStyle.subtitle);
                     g.setFont(juce::FontOptions(10.0f));
                     g.drawText(block.subtitle, textBounds.removeFromTop(10), juce::Justification::centredLeft, true);
                 }
 
-                g.setColour(theme.inkLight.withAlpha(0.96f));
+                g.setColour(blockStyle.label);
                 g.setFont(juce::FontOptions(12.0f).withStyle("Bold"));
                 g.drawText(block.label, textBounds, juce::Justification::centred, true);
 
                 if (block.functionTag.isNotEmpty())
                 {
                     auto badge = blockRect.toNearestInt().removeFromBottom(14).removeFromLeft(34).translated(4, -2);
-                    g.setColour(theme.surface2.withAlpha(0.85f));
+                    const auto chip = setle::theme::chipStyle(theme,
+                                                              isSelected ? setle::theme::SurfaceState::selected : setle::theme::SurfaceState::normal,
+                                                              block.tint);
+                    g.setColour(chip.fill);
                     g.fillRoundedRectangle(badge.toFloat(), 2.0f);
-                    g.setColour(theme.inkMid.withAlpha(0.95f));
+                    g.setColour(chip.text);
                     g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
                     g.drawText("[" + block.functionTag + "]", badge, juce::Justification::centred, false);
                 }
@@ -2480,12 +2486,12 @@ void WorkspaceShellComponent::mouseDown(const juce::MouseEvent& event)
 void WorkspaceShellComponent::paint(juce::Graphics& g)
 {
     const auto& theme = ThemeManager::get().theme();
-    g.fillAll(theme.surface0);
+    g.fillAll(setle::theme::panelBackground(theme, setle::theme::ZoneRole::neutral));
 
     const auto topBounds = juce::Rectangle<int>(0, 0, getWidth(), topStripHeight);
-    g.setColour(theme.headerBg);
+    g.setColour(setle::theme::panelHeaderBackground(theme, setle::theme::ZoneRole::workPanel));
     g.fillRect(topBounds);
-    g.setColour(theme.surfaceEdge.withAlpha(0.85f));
+    g.setColour(setle::theme::timelineGridLine(theme, true, true));
     g.fillRect(0, topStripHeight - 1, getWidth(), 1);
 
     auto toRoot = [this](const juce::Rectangle<int>& r)
@@ -2493,7 +2499,8 @@ void WorkspaceShellComponent::paint(juce::Graphics& g)
         return r.translated(topStrip.getX(), topStrip.getY());
     };
 
-    g.setColour(theme.surface3.withAlpha(0.58f));
+    const auto fieldStyle = setle::theme::rowStyle(theme, setle::theme::SurfaceState::hovered);
+    g.setColour(fieldStyle.fill.withAlpha(0.92f));
     g.fillRoundedRectangle(toRoot(bpmEditor.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
     g.fillRoundedRectangle(toRoot(sessionKeySelector.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
     g.fillRoundedRectangle(toRoot(sessionModeSelector.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
@@ -2501,7 +2508,7 @@ void WorkspaceShellComponent::paint(juce::Graphics& g)
 
     if (toolPalette != nullptr)
     {
-        g.setColour(theme.surface2.withAlpha(0.70f));
+        g.setColour(fieldStyle.fill.withAlpha(0.72f));
         g.fillRoundedRectangle(toRoot(toolPalette->getBounds()).toFloat().expanded(1.0f, 1.0f), 4.0f);
     }
 
@@ -5897,7 +5904,7 @@ void WorkspaceShellComponent::resized()
     if (themeEditorPanel != nullptr)
     {
         themeDismissOverlay.setBounds(getLocalBounds());
-        themeEditorPanel->setBounds(getWidth() - 320, topStripHeight, 320, getHeight() - topStripHeight);
+        themeEditorPanel->setBounds(getWidth() - 440, topStripHeight, 440, getHeight() - topStripHeight);
     }
 }
 

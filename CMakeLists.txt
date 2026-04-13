@@ -209,6 +209,8 @@ target_sources(SETLE PRIVATE
     source/theme/ThemePresets.cpp
     source/theme/ThemePresets.h
     source/theme/SetleLookAndFeel.h
+    source/theme/ThemeStyleHelpers.cpp
+    source/theme/ThemeStyleHelpers.h
     source/theme/ThemeEditorPanel.cpp
     source/theme/ThemeEditorPanel.h
     source/model/SetleSongModel.cpp

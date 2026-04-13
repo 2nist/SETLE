@@ -1,5 +1,6 @@
 #include "TrackLane.h"
 #include "../theme/ThemeManager.h"
+#include "../theme/ThemeStyleHelpers.h"
 
 #include <cmath>
 
@@ -29,9 +30,11 @@ juce::Colour colourFromTrackState(const te::Track& track, const ThemeData& theme
 TrackLane::TrackLane(te::Track& track)
     : trackRef(track)
 {
+    const auto& themeData = ThemeManager::get().theme();
     nameLabel.setText(trackRef.getName(), juce::dontSendNotification);
     nameLabel.setJustificationType(juce::Justification::centredLeft);
-    nameLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.9f));
+    nameLabel.setColour(juce::Label::textColourId,
+                        setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(0.9f));
 
     muteButton.onClick = [this]
     {
@@ -81,9 +84,11 @@ void TrackLane::paint(juce::Graphics& g)
     const auto& theme = ThemeManager::get().theme();
     const auto trackColour = colourFromTrackState(trackRef, theme, isMidi).withMultipliedSaturation(0.7f);
 
-    g.setColour(isArmed ? theme.accentWarm.withAlpha(0.32f) : theme.surface2);
+    g.setColour(isArmed
+                    ? setle::theme::stateOverlay(theme, setle::theme::SurfaceState::warning).interpolatedWith(theme.surface2, 0.55f)
+                    : setle::theme::panelBackground(theme, setle::theme::ZoneRole::neutral));
     g.fillRect(headerArea);
-    g.setColour(theme.surfaceEdge.withAlpha(0.35f));
+    g.setColour(setle::theme::timelineGridLine(theme, true));
     g.drawRect(headerArea);
     if (isArmed)
     {
@@ -107,8 +112,7 @@ void TrackLane::paint(juce::Graphics& g)
         const auto x = clipArea.getX() + static_cast<int>(std::round(frac * clipArea.getWidth()));
         const bool barLine = (beat % 4) == 0;
         const bool fourBars = (beat % 16) == 0;
-        const float alpha = fourBars ? 0.45f : (barLine ? 0.30f : 0.15f);
-        g.setColour(theme.surfaceEdge.withAlpha(alpha));
+        g.setColour(setle::theme::timelineGridLine(theme, barLine, fourBars));
         g.drawVerticalLine(x, static_cast<float>(clipArea.getY()), static_cast<float>(clipArea.getBottom()));
     }
 
@@ -199,7 +203,7 @@ void TrackLane::paint(juce::Graphics& g)
     }
 
     const auto playheadX = clipArea.getX() + static_cast<int>(std::round(playheadFraction * clipArea.getWidth()));
-    g.setColour(juce::Colours::white.withAlpha(0.95f));
+    g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::primary).withAlpha(0.95f));
     g.drawVerticalLine(playheadX, static_cast<float>(clipArea.getY()), static_cast<float>(clipArea.getBottom()));
 }
 
