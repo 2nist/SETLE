@@ -1,5 +1,6 @@
 #pragma once
 
+#include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
 
@@ -9,6 +10,7 @@
 
 #include "../capture/GrabSamplerQueue.h"
 #include "../capture/HistoryBuffer.h"
+#include "../capture/CircularAudioBuffer.h"
 #include "../instruments/InstrumentSlot.h"
 #include "../model/SetleSongModel.h"
 #include "../timeline/TimelineTracksComponent.h"
@@ -23,6 +25,11 @@
 #include "ProgressionLibraryBrowser.h"
 #include "ProgressionChordPalette.h"
 #include "ToolPaletteComponent.h"
+#include "AppCommands.h"
+#include "AppMenuBarModel.h"
+#include "LeftNavComponent.h"
+#include "NavSection.h"
+#include "ZoneHeaderComponent.h"
 
 namespace te = tracktion::engine;
 
@@ -31,6 +38,7 @@ namespace setle::ui
 
 class WorkspaceShellComponent final : public juce::Component,
                                       public juce::DragAndDropContainer,
+                                      public juce::ApplicationCommandTarget,
                                       private juce::Timer,
                                       public ThemeManager::Listener
 {
@@ -42,6 +50,7 @@ public:
     void mouseDown(const juce::MouseEvent& event) override;
     void resized() override;
     void themeChanged() override;
+    void themePreviewTargetChanged(const juce::String& token) override;
 
 private:
     class LabelPanel;
@@ -65,6 +74,13 @@ private:
         inFocused = 1,
         outFocused = 2
     };
+
+    // juce::ApplicationCommandTarget overrides
+    juce::ApplicationCommandTarget* getNextCommandTarget() override;
+    void getAllCommands(juce::Array<juce::CommandID>& commands) override;
+    void getCommandInfo(juce::CommandID commandID,
+                        juce::ApplicationCommandInfo& result) override;
+    bool perform(const juce::ApplicationCommandTarget::InvocationInfo& info) override;
 
     void paint(juce::Graphics& g) override;
     void applyFocusMode(FocusMode mode);
@@ -97,6 +113,7 @@ private:
                                double startTimeSeconds,
                                bool preferNonSystemTrack,
                                te::Track* preferredTrack = nullptr);
+    void ensureProgressionLoadedForNoteMode(const juce::String& progressionId);
     juce::File getSongStateFile() const;
     void loadSongState();
     void seedSongStateIfNeeded();
@@ -111,6 +128,7 @@ private:
     void openTheoryEditor(TheoryMenuTarget target, int actionId, const juce::String& actionName);
     void switchWorkTab(int tabIndex); // 0=Theory, 1=GridRoll, 2=FX
     void switchWorkTab(bool showGridRoll) { switchWorkTab(showGridRoll ? 1 : 0); }
+    void switchNavSection(NavSection section);
     void populateTheoryObjectSelector();
     void populateTheoryFieldsForCurrentSelection();
     void commitTheoryEditorAction();
@@ -144,6 +162,8 @@ private:
     void timerCallback() override;
     void repaintEntireTree();
     void showThemeEditor(bool shouldShow);
+    juce::Rectangle<int> highlightBoundsForThemeToken(const juce::String& token) const;
+    void drawThemePreviewHighlight(juce::Graphics& g) const;
 
     // FX chain persistence
     juce::File getEffectsFolder() const;
@@ -153,6 +173,14 @@ private:
 
     te::Engine& engineRef;
     std::unique_ptr<te::Edit> edit;
+
+    // ---- Nav / menu layer ----
+    juce::ApplicationCommandManager commandManager;
+    std::unique_ptr<AppMenuBarModel>     appMenuBarModel;
+    std::unique_ptr<juce::MenuBarComponent> menuBarComponent;
+    std::unique_ptr<LeftNavComponent>    leftNavComponent;
+
+    NavSection activeNavSection { NavSection::edit };
 
     juce::Component topStrip;
     juce::Component* inPanel;
@@ -199,6 +227,8 @@ private:
     juce::Component themeDismissOverlay;
     std::unique_ptr<setle::capture::GrabSamplerQueue> grabSamplerQueue;
     std::unique_ptr<setle::capture::HistoryBuffer> historyBuffer;
+    std::unique_ptr<setle::capture::CircularAudioBuffer> circularAudioBuffer;
+    std::unique_ptr<juce::AudioIODeviceCallback> outputCaptureTap;
     std::unique_ptr<setle::timeline::TrackManager> trackManager;
     std::map<juce::String, std::unique_ptr<setle::instruments::InstrumentSlot>> instrumentSlots;
     model::Song songState;
@@ -209,6 +239,8 @@ private:
     juce::String selectedProgressionId;
     juce::String selectedChordId;
     juce::String selectedNoteId;
+    std::shared_ptr<juce::AudioBuffer<float>> pendingGrabCoupledAudio;
+    double pendingGrabCoupledSampleRate { 0.0 };
 
     // TRANSIENT UI STATE — never persist these to SetleSongModel.
     // They reset on app launch. Keep them on the component, not the model.
@@ -247,13 +279,18 @@ private:
     TheoryMenuTarget activeEditorTarget { TheoryMenuTarget::section };
     int activeEditorActionId = 0;
 
+    // ---- Zone header (inside WORK panel) ----
+    std::unique_ptr<ZoneHeaderComponent> zoneHeader;
+
     FocusMode focusMode { FocusMode::balanced };
 
     int leftPanelWidth { 280 };
     int rightPanelWidth { 300 };
     int timelineHeight { 280 };
 
-    static constexpr int topStripHeight = 44;
+    static constexpr int menuBarHeight    = 22;
+    static constexpr int navBarHeight     = 30;
+    static constexpr int topStripHeight   = 44;
     static constexpr int splitterThickness = 6;
     static constexpr int minSideWidth = 72;
     static constexpr int maxSideWidth = 700;

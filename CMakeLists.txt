@@ -126,6 +126,8 @@ juce_add_gui_app(SETLE
 # Sources — just Main.cpp to start
 target_sources(SETLE PRIVATE
     source/Main.cpp
+    source/capture/CircularAudioBuffer.cpp
+    source/capture/CircularAudioBuffer.h
     source/capture/GrabSamplerQueue.cpp
     source/capture/GrabSamplerQueue.h
     source/capture/GrabSlot.h
@@ -209,6 +211,8 @@ target_sources(SETLE PRIVATE
     source/theme/ThemePresets.cpp
     source/theme/ThemePresets.h
     source/theme/SetleLookAndFeel.h
+    source/theme/ThemeStyleHelpers.cpp
+    source/theme/ThemeStyleHelpers.h
     source/theme/ThemeEditorPanel.cpp
     source/theme/ThemeEditorPanel.h
     source/model/SetleSongModel.cpp
@@ -237,6 +241,14 @@ target_sources(SETLE PRIVATE
     source/ui/ProgressionLibraryBrowser.h
     source/ui/ProgressionChordPalette.cpp
     source/ui/ProgressionChordPalette.h
+    source/ui/AppCommands.h
+    source/ui/NavSection.h
+    source/ui/AppMenuBarModel.h
+    source/ui/AppMenuBarModel.cpp
+    source/ui/LeftNavComponent.h
+    source/ui/LeftNavComponent.cpp
+    source/ui/ZoneHeaderComponent.h
+    source/ui/ZoneHeaderComponent.cpp
     source/eff/EffModel.h
     source/eff/EffSerializer.h
     source/eff/EffSerializer.cpp
@@ -306,6 +318,10 @@ if(SETLE_BUILD_TESTS)
         source/tests/SetleSongModelTests.cpp
         source/model/SetleSongModel.cpp
         source/model/SetleSongModel.h
+        source/theory/BachTheory.cpp
+        source/theory/BachTheory.h
+        source/theory/DiatonicHarmony.cpp
+        source/theory/DiatonicHarmony.h
     )
 
     target_link_libraries(setle_model_tests PRIVATE

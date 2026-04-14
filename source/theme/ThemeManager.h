@@ -24,6 +24,7 @@ public:
     public:
         virtual ~Listener() = default;
         virtual void themeChanged() = 0;
+        virtual void themePreviewTargetChanged(const juce::String&) {}
     };
 
     void addListener(Listener* listener);
@@ -38,11 +39,15 @@ public:
     juce::File getUserThemeDir() const;
     juce::File getCurrentThemeFile() const;
 
+    void setPreviewHighlightToken(const juce::String& token);
+    const juce::String& getPreviewHighlightToken() const noexcept { return previewHighlightToken; }
+
 private:
     ThemeManager() = default;
     void timerCallback() override;
     void broadcast();
 
     ThemeData currentTheme;
+    juce::String previewHighlightToken;
     juce::ListenerList<Listener> listeners;
 };

@@ -51,6 +51,10 @@ public:
     bool getAutoGrabEnabled() const;
     void setAutoGrabEnabled(bool enabled);
 
+    // Active nav section
+    juce::String getActiveNavSection(const juce::String& fallback = "edit") const;
+    void setActiveNavSection(const juce::String& sectionId);
+
 private:
     AppPreferences();
 

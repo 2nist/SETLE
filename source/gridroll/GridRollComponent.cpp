@@ -3,6 +3,8 @@
 #include <cmath>
 #include <map>
 
+#include "../theme/ThemeStyleHelpers.h"
+
 namespace setle::gridroll
 {
 
@@ -99,21 +101,33 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
         addAndMakeVisible(*btn);
     }
 
-    progressionName.setColour(juce::Label::textColourId, ThemeManager::get().theme().inkLight.withAlpha(0.9f));
+    progressionName.setColour(juce::Label::textColourId,
+                              setle::theme::textForRole(ThemeManager::get().theme(),
+                                                         setle::theme::TextRole::primary)
+                                  .withAlpha(0.96f));
     progressionName.setFont(juce::FontOptions(13.0f).withStyle("Bold"));
     progressionName.setEditable(false);
     progressionName.setText("—", juce::dontSendNotification);
     addAndMakeVisible(progressionName);
 
-    sessionKeyDisplay.setColour(juce::Label::textColourId, ThemeManager::get().theme().inkMuted.withAlpha(0.7f));
+    sessionKeyDisplay.setColour(juce::Label::textColourId,
+                                setle::theme::textForRole(ThemeManager::get().theme(),
+                                                           setle::theme::TextRole::muted)
+                                    .withAlpha(0.90f));
     sessionKeyDisplay.setFont(juce::FontOptions(11.0f));
     addAndMakeVisible(sessionKeyDisplay);
 
-    zoomLabel.setColour(juce::Label::textColourId, ThemeManager::get().theme().inkMuted.withAlpha(0.85f));
+    zoomLabel.setColour(juce::Label::textColourId,
+                        setle::theme::textForRole(ThemeManager::get().theme(),
+                                                   setle::theme::TextRole::muted)
+                            .withAlpha(0.96f));
     zoomLabel.setFont(juce::FontOptions(11.0f));
     addAndMakeVisible(zoomLabel);
 
-    pitchLabel.setColour(juce::Label::textColourId, ThemeManager::get().theme().inkMuted.withAlpha(0.85f));
+    pitchLabel.setColour(juce::Label::textColourId,
+                         setle::theme::textForRole(ThemeManager::get().theme(),
+                                                    setle::theme::TextRole::muted)
+                             .withAlpha(0.96f));
     pitchLabel.setFont(juce::FontOptions(11.0f));
     addAndMakeVisible(pitchLabel);
 
@@ -130,6 +144,9 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
 void GridRollComponent::setTargetProgression(const juce::String& id)
 {
     progressionId = id;
+
+    if (onPrepareProgressionForNoteMode != nullptr && id.isNotEmpty())
+        onPrepareProgressionForNoteMode(id);
 
     auto progOpt = song.findProgressionById(id);
     if (progOpt.has_value())
@@ -222,10 +239,13 @@ void GridRollComponent::applyMode()
 void GridRollComponent::paint(juce::Graphics& g)
 {
     const auto& theme = ThemeManager::get().theme();
-    g.fillAll(theme.surface1);
+    g.fillAll(setle::theme::panelBackground(theme, setle::theme::ZoneRole::timeline));
 
-    g.setColour(theme.headerBg);
+    g.setColour(setle::theme::panelHeaderBackground(theme, setle::theme::ZoneRole::timeline));
     g.fillRect(0, 0, getWidth(), kHeaderHeight);
+    g.setColour(setle::theme::timelineGridLine(theme, true).withAlpha(0.85f));
+    g.drawLine(0.0f, static_cast<float>(kHeaderHeight), static_cast<float>(getWidth()), static_cast<float>(kHeaderHeight),
+               setle::theme::stroke(theme, setle::theme::StrokeRole::normal));
 }
 
 void GridRollComponent::resized()

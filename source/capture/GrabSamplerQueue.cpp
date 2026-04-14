@@ -61,6 +61,10 @@ bool GrabSamplerQueue::loadProgression(int slotIndex,
     slot.state = GrabSlot::State::Ready;
     slot.looping = false;
     slot.repeatCount = 1;
+    // Loading a new progression into a reused slot should not retain stale
+    // coupled audio from the previous assignment.
+    slot.coupledAudio.reset();
+    slot.coupledSampleRate = 0.0;
     notifyQueueChanged();
     return true;
 }
@@ -112,7 +116,10 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
         return;
 
     auto& slot = slots[static_cast<size_t>(slotIndex)];
-    if (slot.state == GrabSlot::State::Empty || slot.progressionId.isEmpty() || songRef == nullptr)
+    if (slot.state == GrabSlot::State::Empty || slot.progressionId.isEmpty())
+        return;
+
+    if (!slot.hasCoupledAudio() && songRef == nullptr)
         return;
 
     if (activeSlot >= 0 && activeSlot != slotIndex)
@@ -154,7 +161,18 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
         }
 
         if (reel != nullptr && slot.coupledAudio != nullptr)
+        {
+            reel->setEnabled(true);
+            reel->getProcessor().setMode(ReelMode::sample);
+            reel->getProcessor().setParam("sample.oneshot", 1.0f);
             reel->getProcessor().loadFromBuffer(*slot.coupledAudio, slot.coupledSampleRate);
+        }
+
+        // Explicitly disable polysynth on coupled-audio playback so the queue
+        // routes through Reel only.
+        for (auto* p : track->pluginList.getPlugins())
+            if (auto* poly = dynamic_cast<setle::instruments::polysynth::TracktionPolySynthPlugin*>(p))
+                poly->setEnabled(false);
 
         const auto durationSeconds = static_cast<double>(slot.coupledAudio->getNumSamples()) / slot.coupledSampleRate;
         rebuildSamplerClipForAudioSlot(*track, juce::jmax(0.2, durationSeconds));
@@ -178,7 +196,10 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
             }
 
             if (auto* reel = dynamic_cast<setle::instruments::reel::TracktionReelPlugin*>(p))
+            {
+                reel->setEnabled(false);
                 reel->getProcessor().clearBuffer();
+            }
         }
 
         if (poly == nullptr)
@@ -191,13 +212,14 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
             }
         }
 
-        (void) poly;
+        if (poly != nullptr)
+            poly->setEnabled(true);
         rebuildSamplerClipForSlot(edit, slotIndex, *track);
     }
 
-    auto progressionOpt = songRef->findProgressionById(slot.progressionId);
-    if (!progressionOpt.has_value())
-        return;
+    std::optional<model::Progression> progressionOpt;
+    if (songRef != nullptr)
+        progressionOpt = songRef->findProgressionById(slot.progressionId);
 
     double totalSeconds = 0.0;
     if (slot.hasCoupledAudio())
@@ -206,6 +228,9 @@ void GrabSamplerQueue::playSlot(int slotIndex, te::Edit& edit)
     }
     else
     {
+        if (!progressionOpt.has_value())
+            return;
+
         double totalBeats = 0.0;
         for (const auto& chord : progressionOpt->getChords())
         {

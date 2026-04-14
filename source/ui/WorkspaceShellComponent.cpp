@@ -2,6 +2,10 @@
 
 #include "ToolPaletteComponent.h"
 #include "EditToolManager.h"
+#include "AppCommands.h"
+#include "AppMenuBarModel.h"
+#include "LeftNavComponent.h"
+#include "ZoneHeaderComponent.h"
 
 #include <algorithm>
 #include <array>
@@ -12,6 +16,7 @@
 #include <set>
 
 #include "../theme/ThemePresets.h"
+#include "../theme/ThemeStyleHelpers.h"
 #include "../theory/BachTheory.h"
 
 namespace te = tracktion::engine;
@@ -101,6 +106,37 @@ static const juce::Identifier kSlotTrackIdProp { "trackId" };
 static const juce::Identifier kSlotTypeProp { "slotType" };
 static const juce::Identifier kSlotPersistentIdProp { "persistentId" };
 static const juce::Identifier kSlotPersistentNameProp { "persistentName" };
+
+class OutputCaptureTap final : public juce::AudioIODeviceCallback
+{
+public:
+    explicit OutputCaptureTap(setle::capture::CircularAudioBuffer& bufferToWrite)
+        : buffer(bufferToWrite)
+    {
+    }
+
+    void audioDeviceIOCallbackWithContext(const float* const*,
+                                          int,
+                                          float* const* outputChannelData,
+                                          int numOutputChannels,
+                                          int numSamples,
+                                          const juce::AudioIODeviceCallbackContext&) override
+    {
+        buffer.pushAudioBlock(outputChannelData, numOutputChannels, numSamples);
+    }
+
+    void audioDeviceAboutToStart(juce::AudioIODevice* device) override
+    {
+        if (device != nullptr)
+            buffer.prepare(device->getCurrentSampleRate(),
+                           juce::jmax(1, device->getActiveOutputChannels().countNumberOfSetBits()));
+    }
+
+    void audioDeviceStopped() override {}
+
+private:
+    setle::capture::CircularAudioBuffer& buffer;
+};
 
 juce::String slotTypeToString(setle::instruments::InstrumentSlot::SlotType type)
 {
@@ -450,8 +486,10 @@ private:
 
             if (slot != nullptr && slot->state == capture::GrabSlot::State::Playing)
                 playButton.setButtonText("Stop");
+            else if (slot != nullptr && slot->hasCoupledAudio())
+                playButton.setButtonText("Play Reel");
             else
-                playButton.setButtonText("Play");
+                playButton.setButtonText("Play MIDI");
 
             repaint();
         }
@@ -460,11 +498,12 @@ private:
         {
             auto area = getLocalBounds().reduced(8, 6);
             auto buttonRow = area.removeFromBottom(24);
-            playButton.setBounds(buttonRow.removeFromLeft(56));
+            const int buttonWidth = juce::jmax(54, (buttonRow.getWidth() - 12) / 3);
+            playButton.setBounds(buttonRow.removeFromLeft(buttonWidth));
             buttonRow.removeFromLeft(6);
-            editButton.setBounds(buttonRow.removeFromLeft(56));
+            editButton.setBounds(buttonRow.removeFromLeft(buttonWidth));
             buttonRow.removeFromLeft(6);
-            promoteButton.setBounds(buttonRow.removeFromLeft(90));
+            promoteButton.setBounds(buttonRow.removeFromLeft(buttonWidth));
         }
 
         void mouseUp(const juce::MouseEvent& event) override
@@ -555,37 +594,44 @@ private:
         {
             auto bounds = getLocalBounds().reduced(2);
             const auto pulse = 0.5f + 0.5f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.01));
+            const auto& themeData = ThemeManager::get().theme();
 
             const auto* slot = getSlot();
             if (slot == nullptr || slot->state == capture::GrabSlot::State::Empty)
             {
-                g.setColour(juce::Colour(0xff1e2b24));
-                g.fillRoundedRectangle(bounds.toFloat(), 4.0f);
-                g.setColour(juce::Colours::white.withAlpha(0.35f));
-                g.drawRoundedRectangle(bounds.toFloat(), 4.0f, 1.0f);
+                const auto style = setle::theme::cardStyle(themeData, setle::theme::SurfaceState::muted);
+                g.setColour(style.fill);
+                g.fillRoundedRectangle(bounds.toFloat(), style.radius);
+                g.setColour(style.outline);
+                g.drawRoundedRectangle(bounds.toFloat(), style.radius, style.stroke);
                 // subtle dashed frame for empty slots
-                g.setColour(juce::Colours::white.withAlpha(0.18f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.36f));
                 for (int x = bounds.getX() + 6; x < bounds.getRight() - 6; x += 6)
                     g.fillRect(x, bounds.getY() + 5, 3, 1);
                 g.setFont(juce::FontOptions(12.0f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::muted));
                 g.drawText("[ Empty - drag or grab ]", bounds, juce::Justification::centred, true);
                 return;
             }
 
             const bool playing = slot->state == capture::GrabSlot::State::Playing;
-            g.setColour(playing ? juce::Colour(0xff224d2a) : juce::Colour(0xff1e2b24));
-            g.fillRoundedRectangle(bounds.toFloat(), 4.0f);
-            g.setColour(playing ? juce::Colour(0xff66d27a).withAlpha(0.6f + 0.4f * pulse)
-                                : juce::Colours::white.withAlpha(0.35f));
-            g.drawRoundedRectangle(bounds.toFloat(), 4.0f, playing ? 2.2f : 1.0f);
+            const auto state = playing ? setle::theme::SurfaceState::success : setle::theme::SurfaceState::normal;
+            auto style = setle::theme::cardStyle(themeData, state);
+            g.setColour(style.fill);
+            g.fillRoundedRectangle(bounds.toFloat(), style.radius);
+            g.setColour(playing ? style.outline.withAlpha(0.65f + 0.35f * pulse) : style.outline);
+            g.drawRoundedRectangle(bounds.toFloat(), style.radius, playing ? 2.2f : style.stroke);
 
             auto textArea = bounds.reduced(8, 4);
-            auto row1 = textArea.removeFromTop(16);
-            auto row2 = textArea.removeFromTop(16);
+            auto reservedButtons = getLocalBounds().reduced(8, 6).removeFromBottom(24);
+            textArea = textArea.withBottom(juce::jmax(textArea.getY() + 12, reservedButtons.getY() - 2));
+            auto row1 = textArea.removeFromTop(14);
+            auto row2 = textArea.removeFromTop(12);
+            auto row3 = textArea.removeFromTop(11);
 
             const auto marker = playing ? juce::String("▶") : juce::String(" ");
-            g.setFont(juce::FontOptions(12.5f));
-            g.setColour(juce::Colours::white.withAlpha(0.92f));
+            g.setFont(juce::FontOptions(11.8f));
+            g.setColour(style.text);
 
             auto firstThree = juce::String();
             auto keyMode = juce::String();
@@ -618,14 +664,75 @@ private:
                        juce::Justification::centredLeft,
                        true);
 
-            g.setColour(juce::Colours::white.withAlpha(0.64f));
-            g.setFont(juce::FontOptions(11.5f));
+            g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::muted).withAlpha(0.95f));
+            g.setFont(juce::FontOptions(10.5f));
             const auto confidenceText = juce::String(juce::roundToInt(slot->confidence * 100.0f)) + "%";
             g.drawText("    " + keyMode + "  •  " + juce::String(chordCount) + " chords  •  "
                            + juce::String(beatCount, 1) + " beats  •  " + confidenceText,
                        row2,
                        juce::Justification::centredLeft,
                        true);
+
+            if (slot->hasCoupledAudio())
+            {
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.95f));
+                g.setFont(juce::FontOptions(9.5f));
+                g.drawText("    " + formatAudioInfo(*slot),
+                           row3,
+                           juce::Justification::centredLeft,
+                           true);
+
+                auto waveArea = textArea.removeFromTop(10);
+                if (waveArea.getWidth() > 10 && waveArea.getHeight() > 2 && slot->coupledAudio != nullptr)
+                {
+                    g.setColour(themeData.surface0.withAlpha(0.55f));
+                    g.fillRoundedRectangle(waveArea.toFloat(), 2.0f);
+                    g.setColour(themeData.surfaceEdge.withAlpha(0.60f));
+                    g.drawRoundedRectangle(waveArea.toFloat(), 2.0f, 0.8f);
+
+                    const auto* audio = slot->coupledAudio.get();
+                    const int samples = audio->getNumSamples();
+                    const int width = waveArea.getWidth();
+                    if (samples > 1 && width > 1)
+                    {
+                        g.setColour(themeData.signalAudio.withAlpha(0.88f));
+                        const float midY = static_cast<float>(waveArea.getCentreY());
+                        const float halfH = static_cast<float>(waveArea.getHeight()) * 0.45f;
+
+                        for (int x = 0; x < width; ++x)
+                        {
+                            const int s0 = (x * samples) / width;
+                            const int s1 = juce::jmax(s0 + 1, ((x + 1) * samples) / width);
+                            float peak = 0.0f;
+
+                            for (int s = s0; s < s1; ++s)
+                            {
+                                peak = juce::jmax(peak, std::abs(audio->getSample(0, s)));
+                                if (audio->getNumChannels() > 1)
+                                    peak = juce::jmax(peak, std::abs(audio->getSample(1, s)));
+                            }
+
+                            const float amp = juce::jlimit(0.0f, 1.0f, peak) * halfH;
+                            const float px = static_cast<float>(waveArea.getX() + x);
+                            g.drawLine(px, midY - amp, px, midY + amp, 1.0f);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.9f));
+                g.setFont(juce::FontOptions(9.5f));
+                g.drawText("    MIDI pattern playback", row3, juce::Justification::centredLeft, true);
+            }
+
+            auto modeBadge = bounds.removeFromRight(72).removeFromTop(14).reduced(4, 2);
+            const auto badgeColor = slot->hasCoupledAudio() ? themeData.signalAudio : themeData.signalMidi;
+            g.setColour(badgeColor.withAlpha(0.24f));
+            g.fillRoundedRectangle(modeBadge.toFloat(), 2.0f);
+            g.setColour(badgeColor.withAlpha(0.92f));
+            g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+            g.drawText(slot->hasCoupledAudio() ? "AUDIO" : "MIDI", modeBadge, juce::Justification::centred, false);
         }
 
     private:
@@ -634,6 +741,20 @@ private:
             if (auto* queue = queueProvider())
                 return &queue->getSlot(slotIndex);
             return nullptr;
+        }
+
+        juce::String formatAudioInfo(const capture::GrabSlot& slot) const
+        {
+            if (!slot.hasCoupledAudio() || slot.coupledAudio == nullptr)
+                return "audio unavailable";
+
+            const auto samples = slot.coupledAudio->getNumSamples();
+            if (samples <= 0 || slot.coupledSampleRate <= 0.0)
+                return "audio unavailable";
+
+            const auto seconds = static_cast<double>(samples) / slot.coupledSampleRate;
+            const auto kHz = slot.coupledSampleRate / 1000.0;
+            return juce::String(seconds, 2) + "s  @  " + juce::String(kHz, 1) + "kHz";
         }
 
         int slotIndex = 0;
@@ -679,15 +800,19 @@ public:
 
     void paint(juce::Graphics& g) override
     {
+        const auto& themeData = ThemeManager::get().theme();
         const auto bounds = getLocalBounds();
-        g.setColour(juce::Colour(0xff22352a));
-        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 5.0f);
+        const auto panelStyle = setle::theme::cardStyle(themeData, setle::theme::SurfaceState::normal);
+        g.setColour(setle::theme::panelBackground(themeData, setle::theme::ZoneRole::inPanel));
+        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), panelStyle.radius);
+        g.setColour(panelStyle.outline);
+        g.drawRoundedRectangle(bounds.toFloat().reduced(1.0f), panelStyle.radius, panelStyle.stroke);
 
         auto area = bounds.reduced(10, 8);
 
         // Title
         g.setFont(juce::FontOptions(16.0f));
-        g.setColour(juce::Colours::white.withAlpha(0.88f));
+        g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(0.92f));
         g.drawText("IN", area.removeFromTop(22), juce::Justification::centredLeft, false);
 
         area.removeFromTop(4);
@@ -702,16 +827,16 @@ public:
                 const auto sr = static_cast<int>(dev->getCurrentSampleRate());
                 const auto bs = dev->getCurrentBufferSizeSamples();
                 const auto devName = dev->getName();
-                g.setColour(juce::Colours::white.withAlpha(0.80f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(0.92f));
                 g.setFont(juce::FontOptions(12.0f));
                 g.drawText(devName, area.removeFromTop(16), juce::Justification::centredLeft, true);
-                g.setColour(juce::Colours::white.withAlpha(0.50f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::muted).withAlpha(0.90f));
                 g.setFont(juce::FontOptions(11.0f));
                 g.drawText(juce::String(sr) + " Hz  |  " + juce::String(bs) + " samples",
                            area.removeFromTop(15), juce::Justification::centredLeft, true);
 
                 const double latencyMs = sr > 0 ? (1000.0 * static_cast<double>(bs) / static_cast<double>(sr)) : 0.0;
-                g.setColour(juce::Colours::white.withAlpha(0.58f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.95f));
                 g.drawText("Latency: " + juce::String(latencyMs, 1) + " ms",
                            area.removeFromTop(14), juce::Justification::centredLeft, true);
 
@@ -720,14 +845,14 @@ public:
                 meterRow.removeFromLeft(4);
                 auto meterR = meterRow.removeFromLeft(40);
 
-                auto drawMiniMeter = [&g](juce::Rectangle<int> r, float level, juce::Colour colour)
+                auto drawMiniMeter = [&g, &themeData](juce::Rectangle<int> r, float level, juce::Colour colour)
                 {
-                    g.setColour(juce::Colour(0xff101812));
+                    g.setColour(setle::theme::panelBackground(themeData, setle::theme::ZoneRole::neutral));
                     g.fillRect(r);
                     const int fill = static_cast<int>(juce::jlimit(0.0f, 1.0f, level) * r.getHeight());
                     g.setColour(colour.withAlpha(0.9f));
                     g.fillRect(r.withY(r.getBottom() - fill).withHeight(fill));
-                    g.setColour(juce::Colours::white.withAlpha(0.16f));
+                    g.setColour(setle::theme::timelineGridLine(themeData, true).withAlpha(0.6f));
                     g.drawRect(r);
                 };
 
@@ -736,7 +861,7 @@ public:
             }
             else
             {
-                g.setColour(juce::Colours::white.withAlpha(0.40f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.95f));
                 g.setFont(juce::FontOptions(12.0f));
                 g.drawText("(no audio device open)", area.removeFromTop(16), juce::Justification::centredLeft, true);
             }
@@ -749,7 +874,7 @@ public:
             const auto midiDevices = juce::MidiInput::getAvailableDevices();
             if (midiDevices.isEmpty())
             {
-                g.setColour(juce::Colours::white.withAlpha(0.40f));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.95f));
                 g.setFont(juce::FontOptions(12.0f));
                 g.drawText("(no MIDI inputs found)", area.removeFromTop(15), juce::Justification::centredLeft, true);
             }
@@ -765,10 +890,11 @@ public:
                     const bool active = it != midiActivitySeconds.end() && (nowSec - it->second) < 0.18;
                     const float pulse = 0.55f + 0.45f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.02));
 
-                    juce::Colour dotColour = juce::Colour(0xff6ac87b).withAlpha(active ? pulse : 0.75f);
-                    juce::Colour textColour = isOpen ? juce::Colours::white.withAlpha(active ? 0.95f : 0.75f)
-                                                     : juce::Colours::white.withAlpha(0.35f);
-                    g.setColour(isOpen ? dotColour : juce::Colours::white.withAlpha(0.25f));
+                    juce::Colour dotColour = themeData.zoneC.withAlpha(active ? pulse : 0.75f);
+                    juce::Colour textColour = isOpen
+                                                  ? setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(active ? 0.95f : 0.78f)
+                                                  : setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.78f);
+                    g.setColour(isOpen ? dotColour : setle::theme::textForRole(themeData, setle::theme::TextRole::ghost).withAlpha(0.45f));
                     g.setFont(juce::FontOptions(12.0f));
                     const auto dot = isOpen ? juce::String(juce::CharPointer_UTF8("\xe2\x97\x8f "))
                                             : juce::String(juce::CharPointer_UTF8("\xe2\x97\x8b "));
@@ -782,7 +908,7 @@ public:
         area.removeFromTop(8);
 
         // ── MIDI Monitor ──────────────────────────────────────────────────────
-        auto queueArea = area.removeFromBottom(200);
+        auto queueArea = area.removeFromBottom(getQueueAreaHeight());
         if (area.getHeight() < 36)
             return;
 
@@ -815,7 +941,7 @@ public:
                     text = "0x" + juce::String::toHexString(msg.getRawData(), juce::jmin(3, msg.getRawDataSize()));
 
                 const float alpha = 0.35f + 0.65f * (static_cast<float>(i) / static_cast<float>(juce::jmax(1, snapshot.size() - 1)));
-                g.setColour(juce::Colours::white.withAlpha(alpha));
+                g.setColour(setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(alpha));
                 g.drawText(text, area.removeFromTop(13), juce::Justification::centredLeft, true);
             }
         }
@@ -823,8 +949,10 @@ public:
         queueArea.removeFromTop(6);
         drawSectionLabel(g, queueArea, "Grab Queue");
 
-        g.setColour(juce::Colours::white.withAlpha(0.08f));
-        g.drawRoundedRectangle(queueArea.toFloat(), 4.0f, 1.0f);
+        g.setColour(setle::theme::timelineGridLine(themeData, true).withAlpha(0.40f));
+        g.drawRoundedRectangle(queueArea.toFloat(),
+                               setle::theme::radius(themeData, setle::theme::RadiusRole::sm),
+                               setle::theme::stroke(themeData, setle::theme::StrokeRole::subtle));
     }
 
     void resized() override
@@ -833,7 +961,7 @@ public:
         area.removeFromTop(22); // IN title
         area.removeFromTop(4);
 
-        auto queueArea = area.removeFromBottom(200);
+        auto queueArea = area.removeFromBottom(getQueueAreaHeight());
         queueArea.removeFromTop(6);
         queueArea.removeFromTop(14); // section label
         queueArea.removeFromTop(4);
@@ -851,9 +979,15 @@ public:
     }
 
 private:
+    int getQueueAreaHeight() const
+    {
+        return juce::jlimit(220, 360, static_cast<int>(std::round(static_cast<double>(getHeight()) * 0.36)));
+    }
+
     static void drawSectionLabel(juce::Graphics& g, juce::Rectangle<int>& area, const juce::String& label)
     {
-        g.setColour(juce::Colour(0xff4a8a60).withAlpha(0.85f));
+        const auto& themeData = ThemeManager::get().theme();
+        g.setColour(setle::theme::panelHeaderBackground(themeData, setle::theme::ZoneRole::inPanel).brighter(0.22f));
         g.setFont(juce::FontOptions(10.5f));
         g.drawText(label.toUpperCase(), area.removeFromTop(14), juce::Justification::centredLeft, false);
     }
@@ -949,15 +1083,19 @@ public:
 
     void paint(juce::Graphics& g) override
     {
+        const auto& theme = ThemeManager::get().theme();
+        const auto panelStyle = setle::theme::cardStyle(theme, setle::theme::SurfaceState::normal);
         auto bounds = getLocalBounds();
-        g.setColour(colour);
-        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 5.0f);
+        g.setColour(setle::theme::panelBackground(theme, setle::theme::ZoneRole::workPanel).interpolatedWith(colour, 0.35f));
+        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), panelStyle.radius);
+        g.setColour(panelStyle.outline.withAlpha(0.8f));
+        g.drawRoundedRectangle(bounds.toFloat().reduced(1.0f), panelStyle.radius, panelStyle.stroke);
 
-        g.setColour(juce::Colours::white.withAlpha(0.88f));
+        g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::primary).withAlpha(0.96f));
         g.setFont(juce::FontOptions(16.0f));
         g.drawText(title, bounds.removeFromTop(32).reduced(10, 4), juce::Justification::centredLeft, false);
 
-        g.setColour(juce::Colours::white.withAlpha(0.60f));
+        g.setColour(setle::theme::textForRole(theme, setle::theme::TextRole::muted).withAlpha(0.95f));
         g.setFont(juce::FontOptions(13.0f));
         g.drawText(subtitle, bounds.reduced(10, 4), juce::Justification::topLeft, true);
     }
@@ -991,14 +1129,17 @@ public:
             addAndMakeVisible(volumeSlider);
             addAndMakeVisible(panSlider);
 
-            trackNameLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.92f));
+            const auto& themeData = ThemeManager::get().theme();
+            trackNameLabel.setColour(juce::Label::textColourId,
+                                     setle::theme::textForRole(themeData, setle::theme::TextRole::primary).withAlpha(0.96f));
             trackNameLabel.setFont(juce::FontOptions(14.0f));
             trackNameLabel.setJustificationType(juce::Justification::centredLeft);
 
             muteButton.setButtonText("M");
             muteButton.setClickingTogglesState(true);
-            muteButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3f46));
-            muteButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
+            const auto muteChip = setle::theme::chipStyle(themeData, setle::theme::SurfaceState::normal, themeData.accentWarm);
+            muteButton.setColour(juce::TextButton::buttonColourId, muteChip.fill);
+            muteButton.setColour(juce::TextButton::textColourOffId, muteChip.text.withAlpha(0.95f));
 
             volumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
             volumeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
@@ -1152,11 +1293,15 @@ public:
 
         void paint(juce::Graphics& g) override
         {
+            const auto& theme = ThemeManager::get().theme();
+            const auto stripStyle = setle::theme::cardStyle(theme, setle::theme::SurfaceState::normal);
             auto r = getLocalBounds().toFloat();
-            g.setColour(juce::Colour(0xff1a1e24));
-            g.fillRoundedRectangle(r, 5.0f);
-            g.setColour(juce::Colour(0xff3b4650));
-            g.drawRoundedRectangle(r.reduced(0.5f), 5.0f, 1.0f);
+            g.setColour(stripStyle.fill);
+            g.fillRoundedRectangle(r, setle::theme::radius(theme, setle::theme::RadiusRole::sm));
+            g.setColour(stripStyle.outline.withAlpha(0.85f));
+            g.drawRoundedRectangle(r.reduced(0.5f),
+                                   setle::theme::radius(theme, setle::theme::RadiusRole::sm),
+                                   setle::theme::stroke(theme, setle::theme::StrokeRole::normal));
         }
 
         void resized() override
@@ -1313,6 +1458,12 @@ public:
             juce::String timeSigLabel;
             juce::Colour tint;
             juce::Colour boundaryScoreColor;
+
+            // Per-repeat variant map (section lane only).
+            // One entry per repeat of the section's progression; isVariant is true
+            // when that repeat resolves to a progression with a non-empty variantOf.
+            struct RepeatCell { bool isVariant { false }; };
+            std::vector<RepeatCell> repeatCells;
         };
 
         using SelectionCallback = std::function<void(const juce::String&)>;
@@ -1421,14 +1572,14 @@ public:
                 return;
             }
 
-            g.fillAll(theme.surface1);
+            g.fillAll(setle::theme::panelBackground(theme, setle::theme::ZoneRole::timeline));
 
             if (totalBeats > 0.0 && beatUnit > 0.0)
             {
                 for (double beat = 0.0; beat <= totalBeats + 0.0001; beat += beatUnit)
                 {
                     const int x = bounds.getX() + static_cast<int>((beat / totalBeats) * bounds.getWidth());
-                    g.setColour(theme.surfaceEdge.withAlpha(0.20f));
+                    g.setColour(setle::theme::timelineGridLine(theme, false));
                     g.fillRect(x, bounds.getY(), 1, bounds.getHeight());
                 }
             }
@@ -1438,7 +1589,7 @@ public:
                 for (double beat = 0.0; beat <= totalBeats + 0.0001; beat += beatsPerBar)
                 {
                     const int x = bounds.getX() + static_cast<int>((beat / totalBeats) * bounds.getWidth());
-                    g.setColour(theme.surfaceEdge.withAlpha(0.40f));
+                    g.setColour(setle::theme::timelineGridLine(theme, true));
                     g.fillRect(x, bounds.getY(), 1, bounds.getHeight());
                 }
             }
@@ -1455,38 +1606,34 @@ public:
                 const bool isSelected = (block.id == selectedId);
                 const bool isActive = playheadX >= blockRect.getX() && playheadX < blockRect.getRight();
 
-                juce::Colour blockColor = theme.surface3;
-                if (!block.tint.isTransparent())
-                    blockColor = blockColor.interpolatedWith(block.tint, 0.55f);
-                if (isSelected)
-                    blockColor = blockColor.interpolatedWith(theme.zoneA, 0.42f);
-                if (isActive)
-                    blockColor = blockColor.brighter(0.22f);
-
-                g.setColour(blockColor);
+                const auto blockStyle = setle::theme::progressionBlockStyle(theme, isSelected, isActive, block.tint);
+                g.setColour(blockStyle.fill);
                 g.fillRoundedRectangle(blockRect, 3.0f);
 
-                g.setColour(isActive ? theme.accent : theme.surfaceEdge.withAlpha(0.8f));
+                g.setColour(blockStyle.outline);
                 g.drawRoundedRectangle(blockRect, 3.0f, isActive ? 2.0f : 1.0f);
 
                 auto textBounds = blockRect.toNearestInt().reduced(5, 3);
                 if (block.subtitle.isNotEmpty())
                 {
-                    g.setColour(theme.inkMuted.withAlpha(0.88f));
+                    g.setColour(blockStyle.subtitle);
                     g.setFont(juce::FontOptions(10.0f));
                     g.drawText(block.subtitle, textBounds.removeFromTop(10), juce::Justification::centredLeft, true);
                 }
 
-                g.setColour(theme.inkLight.withAlpha(0.96f));
+                g.setColour(blockStyle.label);
                 g.setFont(juce::FontOptions(12.0f).withStyle("Bold"));
                 g.drawText(block.label, textBounds, juce::Justification::centred, true);
 
                 if (block.functionTag.isNotEmpty())
                 {
                     auto badge = blockRect.toNearestInt().removeFromBottom(14).removeFromLeft(34).translated(4, -2);
-                    g.setColour(theme.surface2.withAlpha(0.85f));
+                    const auto chip = setle::theme::chipStyle(theme,
+                                                              isSelected ? setle::theme::SurfaceState::selected : setle::theme::SurfaceState::normal,
+                                                              block.tint);
+                    g.setColour(chip.fill);
                     g.fillRoundedRectangle(badge.toFloat(), 2.0f);
-                    g.setColour(theme.inkMid.withAlpha(0.95f));
+                    g.setColour(chip.text);
                     g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
                     g.drawText("[" + block.functionTag + "]", badge, juce::Justification::centred, false);
                 }
@@ -1514,69 +1661,113 @@ public:
                     g.fillRect(edge);
                 }
 
+                // Repeat-variant pip strip (section lane only).
+                // Each pip = one repeat; accentWarm = variant, inkGhost = base.
+                if (menuTarget == TheoryMenuTarget::section && !block.repeatCells.empty())
+                {
+                    const int numCells = static_cast<int>(block.repeatCells.size());
+                    const float stripH = 4.0f;
+                    // Leave 3px margin from left/right edges, 1px from bottom
+                    const float availW = blockRect.getWidth() - 6.0f;
+                    const float gap = 1.0f;
+                    const float cellW = juce::jmax(2.0f, (availW - gap * static_cast<float>(numCells - 1)) / static_cast<float>(numCells));
+                    const float stripY = blockRect.getBottom() - stripH - 0.5f;
+
+                    if (cellW >= 2.0f && numCells <= 32)
+                    {
+                        float cx = blockRect.getX() + 3.0f;
+                        for (const auto& cell : block.repeatCells)
+                        {
+                            const juce::Colour pipColour = cell.isVariant
+                                ? theme.accentWarm.withAlpha(0.88f)
+                                : theme.inkGhost.withAlpha(isSelected ? 0.45f : 0.28f);
+                            g.setColour(pipColour);
+                            g.fillRoundedRectangle(cx, stripY, cellW, stripH, 1.0f);
+                            cx += cellW + gap;
+                        }
+                    }
+                    else
+                    {
+                        // Too dense to show per-repeat — show a variant-present dot
+                        bool anyVariant = false;
+                        for (const auto& c : block.repeatCells)
+                            if (c.isVariant) { anyVariant = true; break; }
+                        if (anyVariant)
+                        {
+                            const auto dot = juce::Rectangle<float>(
+                                blockRect.getX() + 4.0f, blockRect.getBottom() - 7.0f, 4.0f, 4.0f);
+                            g.setColour(theme.accentWarm.withAlpha(0.92f));
+                            g.fillEllipse(dot);
+                        }
+                    }
+                }
+
                 x += w;
             }
         }
 
-        void mouseUp(const juce::MouseEvent& event) override
+void mouseUp(const juce::MouseEvent& event) override
+{
+    if (menuTarget == TheoryMenuTarget::historyBuffer && !event.mods.isRightButtonDown())
+    {
+        auto header = getLocalBounds().removeFromTop(24);
+        header.removeFromLeft(44);
+        auto buttons = header.removeFromLeft(130);
+        const auto b4 = buttons.removeFromLeft(40).reduced(2, 3);
+        const auto b8 = buttons.removeFromLeft(40).reduced(2, 3);
+        const auto b16 = buttons.removeFromLeft(50).reduced(2, 3);
+
+        int actionId = 0;
+        if (b4.contains(event.getPosition())) actionId = historyGrab4;
+        else if (b8.contains(event.getPosition())) actionId = historyGrab8;
+        else if (b16.contains(event.getPosition())) actionId = historyGrab16;
+
+        if (actionId > 0 && onAction != nullptr)
+            onAction(menuTarget, actionId, actionNameFor(actionId));
+
+        return;
+    }
+
+    if (!event.mods.isRightButtonDown())
+    {
+        if (!blocks.empty() && onSelect != nullptr)
         {
-            if (menuTarget == TheoryMenuTarget::historyBuffer && !event.mods.isRightButtonDown())
+            const float totalWidth = static_cast<float>(getWidth());
+            float x = 0.0f;
+            const float clickX = static_cast<float>(event.x);
+            const float clickY = static_cast<float>(event.y);
+            const float h = static_cast<float>(getHeight());
+
+            for (const auto& block : blocks)
             {
-                auto header = getLocalBounds().removeFromTop(24);
-                header.removeFromLeft(44);
-                auto buttons = header.removeFromLeft(130);
-                const auto b4 = buttons.removeFromLeft(40).reduced(2, 3);
-                const auto b8 = buttons.removeFromLeft(40).reduced(2, 3);
-                const auto b16 = buttons.removeFromLeft(50).reduced(2, 3);
-
-                int actionId = 0;
-                if (b4.contains(event.getPosition())) actionId = historyGrab4;
-                else if (b8.contains(event.getPosition())) actionId = historyGrab8;
-                else if (b16.contains(event.getPosition())) actionId = historyGrab16;
-
-                if (actionId > 0 && onAction != nullptr)
-                    onAction(menuTarget, actionId, actionNameFor(actionId));
-
-                return;
-            }
-
-            if (!event.mods.isRightButtonDown())
-            {
-                if (!blocks.empty() && onSelect != nullptr)
+                const float w = totalWidth * block.widthFraction;
+                if (clickX >= x && clickX < x + w)
                 {
-                    const float totalWidth = static_cast<float>(getWidth());
-                    float x = 0.0f;
-                    const float clickX = static_cast<float>(event.x);
-                    for (const auto& block : blocks)
-                    {
-                        const float w = totalWidth * block.widthFraction;
-                        if (clickX >= x && clickX < x + w)
-                        {
-                            selectedId = block.id;
-                            repaint();
-                            onSelect(block.id);
-                            return;
-                        }
-                        x += w;
-                    }
+                    selectedId = block.id;
+                    repaint();
+                    onSelect(block.id);
+                    return;
                 }
-                return;
+                x += w;
             }
-
-            juce::PopupMenu menu;
-            populateMenu(menu);
-
-            auto options = juce::PopupMenu::Options().withTargetComponent(this);
-            menu.showMenuAsync(
-                options,
-                [safeThis = juce::Component::SafePointer<ContextLane>(this)](int selectedId)
-                {
-                    if (safeThis == nullptr || selectedId <= 0 || safeThis->onAction == nullptr)
-                        return;
-
-                    safeThis->onAction(safeThis->menuTarget, selectedId, safeThis->actionNameFor(selectedId));
-                });
         }
+        return;
+    }
+
+    juce::PopupMenu menu;
+    populateMenu(menu);
+
+    auto options = juce::PopupMenu::Options().withTargetComponent(this);
+    menu.showMenuAsync(
+        options,
+        [safeThis = juce::Component::SafePointer<ContextLane>(this)](int selectedId)
+        {
+            if (safeThis == nullptr || selectedId <= 0 || safeThis->onAction == nullptr)
+                return;
+
+            safeThis->onAction(safeThis->menuTarget, selectedId, safeThis->actionNameFor(selectedId));
+        });
+}
 
     private:
         void populateMenu(juce::PopupMenu& menu) const
@@ -1792,7 +1983,16 @@ public:
             return;
         }
 
-        // Compute beat length per section (repeatCount × progression length)
+        // Helper: find a progression by id within the song's progression list.
+        auto findProg = [&](const juce::String& progId) -> const model::Progression*
+        {
+            for (const auto& p : progressions)
+                if (p.getId() == progId) return &p;
+            return nullptr;
+        };
+
+        // Compute beat length per section (repeatCount × progression length) and
+        // per-repeat variant map so the section lane can visualise variant repeats.
         struct SectionEntry
         {
             juce::String id;
@@ -1801,28 +2001,32 @@ public:
             juce::String timeSig;
             juce::Colour tint;
             juce::Colour boundaryColor;
+            juce::String progressionName;
+            std::vector<ContextLane::BlockData::RepeatCell> repeatCells;
         };
         std::vector<SectionEntry> entries;
         double totalBeats = 0.0;
 
         for (const auto& section : sections)
         {
+            // Sort refs by orderIndex so the "default" ref comes first.
+            auto refs = section.getProgressionRefs();
+            std::sort(refs.begin(), refs.end(), [](const auto& a, const auto& b)
+                { return a.getOrderIndex() < b.getOrderIndex(); });
+
             double sectionBeats = 0.0;
-            for (const auto& ref : section.getProgressionRefs())
+            for (const auto& ref : refs)
             {
-                for (const auto& prog : progressions)
+                if (const auto* prog = findProg(ref.getProgressionId()))
                 {
-                    if (prog.getId() == ref.getProgressionId())
-                    {
-                        double len = prog.getLengthBeats();
-                        if (len <= 0.0) len = 8.0;
-                        sectionBeats += len;
-                        break;
-                    }
+                    double len = prog->getLengthBeats();
+                    if (len <= 0.0) len = 8.0;
+                    sectionBeats += len;
                 }
             }
             if (sectionBeats <= 0.0) sectionBeats = 8.0;
-            const double withRepeats = sectionBeats * juce::jmax(1, section.getRepeatCount());
+            const int repeatCount = juce::jmax(1, section.getRepeatCount());
+            const double withRepeats = sectionBeats * repeatCount;
             totalBeats += withRepeats;
 
             juce::Colour tint;
@@ -1835,17 +2039,70 @@ public:
                 tint = juce::Colour::fromString(colorText);
 
             juce::Colour boundary = juce::Colour(0x00000000);
-            const int repeats = juce::jmax(1, section.getRepeatCount());
-            if (repeats <= 2) boundary = ThemeManager::get().theme().zoneC;
-            else if (repeats <= 4) boundary = ThemeManager::get().theme().zoneD;
+            if (repeatCount <= 2) boundary = ThemeManager::get().theme().zoneC;
+            else if (repeatCount <= 4) boundary = ThemeManager::get().theme().zoneD;
             else boundary = ThemeManager::get().theme().accentWarm;
 
             const auto timeSig = juce::String(section.getTimeSigNumerator()) + "/" + juce::String(section.getTimeSigDenominator());
-            entries.push_back({ section.getId(), section.getName(), withRepeats, timeSig, tint, boundary });
+
+            // Build a per-repeat progressionId map (0-based).
+            // First, seed every slot with the first "all"-scope ref's progressionId.
+            std::vector<juce::String> repeatProgIds(static_cast<size_t>(repeatCount), juce::String{});
+            for (const auto& ref : refs)
+            {
+                const auto indices = ref.getRepeatIndices().trim();
+                if (ref.getRepeatScope() == "all" || indices.isEmpty())
+                {
+                    for (auto& slot : repeatProgIds)
+                        slot = ref.getProgressionId();
+                    break;
+                }
+            }
+            // Then overlay refs that target specific repeat indices.
+            for (const auto& ref : refs)
+            {
+                const auto indices = ref.getRepeatIndices().trim();
+                if (indices.isEmpty() || ref.getRepeatScope() == "all")
+                    continue;
+                auto tokens = juce::StringArray::fromTokens(indices, ",", "");
+                for (const auto& t : tokens)
+                {
+                    const int idx = t.trim().getIntValue() - 1; // 0-based
+                    if (idx >= 0 && idx < repeatCount)
+                        repeatProgIds[static_cast<size_t>(idx)] = ref.getProgressionId();
+                }
+            }
+
+            // Convert the id map to RepeatCell values.
+            std::vector<ContextLane::BlockData::RepeatCell> cells;
+            cells.reserve(static_cast<size_t>(repeatCount));
+            for (const auto& progId : repeatProgIds)
+            {
+                bool isVar = false;
+                if (const auto* prog = findProg(progId))
+                    isVar = prog->getVariantOf().isNotEmpty();
+                cells.push_back({ isVar });
+            }
+
+            // Progression name for the subtitle line.
+            juce::String progName;
+            if (!refs.empty())
+            {
+                if (const auto* firstProg = findProg(refs[0].getProgressionId()))
+                    progName = firstProg->getName();
+                bool multi = false;
+                for (size_t i = 1; i < refs.size(); ++i)
+                    if (refs[i].getProgressionId() != refs[0].getProgressionId())
+                        { multi = true; break; }
+                if (multi) progName = "Multi";
+            }
+
+            entries.push_back({ section.getId(), section.getName(), withRepeats,
+                                 timeSig, tint, boundary, progName, std::move(cells) });
         }
 
         std::vector<ContextLane::BlockData> blockData;
-        for (const auto& e : entries)
+        for (auto& e : entries)
         {
             ContextLane::BlockData block;
             block.id = e.id;
@@ -1854,6 +2111,8 @@ public:
             block.timeSigLabel = e.timeSig != "4/4" ? e.timeSig : juce::String();
             block.tint = e.tint;
             block.boundaryScoreColor = e.boundaryColor;
+            block.subtitle = e.progressionName;
+            block.repeatCells = std::move(e.repeatCells);
             blockData.push_back(std::move(block));
         }
 
@@ -2004,8 +2263,9 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(juce::Colour(0xff141414));
-        g.setColour(juce::Colours::white.withAlpha(0.20f));
+        const auto& theme = ThemeManager::get().theme();
+        g.fillAll(setle::theme::panelHeaderBackground(theme, setle::theme::ZoneRole::neutral));
+        g.setColour(setle::theme::timelineGridLine(theme, true).withAlpha(0.55f));
 
         if (orientation == Orientation::vertical)
             g.drawVerticalLine(getWidth() / 2, 2.0f, static_cast<float>(getHeight() - 2));
@@ -2150,6 +2410,23 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 
     addAndMakeVisible(topStrip);
 
+    // ---- Classic menu bar ----
+    commandManager.registerAllCommandsForTarget(this);
+    commandManager.setFirstCommandTarget(this);
+    appMenuBarModel  = std::make_unique<AppMenuBarModel>(commandManager);
+    menuBarComponent = std::make_unique<juce::MenuBarComponent>(appMenuBarModel.get());
+    addAndMakeVisible(*menuBarComponent);
+
+    // ---- Left nav section strip ----
+    activeNavSection = navSectionFromString(setle::state::AppPreferences::get().getActiveNavSection("edit"));
+    leftNavComponent = std::make_unique<LeftNavComponent>();
+    leftNavComponent->setActiveSection(activeNavSection);
+    leftNavComponent->onSectionChanged = [this](NavSection section)
+    {
+        switchNavSection(section);
+    };
+    addAndMakeVisible(*leftNavComponent);
+
     inPanel = new InDevicePanel(
         engineRef,
         [this]() { return grabSamplerQueue.get(); },
@@ -2193,6 +2470,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         "Active editor host:\npiano roll, sequencer, notation,\nor focused plugin UI");
     addAndMakeVisible(workPanel);
     configureTheoryEditorPanel();
+    switchNavSection(activeNavSection);
 
     timelineShell = new TimelineShell(
         [this](TheoryMenuTarget target, int actionId, const juce::String& actionName)
@@ -2309,6 +2587,13 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     edit = te::Edit::createSingleTrackEdit(engineRef);
     historyBuffer = std::make_unique<setle::capture::HistoryBuffer>(
         setle::state::AppPreferences::get().getHistoryBufferMaxBeats(64));
+    const auto historyBeats = juce::jmax(16, setle::state::AppPreferences::get().getHistoryBufferMaxBeats(64));
+    const auto captureSeconds = juce::jlimit(30.0,
+                                             180.0,
+                                             (60.0 / juce::jmax(20.0, songState.getBpm())) * static_cast<double>(historyBeats) + 2.0);
+    circularAudioBuffer = std::make_unique<setle::capture::CircularAudioBuffer>(captureSeconds);
+    outputCaptureTap = std::make_unique<OutputCaptureTap>(*circularAudioBuffer);
+    engineRef.getDeviceManager().deviceManager.addAudioCallback(outputCaptureTap.get());
     refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
     if (grabSamplerQueue != nullptr)
         grabSamplerQueue->setSong(&songState);
@@ -2384,6 +2669,10 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
             refreshTimelineData();
             captureUndoStateIfChanged(snapshot);
         };
+        gridRollComponent->onPrepareProgressionForNoteMode = [this](const juce::String& progId)
+        {
+            ensureProgressionLoadedForNoteMode(progId);
+        };
         gridRollComponent->onStatusMessage = [this](const juce::String& msg)
         {
             interactionStatus.setText(msg, juce::dontSendNotification);
@@ -2409,6 +2698,10 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 WorkspaceShellComponent::~WorkspaceShellComponent()
 {
     stopTimer();
+    if (outputCaptureTap != nullptr)
+        engineRef.getDeviceManager().deviceManager.removeAudioCallback(outputCaptureTap.get());
+    outputCaptureTap.reset();
+    circularAudioBuffer.reset();
     saveLayoutState();
     saveSongState();
     ThemeManager::get().removeListener(this);
@@ -2480,12 +2773,12 @@ void WorkspaceShellComponent::mouseDown(const juce::MouseEvent& event)
 void WorkspaceShellComponent::paint(juce::Graphics& g)
 {
     const auto& theme = ThemeManager::get().theme();
-    g.fillAll(theme.surface0);
+    g.fillAll(setle::theme::panelBackground(theme, setle::theme::ZoneRole::neutral));
 
     const auto topBounds = juce::Rectangle<int>(0, 0, getWidth(), topStripHeight);
-    g.setColour(theme.headerBg);
+    g.setColour(setle::theme::panelHeaderBackground(theme, setle::theme::ZoneRole::workPanel));
     g.fillRect(topBounds);
-    g.setColour(theme.surfaceEdge.withAlpha(0.85f));
+    g.setColour(setle::theme::timelineGridLine(theme, true, true));
     g.fillRect(0, topStripHeight - 1, getWidth(), 1);
 
     auto toRoot = [this](const juce::Rectangle<int>& r)
@@ -2493,7 +2786,8 @@ void WorkspaceShellComponent::paint(juce::Graphics& g)
         return r.translated(topStrip.getX(), topStrip.getY());
     };
 
-    g.setColour(theme.surface3.withAlpha(0.58f));
+    const auto fieldStyle = setle::theme::rowStyle(theme, setle::theme::SurfaceState::hovered);
+    g.setColour(fieldStyle.fill.withAlpha(0.92f));
     g.fillRoundedRectangle(toRoot(bpmEditor.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
     g.fillRoundedRectangle(toRoot(sessionKeySelector.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
     g.fillRoundedRectangle(toRoot(sessionModeSelector.getBounds()).toFloat().expanded(1.0f, 1.0f), 3.0f);
@@ -2501,7 +2795,7 @@ void WorkspaceShellComponent::paint(juce::Graphics& g)
 
     if (toolPalette != nullptr)
     {
-        g.setColour(theme.surface2.withAlpha(0.70f));
+        g.setColour(fieldStyle.fill.withAlpha(0.72f));
         g.fillRoundedRectangle(toRoot(toolPalette->getBounds()).toFloat().expanded(1.0f, 1.0f), 4.0f);
     }
 
@@ -2515,6 +2809,8 @@ void WorkspaceShellComponent::paint(juce::Graphics& g)
         g.setColour(theme.zoneC.withAlpha(0.45f + 0.50f * pulse));
         g.fillEllipse(dot);
     }
+
+    drawThemePreviewHighlight(g);
 }
 
 void WorkspaceShellComponent::themeChanged()
@@ -2522,6 +2818,11 @@ void WorkspaceShellComponent::themeChanged()
     if (themeEditorPanel != nullptr)
         themeEditorPanel->refreshControls();
     repaintEntireTree();
+}
+
+void WorkspaceShellComponent::themePreviewTargetChanged(const juce::String&)
+{
+    repaint();
 }
 
 void WorkspaceShellComponent::repaintEntireTree()
@@ -2546,9 +2847,159 @@ void WorkspaceShellComponent::showThemeEditor(bool shouldShow)
 
     themeDismissOverlay.setVisible(shouldShow);
     themeEditorPanel->setVisible(shouldShow);
+    if (!shouldShow)
+        ThemeManager::get().setPreviewHighlightToken({});
     if (shouldShow)
         themeEditorPanel->toFront(true);
     resized();
+}
+
+juce::Rectangle<int> WorkspaceShellComponent::highlightBoundsForThemeToken(const juce::String& token) const
+{
+    auto normalized = token.trim();
+    if (normalized.isEmpty())
+        return {};
+
+    auto toRootRect = [this](const juce::Rectangle<int>& r)
+    {
+        return r.translated(topStrip.getX(), topStrip.getY());
+    };
+
+    auto componentToThis = [this](const juce::Component* component) -> juce::Rectangle<int>
+    {
+        if (component == nullptr || !component->isVisible())
+            return {};
+        return getLocalArea(component, component->getLocalBounds());
+    };
+
+    auto normalizeStartsWith = [&normalized](const char* prefix)
+    {
+        return normalized.startsWithIgnoreCase(prefix);
+    };
+
+    auto unionIfValid = [](juce::Rectangle<int> a, juce::Rectangle<int> b)
+    {
+        if (a.isEmpty()) return b;
+        if (b.isEmpty()) return a;
+        return a.getUnion(b);
+    };
+
+    if (normalized == "surface0")
+        return getLocalBounds();
+
+    if (normalizeStartsWith("header") || normalizeStartsWith("menuBar") || normalized == "focusOutline")
+        return { 0, 0, getWidth(), topStripHeight };
+
+    if (normalized == "zoneAWidth" || normalizeStartsWith("zoneA") || normalized == "signalMidi")
+        return inPanel != nullptr ? inPanel->getBounds() : juce::Rectangle<int>{};
+
+    if (normalized == "zoneCWidth" || normalizeStartsWith("zoneC") || normalized == "signalAudio")
+        return outPanelHost != nullptr ? outPanelHost->getBounds() : juce::Rectangle<int>{};
+
+    if (normalizeStartsWith("zoneB"))
+        return workPanel != nullptr ? workPanel->getBounds() : juce::Rectangle<int>{};
+
+    if (normalized == "zoneDNormHeight"
+        || normalizeStartsWith("zoneD")
+        || normalizeStartsWith("tape")
+        || normalizeStartsWith("playhead")
+        || normalized == "housingEdge")
+        return timelineShell != nullptr ? timelineShell->getBounds() : juce::Rectangle<int>{};
+
+    if (normalized == "cardBg"
+        || normalized == "rowBg"
+        || normalized == "rowHover"
+        || normalized == "rowSelected")
+    {
+        auto r = componentToThis(&theoryEditorPanel);
+        r = unionIfValid(r, componentToThis(libraryBrowser.get()));
+        r = unionIfValid(r, componentToThis(chordPalette.get()));
+        return r.isEmpty() && workPanel != nullptr ? workPanel->getBounds() : r;
+    }
+
+    if (normalizeStartsWith("control")
+        || normalizeStartsWith("btn")
+        || normalizeStartsWith("slider")
+        || normalizeStartsWith("knob")
+        || normalizeStartsWith("switch")
+        || normalized == "sizeTransport")
+    {
+        auto r = toRootRect(playButton.getBounds());
+        r = unionIfValid(r, toRootRect(stopButton.getBounds()));
+        r = unionIfValid(r, toRootRect(recordButton.getBounds()));
+        r = unionIfValid(r, toRootRect(bpmEditor.getBounds()));
+        r = unionIfValid(r, toRootRect(sessionKeySelector.getBounds()));
+        r = unionIfValid(r, toRootRect(sessionModeSelector.getBounds()));
+        r = unionIfValid(r, toRootRect(captureSourceSelector.getBounds()));
+        r = unionIfValid(r, componentToThis(outPanelHost.get()));
+        return r.expanded(6, 4);
+    }
+
+    if (normalizeStartsWith("surface"))
+    {
+        if (normalized == "surface1" && workPanel != nullptr)
+            return workPanel->getBounds();
+        if (normalized == "surface2" && outPanelHost != nullptr)
+            return outPanelHost->getBounds();
+        if (normalized == "surface3" || normalized == "surface4" || normalized == "surfaceEdge")
+        {
+            auto r = toRootRect(sessionKeySelector.getBounds());
+            r = unionIfValid(r, toRootRect(sessionModeSelector.getBounds()));
+            r = unionIfValid(r, toRootRect(captureSourceSelector.getBounds()));
+            r = unionIfValid(r, toRootRect(bpmEditor.getBounds()));
+            return r.expanded(6, 4);
+        }
+    }
+
+    if (normalizeStartsWith("ink") || normalizeStartsWith("size") || normalizeStartsWith("space"))
+    {
+        auto r = toRootRect(topTitle.getBounds());
+        r = unionIfValid(r, toRootRect(interactionStatus.getBounds()));
+        r = unionIfValid(r, componentToThis(&theoryEditorTitle));
+        r = unionIfValid(r, componentToThis(&theoryEditorHint));
+        return r.isEmpty() && workPanel != nullptr ? workPanel->getBounds() : r;
+    }
+
+    if (normalized == "signalCv" || normalized == "signalGate")
+    {
+        auto r = componentToThis(timelineShell);
+        r = unionIfValid(r, componentToThis(timelineTracks));
+        return r;
+    }
+
+    if (normalized == "badgeBg")
+        return componentToThis(timelineShell);
+
+    if (normalized == "moduleSlotHeight")
+        return componentToThis(outPanelHost.get());
+
+    if (normalized == "stepHeight" || normalized == "stepWidth")
+        return componentToThis(gridRollComponent.get());
+
+    if (normalized == "menuBarHeight")
+        return { 0, 0, getWidth(), topStripHeight };
+
+    if (normalizeStartsWith("radius") || normalizeStartsWith("stroke"))
+        return workPanel != nullptr ? workPanel->getBounds() : juce::Rectangle<int>{};
+
+    return workPanel != nullptr ? workPanel->getBounds() : juce::Rectangle<int>{};
+}
+
+void WorkspaceShellComponent::drawThemePreviewHighlight(juce::Graphics& g) const
+{
+    const auto target = highlightBoundsForThemeToken(ThemeManager::get().getPreviewHighlightToken());
+    if (target.isEmpty())
+        return;
+
+    const float pulse = 0.65f + 0.35f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.008));
+    auto outline = juce::Colour(0xFFFF3EE3).withAlpha(0.55f + 0.40f * pulse);
+    auto fill = juce::Colour(0xFFFF3EE3).withAlpha(0.08f + 0.08f * pulse);
+
+    auto rect = target.toFloat().reduced(1.5f);
+    g.setColour(fill);
+    g.fillRoundedRectangle(rect, 6.0f);
+    g.setColour(outline);
+    g.drawRoundedRectangle(rect, 6.0f, 2.2f);
 }
 
 void WorkspaceShellComponent::applyFocusMode(FocusMode mode)
@@ -2703,18 +3154,76 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
         interactionStatus.setText("Theory editor reloaded from current selection", juce::dontSendNotification);
     };
 
-    // ---- Tab strip ----
-    for (auto* btn : { &workTabTheoryButton, &workTabGridRollButton, &workTabFxButton })
+    // ---- Zone header (replaces raw TextButton tab strip) ----
+    zoneHeader = std::make_unique<ZoneHeaderComponent>();
+    zoneHeader->setSection(activeNavSection);
+    zoneHeader->setActiveTab(0);
+    zoneHeader->onTabSelected = [this](int tabIndex) { switchWorkTab(tabIndex); };
+    zoneHeader->onContextControlTriggered = [this](const juce::String& controlId, int commandId, bool availableNow)
     {
-        btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
-        workPanel->addAndMakeVisible(*btn);
-    }
-    workTabTheoryButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c4a67)); // default active
-    workTabGridRollButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
-    workTabFxButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
+        if (availableNow && commandId != 0)
+        {
+            commandManager.invokeDirectly(commandId, true);
+            return;
+        }
+
+        interactionStatus.setText("Planned control: " + controlId + " (coming in a future phase)",
+                                  juce::dontSendNotification);
+    };
+    zoneHeader->onOverflowRequested = [this](juce::Component& anchor)
+    {
+        juce::PopupMenu m;
+        m.addSectionHeader("Zone options");
+        m.addItem(1, "Focus IN",       true, focusMode == FocusMode::inFocused);
+        m.addItem(2, "Focus Balanced", true, focusMode == FocusMode::balanced);
+        m.addItem(3, "Focus OUT",      true, focusMode == FocusMode::outFocused);
+        m.addSeparator();
+        m.addItem(4, "Undo Theory",  true);
+        m.addItem(5, "Redo Theory",  true);
+
+        const auto controls = getContextControls(activeNavSection);
+        bool hasPlanned = false;
+        int plannedItemId = 7000;
+        for (const auto& c : controls)
+        {
+            if (!c.availableNow)
+            {
+                if (!hasPlanned)
+                {
+                    m.addSeparator();
+                    m.addSectionHeader("Planned");
+                    hasPlanned = true;
+                }
+
+                auto line = juce::String(c.label) + " (planned)";
+                if (juce::String(c.plannedNote).isNotEmpty())
+                    line << " - " << c.plannedNote;
+                m.addItem(plannedItemId++, line, false, false);
+            }
+        }
+
+        m.showMenuAsync(
+            juce::PopupMenu::Options().withTargetComponent(&anchor),
+            [this](int id)
+            {
+                switch (id)
+                {
+                    case 1: applyFocusMode(FocusMode::inFocused);  break;
+                    case 2: applyFocusMode(FocusMode::balanced);   break;
+                    case 3: applyFocusMode(FocusMode::outFocused); break;
+                    case 4: performUndo();                         break;
+                    case 5: performRedo();                         break;
+                    default: break;
+                }
+            });
+    };
+    workPanel->addAndMakeVisible(*zoneHeader);
+
+    // Keep legacy buttons wired but invisible — their color-update logic
+    // in switchWorkTab() is harmless; ZoneHeaderComponent is the visible face.
     workTabTheoryButton.onClick   = [this] { switchWorkTab(0); };
-    workTabGridRollButton.onClick  = [this] { switchWorkTab(1); };
-    workTabFxButton.onClick        = [this] { switchWorkTab(2); };
+    workTabGridRollButton.onClick = [this] { switchWorkTab(1); };
+    workTabFxButton.onClick       = [this] { switchWorkTab(2); };
 
     // Create EffBuilderComponent
     effBuilderComponent = std::make_unique<setle::eff::EffBuilderComponent>();
@@ -2734,7 +3243,11 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
     if (gridRollComponent != nullptr)
     {
         if (tabIndex == 1)
+        {
             gridRollComponent->setTheorySnap(theorySnap);
+            ensureProgressionLoadedForNoteMode(selectedProgressionId);
+            gridRollComponent->refreshNoteModeCache();
+        }
         gridRollComponent->setVisible(tabIndex == 1);
     }
 
@@ -2769,7 +3282,7 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
         }
     }
 
-    // Update tab button visual state
+    // Update tab button visual state (legacy buttons kept invisible but still data-accurate)
     const auto activeCol   = juce::Colour(0xff2c4a67);
     const auto inactiveCol = juce::Colour(0xff2a3040);
     workTabTheoryButton.setColour(juce::TextButton::buttonColourId,
@@ -2778,7 +3291,293 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
                                     tabIndex == 1 ? activeCol : inactiveCol);
     workTabFxButton.setColour(juce::TextButton::buttonColourId,
                                tabIndex == 2 ? activeCol : inactiveCol);
+
+    // Sync ZoneHeaderComponent
+    if (zoneHeader != nullptr)
+        zoneHeader->setActiveTab(tabIndex);
+
     resized();
+}
+
+void WorkspaceShellComponent::switchNavSection(NavSection section)
+{
+    activeNavSection = section;
+    setle::state::AppPreferences::get().setActiveNavSection(getNavSectionInfo(section).id);
+
+    if (leftNavComponent != nullptr)
+        leftNavComponent->setActiveSection(section);
+
+    // Determine which work tab to show for the new section and update zone header
+    const auto tabs = getContextTabs(section);
+    int targetTab = workPanelTabIndex; // keep current tab if valid for this section
+
+    if (!tabs.isEmpty())
+    {
+        // check if current tab is in the new section's tab list
+        bool currentTabValid = false;
+        for (const auto& t : tabs)
+            if (t.tabIndex == targetTab) { currentTabValid = true; break; }
+        if (!currentTabValid)
+            targetTab = tabs[0].tabIndex;
+    }
+
+    if (zoneHeader != nullptr)
+        zoneHeader->setSection(section);
+
+    switchWorkTab(targetTab);
+}
+
+// -----------------------------------------------------------------------
+// ApplicationCommandTarget implementation
+// -----------------------------------------------------------------------
+juce::ApplicationCommandTarget* WorkspaceShellComponent::getNextCommandTarget()
+{
+    return nullptr; // shell is top of command target chain
+}
+
+void WorkspaceShellComponent::getAllCommands(juce::Array<juce::CommandID>& commands)
+{
+    namespace ID = AppCommandIDs;
+    const juce::CommandID ids[] = {
+        ID::fileNew,     ID::fileSave,      ID::fileExportMidi, ID::fileExit,
+        ID::editUndo,    ID::editRedo,
+        ID::transportPlay, ID::transportStop, ID::transportRecord,
+        ID::toolSelect,  ID::toolDraw,    ID::toolErase,   ID::toolSplit,
+        ID::toolStretch, ID::toolListen,  ID::toolMarquee, ID::toolScaleSnap,
+        ID::viewFocusIn, ID::viewFocusBalanced, ID::viewFocusOut, ID::viewThemeEditor,
+        ID::navCreate,   ID::navEdit,     ID::navArrange,  ID::navSound,
+        ID::navMix,      ID::navLibrary,  ID::navSession,
+        ID::insertMidiTrack, ID::insertAudioTrack,
+        ID::helpAbout,
+    };
+    commands.addArray(ids, static_cast<int>(std::size(ids)));
+}
+
+void WorkspaceShellComponent::getCommandInfo(juce::CommandID commandID,
+                                              juce::ApplicationCommandInfo& result)
+{
+    namespace ID = AppCommandIDs;
+
+    switch (commandID)
+    {
+        // ---- File ----
+        case ID::fileNew:
+            result.setInfo("New Song", "Start a new empty song", "File", 0);
+            result.setActive(false); // not yet implemented
+            break;
+        case ID::fileSave:
+            result.setInfo("Save Song", "Save the current song", "File", 0);
+            result.addDefaultKeypress('s', juce::ModifierKeys::commandModifier);
+            break;
+        case ID::fileExportMidi:
+            result.setInfo("Export MIDI...", "Export song to MIDI file", "File", 0);
+            result.setActive(false); // not yet implemented
+            break;
+        case ID::fileExit:
+            result.setInfo("Exit", "Quit SETLE", "File", 0);
+            break;
+
+        // ---- Edit ----
+        case ID::editUndo:
+            result.setInfo("Undo Theory", "Undo the last theory change", "Edit", 0);
+            result.addDefaultKeypress('z', juce::ModifierKeys::commandModifier);
+            result.setActive(!undoSnapshots.empty());
+            break;
+        case ID::editRedo:
+            result.setInfo("Redo Theory", "Redo the last undone change", "Edit", 0);
+            result.addDefaultKeypress('z', juce::ModifierKeys::commandModifier
+                                            | juce::ModifierKeys::shiftModifier);
+            result.setActive(!redoSnapshots.empty());
+            break;
+
+        // ---- Transport ----
+        case ID::transportPlay:
+            result.setInfo("Play", "Start transport playback", "Transport", 0);
+            result.addDefaultKeypress(juce::KeyPress::spaceKey, juce::ModifierKeys::noModifiers);
+            break;
+        case ID::transportStop:
+            result.setInfo("Stop", "Stop transport playback", "Transport", 0);
+            break;
+        case ID::transportRecord:
+            result.setInfo("Record", "Start recording", "Transport", 0);
+            break;
+
+        // ---- Tools ----
+        case ID::toolSelect:
+            result.setInfo("Select",     "Select / move items",   "Tools", 0);
+            result.addDefaultKeypress('s', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolDraw:
+            result.setInfo("Draw",       "Draw new items",         "Tools", 0);
+            result.addDefaultKeypress('d', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolErase:
+            result.setInfo("Erase",      "Erase items",            "Tools", 0);
+            result.addDefaultKeypress('e', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolSplit:
+            result.setInfo("Split",      "Split items at cursor",  "Tools", 0);
+            result.addDefaultKeypress('b', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolStretch:
+            result.setInfo("Stretch",    "Time-stretch items",     "Tools", 0);
+            result.addDefaultKeypress('t', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolListen:
+            result.setInfo("Listen",     "Audition / preview",     "Tools", 0);
+            result.addDefaultKeypress('l', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolMarquee:
+            result.setInfo("Marquee",    "Marquee selection",      "Tools", 0);
+            result.addDefaultKeypress('m', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolScaleSnap:
+            result.setInfo("Scale Snap", "Snap notes to scale",    "Tools", 0);
+            result.addDefaultKeypress('g', juce::ModifierKeys::noModifiers);
+            break;
+
+        // ---- View / Focus ----
+        case ID::viewFocusIn:
+            result.setInfo("Focus IN",       "Emphasise the capture/queue panel",  "View", 0);
+            result.setTicked(focusMode == FocusMode::inFocused);
+            break;
+        case ID::viewFocusBalanced:
+            result.setInfo("Focus Balanced", "Balanced layout",                    "View", 0);
+            result.setTicked(focusMode == FocusMode::balanced);
+            break;
+        case ID::viewFocusOut:
+            result.setInfo("Focus OUT",      "Emphasise the instruments/mix panel","View", 0);
+            result.setTicked(focusMode == FocusMode::outFocused);
+            break;
+        case ID::viewThemeEditor:
+            result.setInfo("Theme Editor",   "Open the visual theme editor",       "View", 0);
+            break;
+
+        // ---- Nav sections ----
+        case ID::navCreate:
+            result.setInfo("Create",  "Go to Create section (capture, queue)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::create);
+            break;
+        case ID::navEdit:
+            result.setInfo("Edit",    "Go to Edit section (theory, grid roll)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::edit);
+            break;
+        case ID::navArrange:
+            result.setInfo("Arrange", "Go to Arrange section (timeline)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::arrange);
+            break;
+        case ID::navSound:
+            result.setInfo("Sound",   "Go to Sound section (instruments, FX)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::sound);
+            break;
+        case ID::navMix:
+            result.setInfo("Mix",     "Go to Mix section (mixer, master)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::mix);
+            break;
+        case ID::navLibrary:
+            result.setInfo("Library", "Go to Library section (progressions, patterns)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::library);
+            break;
+        case ID::navSession:
+            result.setInfo("Session", "Go to Session settings (key, mode, BPM)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::session);
+            break;
+
+        // ---- Insert ----
+        case ID::insertMidiTrack:
+            result.setInfo("Add MIDI Track",  "Add a new MIDI track to the timeline", "Insert", 0);
+            break;
+        case ID::insertAudioTrack:
+            result.setInfo("Add Audio Track", "Add a new audio track to the timeline", "Insert", 0);
+            break;
+
+        // ---- Help ----
+        case ID::helpAbout:
+            result.setInfo("About SETLE", "Version and credits", "Help", 0);
+            break;
+
+        default:
+            break;
+    }
+}
+
+bool WorkspaceShellComponent::perform(const juce::ApplicationCommandTarget::InvocationInfo& info)
+{
+    namespace ID = AppCommandIDs;
+
+    switch (info.commandID)
+    {
+        // ---- File ----
+        case ID::fileSave:
+            saveSongState();
+            interactionStatus.setText("Song saved.", juce::dontSendNotification);
+            return true;
+        case ID::fileExit:
+            juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            return true;
+
+        // ---- Edit ----
+        case ID::editUndo: performUndo(); return true;
+        case ID::editRedo: performRedo(); return true;
+
+        // ---- Transport ----
+        case ID::transportPlay:
+            if (edit != nullptr) { loadProgressionToEdit(); edit->getTransport().play(false); }
+            return true;
+        case ID::transportStop:
+            if (edit != nullptr) edit->getTransport().stop(false, false);
+            return true;
+        case ID::transportRecord:
+            if (edit != nullptr) { loadProgressionToEdit(); edit->getTransport().record(false); }
+            return true;
+
+        // ---- Tools ----
+        case ID::toolSelect:    EditToolManager::get().setActiveTool(EditTool::Select);    return true;
+        case ID::toolDraw:      EditToolManager::get().setActiveTool(EditTool::Draw);      return true;
+        case ID::toolErase:     EditToolManager::get().setActiveTool(EditTool::Erase);     return true;
+        case ID::toolSplit:     EditToolManager::get().setActiveTool(EditTool::Split);     return true;
+        case ID::toolStretch:   EditToolManager::get().setActiveTool(EditTool::Stretch);   return true;
+        case ID::toolListen:    EditToolManager::get().setActiveTool(EditTool::Listen);    return true;
+        case ID::toolMarquee:   EditToolManager::get().setActiveTool(EditTool::Marquee);   return true;
+        case ID::toolScaleSnap: EditToolManager::get().setActiveTool(EditTool::ScaleSnap); return true;
+
+        // ---- View / Focus ----
+        case ID::viewFocusIn:      applyFocusMode(FocusMode::inFocused);  return true;
+        case ID::viewFocusBalanced:applyFocusMode(FocusMode::balanced);   return true;
+        case ID::viewFocusOut:     applyFocusMode(FocusMode::outFocused); return true;
+        case ID::viewThemeEditor:  showThemeEditor(!themeEditorPanel->isVisible()); return true;
+
+        // ---- Nav sections ----
+        case ID::navCreate:  switchNavSection(NavSection::create);  return true;
+        case ID::navEdit:    switchNavSection(NavSection::edit);    return true;
+        case ID::navArrange: switchNavSection(NavSection::arrange); return true;
+        case ID::navSound:   switchNavSection(NavSection::sound);   return true;
+        case ID::navMix:     switchNavSection(NavSection::mix);     return true;
+        case ID::navLibrary: switchNavSection(NavSection::library); return true;
+        case ID::navSession: switchNavSection(NavSection::session); return true;
+
+        // ---- Insert ----
+        case ID::insertMidiTrack:
+            if (trackManager != nullptr)
+                trackManager->addMidiTrack("MIDI Track");
+            return true;
+        case ID::insertAudioTrack:
+            if (trackManager != nullptr)
+                trackManager->addAudioTrack("Audio Track");
+            return true;
+
+        // ---- Help ----
+        case ID::helpAbout:
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::AlertWindow::InfoIcon,
+                "SETLE",
+                "SETLE v0.0.1\n2nist — harmonic composition aid",
+                "OK");
+            return true;
+
+        default:
+            return false;
+    }
 }
 
 void WorkspaceShellComponent::openTheoryEditor(TheoryMenuTarget target, int actionId, const juce::String& actionName)
@@ -4742,9 +5541,20 @@ juce::String WorkspaceShellComponent::runProgressionAction(int actionId, const j
             progression->getName(),
             0.75f);
 
-        // Build a deterministic preview buffer so Reel has immediate audio content
-        // even before full coupled audio capture is implemented.
+        bool appliedCoupledAudio = false;
+        if (pendingGrabCoupledAudio != nullptr
+            && pendingGrabCoupledSampleRate > 0.0
+            && pendingGrabCoupledAudio->getNumSamples() > 0)
         {
+            appliedCoupledAudio = grabSamplerQueue->setSlotAudioBuffer(
+                slot,
+                *pendingGrabCoupledAudio,
+                pendingGrabCoupledSampleRate);
+        }
+
+        if (!appliedCoupledAudio)
+        {
+            // Fallback preview for non-grab entry points.
             constexpr double sr = 44100.0;
             const auto secPerBeat = 60.0 / juce::jmax(1.0, songState.getBpm());
 
@@ -5159,6 +5969,9 @@ void WorkspaceShellComponent::handleProgressionAction(const juce::String& progre
 
 void WorkspaceShellComponent::grabFromBuffer(int beats)
 {
+    pendingGrabCoupledAudio.reset();
+    pendingGrabCoupledSampleRate = 0.0;
+
     if (historyBuffer == nullptr || !historyBuffer->isCapturing())
     {
         interactionStatus.setText("Capture source is Off - select a source first", juce::dontSendNotification);
@@ -5167,6 +5980,12 @@ void WorkspaceShellComponent::grabFromBuffer(int beats)
 
     const auto bpm = songState.getBpm();
     const auto captured = historyBuffer->getLastNBeats(bpm, beats);
+    const auto coupledAudio = (circularAudioBuffer != nullptr)
+                                  ? circularAudioBuffer->getLastNBeats(bpm, beats)
+                                  : juce::AudioBuffer<float>();
+    const auto coupledSampleRate = (circularAudioBuffer != nullptr)
+                                       ? circularAudioBuffer->getSampleRate()
+                                       : 0.0;
 
     if (captured.empty())
     {
@@ -5279,7 +6098,16 @@ void WorkspaceShellComponent::grabFromBuffer(int beats)
     }
 
     songState.addProgression(progression);
+    pendingGrabCoupledAudio.reset();
+    pendingGrabCoupledSampleRate = 0.0;
+    if (coupledAudio.getNumSamples() > 0 && coupledSampleRate > 0.0)
+    {
+        pendingGrabCoupledAudio = std::make_shared<juce::AudioBuffer<float>>(coupledAudio);
+        pendingGrabCoupledSampleRate = coupledSampleRate;
+    }
     handleProgressionAction(progression.getId(), progressionGrabSampler);
+    pendingGrabCoupledAudio.reset();
+    pendingGrabCoupledSampleRate = 0.0;
 
     interactionStatus.setText("Grabbed " + juce::String(beats)
                                   + " beats -> " + juce::String(static_cast<int>(progression.getChords().size()))
@@ -5510,9 +6338,13 @@ void WorkspaceShellComponent::playQueueSlot(int slotIndex)
     if (grabSamplerQueue == nullptr || edit == nullptr)
         return;
 
+    const auto& slot = grabSamplerQueue->getSlot(slotIndex);
     grabSamplerQueue->playSlot(slotIndex, *edit);
     updateInPanelQueueView();
-    interactionStatus.setText("Playing sampler slot " + juce::String(slotIndex + 1), juce::dontSendNotification);
+    const auto playbackMode = slot.hasCoupledAudio() ? "Reel sampler" : "MIDI synth";
+    interactionStatus.setText("Playing sampler slot " + juce::String(slotIndex + 1)
+                                  + " (" + playbackMode + ")",
+                              juce::dontSendNotification);
 }
 
 void WorkspaceShellComponent::stopQueuePlayback()
@@ -5777,9 +6609,54 @@ void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progress
     }
 }
 
+void WorkspaceShellComponent::ensureProgressionLoadedForNoteMode(const juce::String& progressionId)
+{
+    if (progressionId.isEmpty() || edit == nullptr)
+        return;
+
+    bool hasClipWithNotes = false;
+    for (auto* track : te::getAudioTracks(*edit))
+    {
+        if (track == nullptr)
+            continue;
+
+        for (auto* clipBase : track->getClips())
+        {
+            auto* midiClip = dynamic_cast<te::MidiClip*>(clipBase);
+            if (midiClip == nullptr)
+                continue;
+
+            const auto clipPropId = midiClip->state.getProperty("progressionId").toString();
+            if (clipPropId != progressionId && midiClip->getName() != progressionId)
+                continue;
+
+            if (!midiClip->getSequence().getNotes().isEmpty())
+            {
+                hasClipWithNotes = true;
+                break;
+            }
+        }
+
+        if (hasClipWithNotes)
+            break;
+    }
+
+    if (!hasClipWithNotes)
+        loadProgressionToEdit(progressionId, 0.0, true, nullptr);
+}
+
 void WorkspaceShellComponent::resized()
 {
     auto bounds = getLocalBounds();
+
+    // ---- 1. Classic menu bar (top-most strip) ----
+    if (menuBarComponent != nullptr)
+        menuBarComponent->setBounds(bounds.removeFromTop(menuBarHeight));
+
+    // ---- 2. Left-nav section strip ----
+    if (leftNavComponent != nullptr)
+        leftNavComponent->setBounds(bounds.removeFromTop(navBarHeight));
+
     clampLayoutValues(bounds.getWidth(), bounds.getHeight() - topStripHeight);
 
     auto topBounds = bounds.removeFromTop(topStripHeight);
@@ -5845,15 +6722,15 @@ void WorkspaceShellComponent::resized()
 
     workPanel->setBounds(bounds);
 
-    // ---- WORK panel tab strip ----
-    auto workLocal = workPanel->getLocalBounds().reduced(12);
+    // ---- WORK panel zone header + content area ----
+    auto workLocal = workPanel->getLocalBounds();
     {
-        auto tabRow = workLocal.removeFromTop(28);
-        workTabTheoryButton.setBounds(tabRow.removeFromLeft(120).reduced(2, 2));
-        workTabGridRollButton.setBounds(tabRow.removeFromLeft(100).reduced(2, 2));
-        workTabFxButton.setBounds(tabRow.removeFromLeft(60).reduced(2, 2));
+        // Zone header (tabs + section label + hamburger)
+        if (zoneHeader != nullptr)
+            zoneHeader->setBounds(workLocal.removeFromTop(ZoneHeaderComponent::kPreferredHeight));
     }
-    workLocal.removeFromTop(6); // gap between tabs and content
+    workLocal.reduce(12, 0);
+    workLocal.removeFromTop(6); // gap between header and content
 
     auto editorBounds = workLocal;
     theoryEditorPanel.setBounds(editorBounds);
@@ -5897,7 +6774,7 @@ void WorkspaceShellComponent::resized()
     if (themeEditorPanel != nullptr)
     {
         themeDismissOverlay.setBounds(getLocalBounds());
-        themeEditorPanel->setBounds(getWidth() - 320, topStripHeight, 320, getHeight() - topStripHeight);
+        themeEditorPanel->setBounds(getWidth() - 440, topStripHeight, 440, getHeight() - topStripHeight);
     }
 }
 

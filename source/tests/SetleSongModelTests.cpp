@@ -2,6 +2,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include "../model/SetleSongModel.h"
+#include "../theory/BachTheory.h"
 #include "../theory/MeterContext.h"
 #include <array>
 #include <cmath>
@@ -1210,6 +1211,28 @@ bool testT3SnapInElevenEight()
     return ok;
 }
 
+bool testT4BachTheoryExtendedChordQualities()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(BachTheory::getChordPitchClasses("Csus2") == std::vector<int>({ 0, 2, 7 }),
+                 "T4: Csus2 should map to [0,2,7]");
+    ok &= expect(BachTheory::getChordPitchClasses("Csus4") == std::vector<int>({ 0, 5, 7 }),
+                 "T4: Csus4 should map to [0,5,7]");
+    ok &= expect(BachTheory::getChordPitchClasses("Cadd9") == std::vector<int>({ 0, 2, 4, 7 }),
+                 "T4: Cadd9 should map to [0,2,4,7]");
+    ok &= expect(BachTheory::getChordPitchClasses("Cmaj9") == std::vector<int>({ 0, 2, 4, 7, 11 }),
+                 "T4: Cmaj9 should map to [0,2,4,7,11]");
+    ok &= expect(BachTheory::getChordPitchClasses("Cm9") == std::vector<int>({ 0, 2, 3, 7, 10 }),
+                 "T4: Cm9 should map to [0,2,3,7,10]");
+    ok &= expect(BachTheory::getChordPitchClasses("C6") == std::vector<int>({ 0, 4, 7, 9 }),
+                 "T4: C6 should map to [0,4,7,9]");
+    ok &= expect(BachTheory::getChordPitchClasses("Cm6") == std::vector<int>({ 0, 3, 7, 9 }),
+                 "T4: Cm6 should map to [0,3,7,9]");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -1250,6 +1273,7 @@ int main()
     ok &= testT1TimeSignatureXmlRoundtrip();              // T1
     ok &= testT2MeterContextBeatsPerBar();                // T2
     ok &= testT3SnapInElevenEight();                      // T3
+    ok &= testT4BachTheoryExtendedChordQualities();       // T4
 
     if (!ok)
         return 1;
