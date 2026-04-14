@@ -241,6 +241,14 @@ target_sources(SETLE PRIVATE
     source/ui/ProgressionLibraryBrowser.h
     source/ui/ProgressionChordPalette.cpp
     source/ui/ProgressionChordPalette.h
+    source/ui/AppCommands.h
+    source/ui/NavSection.h
+    source/ui/AppMenuBarModel.h
+    source/ui/AppMenuBarModel.cpp
+    source/ui/LeftNavComponent.h
+    source/ui/LeftNavComponent.cpp
+    source/ui/ZoneHeaderComponent.h
+    source/ui/ZoneHeaderComponent.cpp
     source/eff/EffModel.h
     source/eff/EffSerializer.h
     source/eff/EffSerializer.cpp

@@ -2,6 +2,10 @@
 
 #include "ToolPaletteComponent.h"
 #include "EditToolManager.h"
+#include "AppCommands.h"
+#include "AppMenuBarModel.h"
+#include "LeftNavComponent.h"
+#include "ZoneHeaderComponent.h"
 
 #include <algorithm>
 #include <array>
@@ -1454,6 +1458,12 @@ public:
             juce::String timeSigLabel;
             juce::Colour tint;
             juce::Colour boundaryScoreColor;
+
+            // Per-repeat variant map (section lane only).
+            // One entry per repeat of the section's progression; isVariant is true
+            // when that repeat resolves to a progression with a non-empty variantOf.
+            struct RepeatCell { bool isVariant { false }; };
+            std::vector<RepeatCell> repeatCells;
         };
 
         using SelectionCallback = std::function<void(const juce::String&)>;
@@ -1651,69 +1661,113 @@ public:
                     g.fillRect(edge);
                 }
 
+                // Repeat-variant pip strip (section lane only).
+                // Each pip = one repeat; accentWarm = variant, inkGhost = base.
+                if (menuTarget == TheoryMenuTarget::section && !block.repeatCells.empty())
+                {
+                    const int numCells = static_cast<int>(block.repeatCells.size());
+                    const float stripH = 4.0f;
+                    // Leave 3px margin from left/right edges, 1px from bottom
+                    const float availW = blockRect.getWidth() - 6.0f;
+                    const float gap = 1.0f;
+                    const float cellW = juce::jmax(2.0f, (availW - gap * static_cast<float>(numCells - 1)) / static_cast<float>(numCells));
+                    const float stripY = blockRect.getBottom() - stripH - 0.5f;
+
+                    if (cellW >= 2.0f && numCells <= 32)
+                    {
+                        float cx = blockRect.getX() + 3.0f;
+                        for (const auto& cell : block.repeatCells)
+                        {
+                            const juce::Colour pipColour = cell.isVariant
+                                ? theme.accentWarm.withAlpha(0.88f)
+                                : theme.inkGhost.withAlpha(isSelected ? 0.45f : 0.28f);
+                            g.setColour(pipColour);
+                            g.fillRoundedRectangle(cx, stripY, cellW, stripH, 1.0f);
+                            cx += cellW + gap;
+                        }
+                    }
+                    else
+                    {
+                        // Too dense to show per-repeat — show a variant-present dot
+                        bool anyVariant = false;
+                        for (const auto& c : block.repeatCells)
+                            if (c.isVariant) { anyVariant = true; break; }
+                        if (anyVariant)
+                        {
+                            const auto dot = juce::Rectangle<float>(
+                                blockRect.getX() + 4.0f, blockRect.getBottom() - 7.0f, 4.0f, 4.0f);
+                            g.setColour(theme.accentWarm.withAlpha(0.92f));
+                            g.fillEllipse(dot);
+                        }
+                    }
+                }
+
                 x += w;
             }
         }
 
-        void mouseUp(const juce::MouseEvent& event) override
+void mouseUp(const juce::MouseEvent& event) override
+{
+    if (menuTarget == TheoryMenuTarget::historyBuffer && !event.mods.isRightButtonDown())
+    {
+        auto header = getLocalBounds().removeFromTop(24);
+        header.removeFromLeft(44);
+        auto buttons = header.removeFromLeft(130);
+        const auto b4 = buttons.removeFromLeft(40).reduced(2, 3);
+        const auto b8 = buttons.removeFromLeft(40).reduced(2, 3);
+        const auto b16 = buttons.removeFromLeft(50).reduced(2, 3);
+
+        int actionId = 0;
+        if (b4.contains(event.getPosition())) actionId = historyGrab4;
+        else if (b8.contains(event.getPosition())) actionId = historyGrab8;
+        else if (b16.contains(event.getPosition())) actionId = historyGrab16;
+
+        if (actionId > 0 && onAction != nullptr)
+            onAction(menuTarget, actionId, actionNameFor(actionId));
+
+        return;
+    }
+
+    if (!event.mods.isRightButtonDown())
+    {
+        if (!blocks.empty() && onSelect != nullptr)
         {
-            if (menuTarget == TheoryMenuTarget::historyBuffer && !event.mods.isRightButtonDown())
+            const float totalWidth = static_cast<float>(getWidth());
+            float x = 0.0f;
+            const float clickX = static_cast<float>(event.x);
+            const float clickY = static_cast<float>(event.y);
+            const float h = static_cast<float>(getHeight());
+
+            for (const auto& block : blocks)
             {
-                auto header = getLocalBounds().removeFromTop(24);
-                header.removeFromLeft(44);
-                auto buttons = header.removeFromLeft(130);
-                const auto b4 = buttons.removeFromLeft(40).reduced(2, 3);
-                const auto b8 = buttons.removeFromLeft(40).reduced(2, 3);
-                const auto b16 = buttons.removeFromLeft(50).reduced(2, 3);
-
-                int actionId = 0;
-                if (b4.contains(event.getPosition())) actionId = historyGrab4;
-                else if (b8.contains(event.getPosition())) actionId = historyGrab8;
-                else if (b16.contains(event.getPosition())) actionId = historyGrab16;
-
-                if (actionId > 0 && onAction != nullptr)
-                    onAction(menuTarget, actionId, actionNameFor(actionId));
-
-                return;
-            }
-
-            if (!event.mods.isRightButtonDown())
-            {
-                if (!blocks.empty() && onSelect != nullptr)
+                const float w = totalWidth * block.widthFraction;
+                if (clickX >= x && clickX < x + w)
                 {
-                    const float totalWidth = static_cast<float>(getWidth());
-                    float x = 0.0f;
-                    const float clickX = static_cast<float>(event.x);
-                    for (const auto& block : blocks)
-                    {
-                        const float w = totalWidth * block.widthFraction;
-                        if (clickX >= x && clickX < x + w)
-                        {
-                            selectedId = block.id;
-                            repaint();
-                            onSelect(block.id);
-                            return;
-                        }
-                        x += w;
-                    }
+                    selectedId = block.id;
+                    repaint();
+                    onSelect(block.id);
+                    return;
                 }
-                return;
+                x += w;
             }
-
-            juce::PopupMenu menu;
-            populateMenu(menu);
-
-            auto options = juce::PopupMenu::Options().withTargetComponent(this);
-            menu.showMenuAsync(
-                options,
-                [safeThis = juce::Component::SafePointer<ContextLane>(this)](int selectedId)
-                {
-                    if (safeThis == nullptr || selectedId <= 0 || safeThis->onAction == nullptr)
-                        return;
-
-                    safeThis->onAction(safeThis->menuTarget, selectedId, safeThis->actionNameFor(selectedId));
-                });
         }
+        return;
+    }
+
+    juce::PopupMenu menu;
+    populateMenu(menu);
+
+    auto options = juce::PopupMenu::Options().withTargetComponent(this);
+    menu.showMenuAsync(
+        options,
+        [safeThis = juce::Component::SafePointer<ContextLane>(this)](int selectedId)
+        {
+            if (safeThis == nullptr || selectedId <= 0 || safeThis->onAction == nullptr)
+                return;
+
+            safeThis->onAction(safeThis->menuTarget, selectedId, safeThis->actionNameFor(selectedId));
+        });
+}
 
     private:
         void populateMenu(juce::PopupMenu& menu) const
@@ -1929,7 +1983,16 @@ public:
             return;
         }
 
-        // Compute beat length per section (repeatCount × progression length)
+        // Helper: find a progression by id within the song's progression list.
+        auto findProg = [&](const juce::String& progId) -> const model::Progression*
+        {
+            for (const auto& p : progressions)
+                if (p.getId() == progId) return &p;
+            return nullptr;
+        };
+
+        // Compute beat length per section (repeatCount × progression length) and
+        // per-repeat variant map so the section lane can visualise variant repeats.
         struct SectionEntry
         {
             juce::String id;
@@ -1938,28 +2001,32 @@ public:
             juce::String timeSig;
             juce::Colour tint;
             juce::Colour boundaryColor;
+            juce::String progressionName;
+            std::vector<ContextLane::BlockData::RepeatCell> repeatCells;
         };
         std::vector<SectionEntry> entries;
         double totalBeats = 0.0;
 
         for (const auto& section : sections)
         {
+            // Sort refs by orderIndex so the "default" ref comes first.
+            auto refs = section.getProgressionRefs();
+            std::sort(refs.begin(), refs.end(), [](const auto& a, const auto& b)
+                { return a.getOrderIndex() < b.getOrderIndex(); });
+
             double sectionBeats = 0.0;
-            for (const auto& ref : section.getProgressionRefs())
+            for (const auto& ref : refs)
             {
-                for (const auto& prog : progressions)
+                if (const auto* prog = findProg(ref.getProgressionId()))
                 {
-                    if (prog.getId() == ref.getProgressionId())
-                    {
-                        double len = prog.getLengthBeats();
-                        if (len <= 0.0) len = 8.0;
-                        sectionBeats += len;
-                        break;
-                    }
+                    double len = prog->getLengthBeats();
+                    if (len <= 0.0) len = 8.0;
+                    sectionBeats += len;
                 }
             }
             if (sectionBeats <= 0.0) sectionBeats = 8.0;
-            const double withRepeats = sectionBeats * juce::jmax(1, section.getRepeatCount());
+            const int repeatCount = juce::jmax(1, section.getRepeatCount());
+            const double withRepeats = sectionBeats * repeatCount;
             totalBeats += withRepeats;
 
             juce::Colour tint;
@@ -1972,17 +2039,70 @@ public:
                 tint = juce::Colour::fromString(colorText);
 
             juce::Colour boundary = juce::Colour(0x00000000);
-            const int repeats = juce::jmax(1, section.getRepeatCount());
-            if (repeats <= 2) boundary = ThemeManager::get().theme().zoneC;
-            else if (repeats <= 4) boundary = ThemeManager::get().theme().zoneD;
+            if (repeatCount <= 2) boundary = ThemeManager::get().theme().zoneC;
+            else if (repeatCount <= 4) boundary = ThemeManager::get().theme().zoneD;
             else boundary = ThemeManager::get().theme().accentWarm;
 
             const auto timeSig = juce::String(section.getTimeSigNumerator()) + "/" + juce::String(section.getTimeSigDenominator());
-            entries.push_back({ section.getId(), section.getName(), withRepeats, timeSig, tint, boundary });
+
+            // Build a per-repeat progressionId map (0-based).
+            // First, seed every slot with the first "all"-scope ref's progressionId.
+            std::vector<juce::String> repeatProgIds(static_cast<size_t>(repeatCount), juce::String{});
+            for (const auto& ref : refs)
+            {
+                const auto indices = ref.getRepeatIndices().trim();
+                if (ref.getRepeatScope() == "all" || indices.isEmpty())
+                {
+                    for (auto& slot : repeatProgIds)
+                        slot = ref.getProgressionId();
+                    break;
+                }
+            }
+            // Then overlay refs that target specific repeat indices.
+            for (const auto& ref : refs)
+            {
+                const auto indices = ref.getRepeatIndices().trim();
+                if (indices.isEmpty() || ref.getRepeatScope() == "all")
+                    continue;
+                auto tokens = juce::StringArray::fromTokens(indices, ",", "");
+                for (const auto& t : tokens)
+                {
+                    const int idx = t.trim().getIntValue() - 1; // 0-based
+                    if (idx >= 0 && idx < repeatCount)
+                        repeatProgIds[static_cast<size_t>(idx)] = ref.getProgressionId();
+                }
+            }
+
+            // Convert the id map to RepeatCell values.
+            std::vector<ContextLane::BlockData::RepeatCell> cells;
+            cells.reserve(static_cast<size_t>(repeatCount));
+            for (const auto& progId : repeatProgIds)
+            {
+                bool isVar = false;
+                if (const auto* prog = findProg(progId))
+                    isVar = prog->getVariantOf().isNotEmpty();
+                cells.push_back({ isVar });
+            }
+
+            // Progression name for the subtitle line.
+            juce::String progName;
+            if (!refs.empty())
+            {
+                if (const auto* firstProg = findProg(refs[0].getProgressionId()))
+                    progName = firstProg->getName();
+                bool multi = false;
+                for (size_t i = 1; i < refs.size(); ++i)
+                    if (refs[i].getProgressionId() != refs[0].getProgressionId())
+                        { multi = true; break; }
+                if (multi) progName = "Multi";
+            }
+
+            entries.push_back({ section.getId(), section.getName(), withRepeats,
+                                 timeSig, tint, boundary, progName, std::move(cells) });
         }
 
         std::vector<ContextLane::BlockData> blockData;
-        for (const auto& e : entries)
+        for (auto& e : entries)
         {
             ContextLane::BlockData block;
             block.id = e.id;
@@ -1991,6 +2111,8 @@ public:
             block.timeSigLabel = e.timeSig != "4/4" ? e.timeSig : juce::String();
             block.tint = e.tint;
             block.boundaryScoreColor = e.boundaryColor;
+            block.subtitle = e.progressionName;
+            block.repeatCells = std::move(e.repeatCells);
             blockData.push_back(std::move(block));
         }
 
@@ -2288,6 +2410,23 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 
     addAndMakeVisible(topStrip);
 
+    // ---- Classic menu bar ----
+    commandManager.registerAllCommandsForTarget(this);
+    commandManager.setFirstCommandTarget(this);
+    appMenuBarModel  = std::make_unique<AppMenuBarModel>(commandManager);
+    menuBarComponent = std::make_unique<juce::MenuBarComponent>(appMenuBarModel.get());
+    addAndMakeVisible(*menuBarComponent);
+
+    // ---- Left nav section strip ----
+    activeNavSection = navSectionFromString(setle::state::AppPreferences::get().getActiveNavSection("edit"));
+    leftNavComponent = std::make_unique<LeftNavComponent>();
+    leftNavComponent->setActiveSection(activeNavSection);
+    leftNavComponent->onSectionChanged = [this](NavSection section)
+    {
+        switchNavSection(section);
+    };
+    addAndMakeVisible(*leftNavComponent);
+
     inPanel = new InDevicePanel(
         engineRef,
         [this]() { return grabSamplerQueue.get(); },
@@ -2331,6 +2470,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         "Active editor host:\npiano roll, sequencer, notation,\nor focused plugin UI");
     addAndMakeVisible(workPanel);
     configureTheoryEditorPanel();
+    switchNavSection(activeNavSection);
 
     timelineShell = new TimelineShell(
         [this](TheoryMenuTarget target, int actionId, const juce::String& actionName)
@@ -3014,18 +3154,76 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
         interactionStatus.setText("Theory editor reloaded from current selection", juce::dontSendNotification);
     };
 
-    // ---- Tab strip ----
-    for (auto* btn : { &workTabTheoryButton, &workTabGridRollButton, &workTabFxButton })
+    // ---- Zone header (replaces raw TextButton tab strip) ----
+    zoneHeader = std::make_unique<ZoneHeaderComponent>();
+    zoneHeader->setSection(activeNavSection);
+    zoneHeader->setActiveTab(0);
+    zoneHeader->onTabSelected = [this](int tabIndex) { switchWorkTab(tabIndex); };
+    zoneHeader->onContextControlTriggered = [this](const juce::String& controlId, int commandId, bool availableNow)
     {
-        btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
-        workPanel->addAndMakeVisible(*btn);
-    }
-    workTabTheoryButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c4a67)); // default active
-    workTabGridRollButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
-    workTabFxButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
+        if (availableNow && commandId != 0)
+        {
+            commandManager.invokeDirectly(commandId, true);
+            return;
+        }
+
+        interactionStatus.setText("Planned control: " + controlId + " (coming in a future phase)",
+                                  juce::dontSendNotification);
+    };
+    zoneHeader->onOverflowRequested = [this](juce::Component& anchor)
+    {
+        juce::PopupMenu m;
+        m.addSectionHeader("Zone options");
+        m.addItem(1, "Focus IN",       true, focusMode == FocusMode::inFocused);
+        m.addItem(2, "Focus Balanced", true, focusMode == FocusMode::balanced);
+        m.addItem(3, "Focus OUT",      true, focusMode == FocusMode::outFocused);
+        m.addSeparator();
+        m.addItem(4, "Undo Theory",  true);
+        m.addItem(5, "Redo Theory",  true);
+
+        const auto controls = getContextControls(activeNavSection);
+        bool hasPlanned = false;
+        int plannedItemId = 7000;
+        for (const auto& c : controls)
+        {
+            if (!c.availableNow)
+            {
+                if (!hasPlanned)
+                {
+                    m.addSeparator();
+                    m.addSectionHeader("Planned");
+                    hasPlanned = true;
+                }
+
+                auto line = juce::String(c.label) + " (planned)";
+                if (juce::String(c.plannedNote).isNotEmpty())
+                    line << " - " << c.plannedNote;
+                m.addItem(plannedItemId++, line, false, false);
+            }
+        }
+
+        m.showMenuAsync(
+            juce::PopupMenu::Options().withTargetComponent(&anchor),
+            [this](int id)
+            {
+                switch (id)
+                {
+                    case 1: applyFocusMode(FocusMode::inFocused);  break;
+                    case 2: applyFocusMode(FocusMode::balanced);   break;
+                    case 3: applyFocusMode(FocusMode::outFocused); break;
+                    case 4: performUndo();                         break;
+                    case 5: performRedo();                         break;
+                    default: break;
+                }
+            });
+    };
+    workPanel->addAndMakeVisible(*zoneHeader);
+
+    // Keep legacy buttons wired but invisible — their color-update logic
+    // in switchWorkTab() is harmless; ZoneHeaderComponent is the visible face.
     workTabTheoryButton.onClick   = [this] { switchWorkTab(0); };
-    workTabGridRollButton.onClick  = [this] { switchWorkTab(1); };
-    workTabFxButton.onClick        = [this] { switchWorkTab(2); };
+    workTabGridRollButton.onClick = [this] { switchWorkTab(1); };
+    workTabFxButton.onClick       = [this] { switchWorkTab(2); };
 
     // Create EffBuilderComponent
     effBuilderComponent = std::make_unique<setle::eff::EffBuilderComponent>();
@@ -3084,7 +3282,7 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
         }
     }
 
-    // Update tab button visual state
+    // Update tab button visual state (legacy buttons kept invisible but still data-accurate)
     const auto activeCol   = juce::Colour(0xff2c4a67);
     const auto inactiveCol = juce::Colour(0xff2a3040);
     workTabTheoryButton.setColour(juce::TextButton::buttonColourId,
@@ -3093,7 +3291,293 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
                                     tabIndex == 1 ? activeCol : inactiveCol);
     workTabFxButton.setColour(juce::TextButton::buttonColourId,
                                tabIndex == 2 ? activeCol : inactiveCol);
+
+    // Sync ZoneHeaderComponent
+    if (zoneHeader != nullptr)
+        zoneHeader->setActiveTab(tabIndex);
+
     resized();
+}
+
+void WorkspaceShellComponent::switchNavSection(NavSection section)
+{
+    activeNavSection = section;
+    setle::state::AppPreferences::get().setActiveNavSection(getNavSectionInfo(section).id);
+
+    if (leftNavComponent != nullptr)
+        leftNavComponent->setActiveSection(section);
+
+    // Determine which work tab to show for the new section and update zone header
+    const auto tabs = getContextTabs(section);
+    int targetTab = workPanelTabIndex; // keep current tab if valid for this section
+
+    if (!tabs.isEmpty())
+    {
+        // check if current tab is in the new section's tab list
+        bool currentTabValid = false;
+        for (const auto& t : tabs)
+            if (t.tabIndex == targetTab) { currentTabValid = true; break; }
+        if (!currentTabValid)
+            targetTab = tabs[0].tabIndex;
+    }
+
+    if (zoneHeader != nullptr)
+        zoneHeader->setSection(section);
+
+    switchWorkTab(targetTab);
+}
+
+// -----------------------------------------------------------------------
+// ApplicationCommandTarget implementation
+// -----------------------------------------------------------------------
+juce::ApplicationCommandTarget* WorkspaceShellComponent::getNextCommandTarget()
+{
+    return nullptr; // shell is top of command target chain
+}
+
+void WorkspaceShellComponent::getAllCommands(juce::Array<juce::CommandID>& commands)
+{
+    namespace ID = AppCommandIDs;
+    const juce::CommandID ids[] = {
+        ID::fileNew,     ID::fileSave,      ID::fileExportMidi, ID::fileExit,
+        ID::editUndo,    ID::editRedo,
+        ID::transportPlay, ID::transportStop, ID::transportRecord,
+        ID::toolSelect,  ID::toolDraw,    ID::toolErase,   ID::toolSplit,
+        ID::toolStretch, ID::toolListen,  ID::toolMarquee, ID::toolScaleSnap,
+        ID::viewFocusIn, ID::viewFocusBalanced, ID::viewFocusOut, ID::viewThemeEditor,
+        ID::navCreate,   ID::navEdit,     ID::navArrange,  ID::navSound,
+        ID::navMix,      ID::navLibrary,  ID::navSession,
+        ID::insertMidiTrack, ID::insertAudioTrack,
+        ID::helpAbout,
+    };
+    commands.addArray(ids, static_cast<int>(std::size(ids)));
+}
+
+void WorkspaceShellComponent::getCommandInfo(juce::CommandID commandID,
+                                              juce::ApplicationCommandInfo& result)
+{
+    namespace ID = AppCommandIDs;
+
+    switch (commandID)
+    {
+        // ---- File ----
+        case ID::fileNew:
+            result.setInfo("New Song", "Start a new empty song", "File", 0);
+            result.setActive(false); // not yet implemented
+            break;
+        case ID::fileSave:
+            result.setInfo("Save Song", "Save the current song", "File", 0);
+            result.addDefaultKeypress('s', juce::ModifierKeys::commandModifier);
+            break;
+        case ID::fileExportMidi:
+            result.setInfo("Export MIDI...", "Export song to MIDI file", "File", 0);
+            result.setActive(false); // not yet implemented
+            break;
+        case ID::fileExit:
+            result.setInfo("Exit", "Quit SETLE", "File", 0);
+            break;
+
+        // ---- Edit ----
+        case ID::editUndo:
+            result.setInfo("Undo Theory", "Undo the last theory change", "Edit", 0);
+            result.addDefaultKeypress('z', juce::ModifierKeys::commandModifier);
+            result.setActive(!undoSnapshots.empty());
+            break;
+        case ID::editRedo:
+            result.setInfo("Redo Theory", "Redo the last undone change", "Edit", 0);
+            result.addDefaultKeypress('z', juce::ModifierKeys::commandModifier
+                                            | juce::ModifierKeys::shiftModifier);
+            result.setActive(!redoSnapshots.empty());
+            break;
+
+        // ---- Transport ----
+        case ID::transportPlay:
+            result.setInfo("Play", "Start transport playback", "Transport", 0);
+            result.addDefaultKeypress(juce::KeyPress::spaceKey, juce::ModifierKeys::noModifiers);
+            break;
+        case ID::transportStop:
+            result.setInfo("Stop", "Stop transport playback", "Transport", 0);
+            break;
+        case ID::transportRecord:
+            result.setInfo("Record", "Start recording", "Transport", 0);
+            break;
+
+        // ---- Tools ----
+        case ID::toolSelect:
+            result.setInfo("Select",     "Select / move items",   "Tools", 0);
+            result.addDefaultKeypress('s', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolDraw:
+            result.setInfo("Draw",       "Draw new items",         "Tools", 0);
+            result.addDefaultKeypress('d', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolErase:
+            result.setInfo("Erase",      "Erase items",            "Tools", 0);
+            result.addDefaultKeypress('e', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolSplit:
+            result.setInfo("Split",      "Split items at cursor",  "Tools", 0);
+            result.addDefaultKeypress('b', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolStretch:
+            result.setInfo("Stretch",    "Time-stretch items",     "Tools", 0);
+            result.addDefaultKeypress('t', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolListen:
+            result.setInfo("Listen",     "Audition / preview",     "Tools", 0);
+            result.addDefaultKeypress('l', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolMarquee:
+            result.setInfo("Marquee",    "Marquee selection",      "Tools", 0);
+            result.addDefaultKeypress('m', juce::ModifierKeys::noModifiers);
+            break;
+        case ID::toolScaleSnap:
+            result.setInfo("Scale Snap", "Snap notes to scale",    "Tools", 0);
+            result.addDefaultKeypress('g', juce::ModifierKeys::noModifiers);
+            break;
+
+        // ---- View / Focus ----
+        case ID::viewFocusIn:
+            result.setInfo("Focus IN",       "Emphasise the capture/queue panel",  "View", 0);
+            result.setTicked(focusMode == FocusMode::inFocused);
+            break;
+        case ID::viewFocusBalanced:
+            result.setInfo("Focus Balanced", "Balanced layout",                    "View", 0);
+            result.setTicked(focusMode == FocusMode::balanced);
+            break;
+        case ID::viewFocusOut:
+            result.setInfo("Focus OUT",      "Emphasise the instruments/mix panel","View", 0);
+            result.setTicked(focusMode == FocusMode::outFocused);
+            break;
+        case ID::viewThemeEditor:
+            result.setInfo("Theme Editor",   "Open the visual theme editor",       "View", 0);
+            break;
+
+        // ---- Nav sections ----
+        case ID::navCreate:
+            result.setInfo("Create",  "Go to Create section (capture, queue)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::create);
+            break;
+        case ID::navEdit:
+            result.setInfo("Edit",    "Go to Edit section (theory, grid roll)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::edit);
+            break;
+        case ID::navArrange:
+            result.setInfo("Arrange", "Go to Arrange section (timeline)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::arrange);
+            break;
+        case ID::navSound:
+            result.setInfo("Sound",   "Go to Sound section (instruments, FX)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::sound);
+            break;
+        case ID::navMix:
+            result.setInfo("Mix",     "Go to Mix section (mixer, master)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::mix);
+            break;
+        case ID::navLibrary:
+            result.setInfo("Library", "Go to Library section (progressions, patterns)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::library);
+            break;
+        case ID::navSession:
+            result.setInfo("Session", "Go to Session settings (key, mode, BPM)", "View", 0);
+            result.setTicked(activeNavSection == NavSection::session);
+            break;
+
+        // ---- Insert ----
+        case ID::insertMidiTrack:
+            result.setInfo("Add MIDI Track",  "Add a new MIDI track to the timeline", "Insert", 0);
+            break;
+        case ID::insertAudioTrack:
+            result.setInfo("Add Audio Track", "Add a new audio track to the timeline", "Insert", 0);
+            break;
+
+        // ---- Help ----
+        case ID::helpAbout:
+            result.setInfo("About SETLE", "Version and credits", "Help", 0);
+            break;
+
+        default:
+            break;
+    }
+}
+
+bool WorkspaceShellComponent::perform(const juce::ApplicationCommandTarget::InvocationInfo& info)
+{
+    namespace ID = AppCommandIDs;
+
+    switch (info.commandID)
+    {
+        // ---- File ----
+        case ID::fileSave:
+            saveSongState();
+            interactionStatus.setText("Song saved.", juce::dontSendNotification);
+            return true;
+        case ID::fileExit:
+            juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            return true;
+
+        // ---- Edit ----
+        case ID::editUndo: performUndo(); return true;
+        case ID::editRedo: performRedo(); return true;
+
+        // ---- Transport ----
+        case ID::transportPlay:
+            if (edit != nullptr) { loadProgressionToEdit(); edit->getTransport().play(false); }
+            return true;
+        case ID::transportStop:
+            if (edit != nullptr) edit->getTransport().stop(false, false);
+            return true;
+        case ID::transportRecord:
+            if (edit != nullptr) { loadProgressionToEdit(); edit->getTransport().record(false); }
+            return true;
+
+        // ---- Tools ----
+        case ID::toolSelect:    EditToolManager::get().setActiveTool(EditTool::Select);    return true;
+        case ID::toolDraw:      EditToolManager::get().setActiveTool(EditTool::Draw);      return true;
+        case ID::toolErase:     EditToolManager::get().setActiveTool(EditTool::Erase);     return true;
+        case ID::toolSplit:     EditToolManager::get().setActiveTool(EditTool::Split);     return true;
+        case ID::toolStretch:   EditToolManager::get().setActiveTool(EditTool::Stretch);   return true;
+        case ID::toolListen:    EditToolManager::get().setActiveTool(EditTool::Listen);    return true;
+        case ID::toolMarquee:   EditToolManager::get().setActiveTool(EditTool::Marquee);   return true;
+        case ID::toolScaleSnap: EditToolManager::get().setActiveTool(EditTool::ScaleSnap); return true;
+
+        // ---- View / Focus ----
+        case ID::viewFocusIn:      applyFocusMode(FocusMode::inFocused);  return true;
+        case ID::viewFocusBalanced:applyFocusMode(FocusMode::balanced);   return true;
+        case ID::viewFocusOut:     applyFocusMode(FocusMode::outFocused); return true;
+        case ID::viewThemeEditor:  showThemeEditor(!themeEditorPanel->isVisible()); return true;
+
+        // ---- Nav sections ----
+        case ID::navCreate:  switchNavSection(NavSection::create);  return true;
+        case ID::navEdit:    switchNavSection(NavSection::edit);    return true;
+        case ID::navArrange: switchNavSection(NavSection::arrange); return true;
+        case ID::navSound:   switchNavSection(NavSection::sound);   return true;
+        case ID::navMix:     switchNavSection(NavSection::mix);     return true;
+        case ID::navLibrary: switchNavSection(NavSection::library); return true;
+        case ID::navSession: switchNavSection(NavSection::session); return true;
+
+        // ---- Insert ----
+        case ID::insertMidiTrack:
+            if (trackManager != nullptr)
+                trackManager->addMidiTrack("MIDI Track");
+            return true;
+        case ID::insertAudioTrack:
+            if (trackManager != nullptr)
+                trackManager->addAudioTrack("Audio Track");
+            return true;
+
+        // ---- Help ----
+        case ID::helpAbout:
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::AlertWindow::InfoIcon,
+                "SETLE",
+                "SETLE v0.0.1\n2nist — harmonic composition aid",
+                "OK");
+            return true;
+
+        default:
+            return false;
+    }
 }
 
 void WorkspaceShellComponent::openTheoryEditor(TheoryMenuTarget target, int actionId, const juce::String& actionName)
@@ -6164,6 +6648,15 @@ void WorkspaceShellComponent::ensureProgressionLoadedForNoteMode(const juce::Str
 void WorkspaceShellComponent::resized()
 {
     auto bounds = getLocalBounds();
+
+    // ---- 1. Classic menu bar (top-most strip) ----
+    if (menuBarComponent != nullptr)
+        menuBarComponent->setBounds(bounds.removeFromTop(menuBarHeight));
+
+    // ---- 2. Left-nav section strip ----
+    if (leftNavComponent != nullptr)
+        leftNavComponent->setBounds(bounds.removeFromTop(navBarHeight));
+
     clampLayoutValues(bounds.getWidth(), bounds.getHeight() - topStripHeight);
 
     auto topBounds = bounds.removeFromTop(topStripHeight);
@@ -6229,15 +6722,15 @@ void WorkspaceShellComponent::resized()
 
     workPanel->setBounds(bounds);
 
-    // ---- WORK panel tab strip ----
-    auto workLocal = workPanel->getLocalBounds().reduced(12);
+    // ---- WORK panel zone header + content area ----
+    auto workLocal = workPanel->getLocalBounds();
     {
-        auto tabRow = workLocal.removeFromTop(28);
-        workTabTheoryButton.setBounds(tabRow.removeFromLeft(120).reduced(2, 2));
-        workTabGridRollButton.setBounds(tabRow.removeFromLeft(100).reduced(2, 2));
-        workTabFxButton.setBounds(tabRow.removeFromLeft(60).reduced(2, 2));
+        // Zone header (tabs + section label + hamburger)
+        if (zoneHeader != nullptr)
+            zoneHeader->setBounds(workLocal.removeFromTop(ZoneHeaderComponent::kPreferredHeight));
     }
-    workLocal.removeFromTop(6); // gap between tabs and content
+    workLocal.reduce(12, 0);
+    workLocal.removeFromTop(6); // gap between header and content
 
     auto editorBounds = workLocal;
     theoryEditorPanel.setBounds(editorBounds);

@@ -1,5 +1,20 @@
 # UI Shell Implementation (Phase 2 - Steps 2-6)
 
+## Phase 2 Extension: Context Controls (Current + Future)
+
+The WORK zone header now includes section-aware context controls in addition to
+tabs. These controls are defined in `source/ui/NavSection.h` via
+`getContextControls(NavSection)`.
+
+- Live controls are command-backed and dispatch through
+  `ApplicationCommandManager`.
+- Planned controls are visible but disabled to provide roadmap context.
+- Zone overflow menu now includes a `Planned` subsection for the active
+  section.
+
+This gives users immediate discoverability of available actions while making
+future direction explicit in-context.
+
 Initial JUCE shell implementation is now in place with these behaviors:
 
 ## Layout

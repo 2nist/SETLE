@@ -265,4 +265,20 @@ void AppPreferences::setAutoGrabEnabled(bool enabled)
     }
 }
 
+juce::String AppPreferences::getActiveNavSection(const juce::String& fallback) const
+{
+    if (auto* s = settings())
+        return s->getValue("setle.ui.activeNavSection", fallback);
+    return fallback;
+}
+
+void AppPreferences::setActiveNavSection(const juce::String& sectionId)
+{
+    if (auto* s = settings())
+    {
+        s->setValue("setle.ui.activeNavSection", sectionId);
+        s->saveIfNeeded();
+    }
+}
+
 } // namespace setle::state
