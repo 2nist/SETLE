@@ -12,6 +12,9 @@ class BachTheory
 public:
     static bool isAvailable() noexcept { return false; }
     static std::vector<int> getChordPitchClasses(const juce::String& chordSymbol);
+    static std::vector<int> getChordPitchClasses(const juce::String& chordSymbol,
+                                                 const juce::String& keyRoot,
+                                                 const juce::String& mode);
 };
 
 } // namespace setle::theory

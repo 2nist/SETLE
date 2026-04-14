@@ -23,6 +23,7 @@ public:
 
     /** Fires when the user clicks a clip in any lane. Set from WorkspaceShellComponent. */
     std::function<void(te::Clip&)> onClipClicked;
+    std::function<void(te::Clip&)> onAnalyzeImportedClip;
 
 private:
     void timerCallback() override;

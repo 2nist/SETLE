@@ -101,6 +101,9 @@ private:
     void loadSongState();
     void seedSongStateIfNeeded();
     void saveSongState();
+    void runMidiAnalysisPipeline();
+    void runMidiAnalysisPipelineForClip(const juce::String& clipId);
+    void refreshSessionKeyModeSelectors();
     juce::String createSongSnapshot() const;
     bool restoreSongFromSnapshot(const juce::String& xmlSnapshot);
     void captureUndoStateIfChanged(const juce::String& beforeSnapshot);
@@ -169,6 +172,7 @@ private:
     juce::TextButton playButton   { juce::CharPointer_UTF8("\xe2\x96\xb6") };  // ▶
     juce::TextButton stopButton   { juce::CharPointer_UTF8("\xe2\x96\xa0") };  // ■
     juce::TextButton recordButton { juce::CharPointer_UTF8("\xe2\x97\x8f") };  // ●
+    juce::TextButton importMidiButton { "Import MIDI" };
     juce::Label     bpmLabel;
     juce::Label     transportPositionLabel;
     juce::TextEditor bpmEditor;
