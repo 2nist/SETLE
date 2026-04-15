@@ -3,6 +3,25 @@
 namespace setle::theme
 {
 
+namespace
+{
+float stableNoise(int x, int y)
+{
+    const auto v = std::sin(static_cast<float>(x * 17 + y * 31)) * 0.5f + 0.5f;
+    return juce::jlimit(0.0f, 1.0f, v);
+}
+}
+
+MaterialToggles materialToggles(const ThemeData& theme)
+{
+    return {
+        theme.isPebbled ? 1.0f : 0.0f,
+        juce::jlimit(0.0f, 1.0f, theme.glassDistortion),
+        juce::jlimit(0.0f, 1.0f, theme.materialInsetFuzz),
+        juce::jlimit(0.0f, 1.0f, theme.glowWarmth)
+    };
+}
+
 juce::Colour panelBackground(const ThemeData& theme, ZoneRole zone)
 {
     switch (zone)
@@ -234,6 +253,145 @@ float stroke(const ThemeData& theme, StrokeRole role)
     }
 
     return theme.strokeNormal;
+}
+
+void drawChassis(juce::Graphics& g,
+                 const juce::Rectangle<float>& bounds,
+                 juce::Colour baseColour,
+                 const ThemeData& theme,
+                 float cornerRadius)
+{
+    const auto material = materialToggles(theme);
+    g.setColour(baseColour);
+    g.fillRoundedRectangle(bounds, cornerRadius);
+
+    const auto textureStrength = 0.012f + 0.060f * material.chassisTexture;
+    if (textureStrength > 0.013f)
+    {
+        for (int y = static_cast<int>(bounds.getY()) + 2; y < static_cast<int>(bounds.getBottom()) - 2; y += 2)
+        {
+            for (int x = static_cast<int>(bounds.getX()) + 2; x < static_cast<int>(bounds.getRight()) - 2; x += 3)
+            {
+                const auto n = stableNoise(x, y);
+                g.setColour(juce::Colours::black.withAlpha(textureStrength * (0.4f + 0.8f * n)));
+                g.fillRect(x, y, 1, 1);
+            }
+        }
+    }
+
+    juce::ColourGradient topSheen(juce::Colours::white.withAlpha(0.06f + 0.08f * material.glassDepth),
+                                  bounds.getTopLeft(),
+                                  juce::Colours::transparentWhite,
+                                  bounds.getBottomLeft(),
+                                  false);
+    g.setGradientFill(topSheen);
+    g.fillRoundedRectangle(bounds.reduced(1.0f), cornerRadius - 1.0f);
+
+    g.setColour(theme.surfaceEdge.withAlpha(0.70f + 0.15f * material.chassisTexture));
+    g.drawRoundedRectangle(bounds.reduced(0.6f), cornerRadius, theme.strokeNormal);
+}
+
+void drawGlassPanel(juce::Graphics& g,
+                    const juce::Rectangle<float>& bounds,
+                    juce::Colour baseColour,
+                    const ThemeData& theme,
+                    bool drawBorder,
+                    float cornerRadius)
+{
+    const auto material = materialToggles(theme);
+    const float depth = material.glassDepth;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto inset = static_cast<float>(i) * 0.8f;
+        g.setColour(baseColour.withAlpha((0.05f + i * 0.025f) * (0.5f + 0.7f * depth)));
+        g.fillRoundedRectangle(bounds.reduced(inset), cornerRadius - inset * 0.15f);
+    }
+
+    juce::ColourGradient gloss(juce::Colours::white.withAlpha(0.03f + 0.10f * depth),
+                               bounds.getX(), bounds.getY(),
+                               juce::Colours::white.withAlpha(0.0f),
+                               bounds.getRight(), bounds.getBottom(),
+                               false);
+    g.setGradientFill(gloss);
+    g.fillRoundedRectangle(bounds.reduced(1.0f), cornerRadius - 0.5f);
+
+    if (depth > 0.05f)
+    {
+        for (int y = static_cast<int>(bounds.getY()) + 3; y < static_cast<int>(bounds.getBottom()) - 3; y += 3)
+        {
+            const int x = static_cast<int>(bounds.getX()) + 3 + (y % 9);
+            g.setColour(juce::Colours::white.withAlpha(0.008f + 0.020f * depth));
+            g.drawHorizontalLine(y, static_cast<float>(x), static_cast<float>(juce::jmin(x + 12, static_cast<int>(bounds.getRight()) - 3)));
+        }
+    }
+
+    if (drawBorder)
+    {
+        g.setColour(theme.surfaceEdge.withAlpha(0.35f + 0.25f * depth));
+        g.drawRoundedRectangle(bounds.reduced(0.6f), cornerRadius, theme.strokeNormal);
+    }
+}
+
+void drawFuzzyInsetPanel(juce::Graphics& g,
+                         const juce::Rectangle<float>& bounds,
+                         juce::Colour baseColour,
+                         const ThemeData& theme,
+                         bool drawBorder,
+                         float cornerRadius)
+{
+    const auto material = materialToggles(theme);
+    const float fuzz = material.insetFuzz;
+
+    g.setColour(baseColour.darker(0.20f + 0.10f * fuzz));
+    g.fillRoundedRectangle(bounds, cornerRadius);
+
+    juce::ColourGradient inset(juce::Colours::black.withAlpha(0.18f + 0.22f * fuzz),
+                               bounds.getTopLeft(),
+                               juce::Colours::transparentBlack,
+                               bounds.getCentre(),
+                               true);
+    g.setGradientFill(inset);
+    g.fillRoundedRectangle(bounds.reduced(1.0f), cornerRadius - 0.6f);
+
+    if (drawBorder)
+    {
+        g.setColour(theme.surfaceEdge.withAlpha(0.25f + 0.20f * fuzz));
+        g.drawRoundedRectangle(bounds.reduced(0.5f), cornerRadius, theme.strokeSubtle + 0.4f);
+    }
+}
+
+void drawIndicatorGlow(juce::Graphics& g,
+                       const juce::Point<float>& centre,
+                       float radius,
+                       juce::Colour accentColour,
+                       const ThemeData& theme,
+                       float glowFactor,
+                       bool active)
+{
+    const auto material = materialToggles(theme);
+    const auto clamped = juce::jlimit(0.0f, 1.0f, glowFactor) * (0.4f + 0.6f * material.glowAmount);
+
+    if (!active)
+    {
+        g.setColour(accentColour.darker(0.5f).withAlpha(0.35f));
+        g.fillEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f);
+        return;
+    }
+
+    const auto bloom = radius + (6.0f + 10.0f * material.glowAmount) * clamped;
+    juce::ColourGradient outer(accentColour.withAlpha(0.10f + 0.40f * clamped),
+                               centre,
+                               accentColour.withAlpha(0.0f),
+                               centre.translated(bloom, 0.0f),
+                               false);
+    g.setGradientFill(outer);
+    g.fillEllipse(centre.x - bloom, centre.y - bloom, bloom * 2.0f, bloom * 2.0f);
+
+    g.setColour(accentColour.withAlpha(0.45f + 0.45f * clamped));
+    g.fillEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f);
+    g.setColour(juce::Colours::white.withAlpha(0.10f + 0.25f * clamped));
+    g.fillEllipse(centre.x - radius * 0.45f, centre.y - radius * 0.65f, radius * 0.7f, radius * 0.7f);
 }
 
 } // namespace setle::theme

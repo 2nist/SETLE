@@ -7,17 +7,22 @@
 #include "LeftNavComponent.h"
 #include "ZoneHeaderComponent.h"
 
+#include <juce_dsp/juce_dsp.h>
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cmath>
 #include <cstdlib>
 #include <functional>
+#include <numeric>
 #include <set>
 
 #include "../theme/ThemePresets.h"
 #include "../theme/ThemeStyleHelpers.h"
 #include "../theory/BachTheory.h"
+#include "../theory/DiatonicHarmony.h"
+#include "../theory/TheoryEngine.h"
 
 namespace te = tracktion::engine;
 
@@ -26,6 +31,12 @@ namespace setle::ui
 
 namespace
 {
+void shellTrace(const juce::String& message)
+{
+    const auto stamp = juce::Time::getCurrentTime().toString(true, true);
+    juce::Logger::writeToLog("[SETLE][Shell][" + stamp + "] " + message);
+}
+
 enum TheoryActionId
 {
     sectionEditTheory = 101,
@@ -99,7 +110,6 @@ enum TheoryActionId
     chordInvertVoicing = 222,
     chordSendToGridRoll = 223
 };
-
 static const juce::Identifier kInstrumentSlotsContainerId { "instrumentSlots" };
 static const juce::Identifier kInstrumentSlotEntryId { "instrumentSlot" };
 static const juce::Identifier kSlotTrackIdProp { "trackId" };
@@ -107,12 +117,191 @@ static const juce::Identifier kSlotTypeProp { "slotType" };
 static const juce::Identifier kSlotPersistentIdProp { "persistentId" };
 static const juce::Identifier kSlotPersistentNameProp { "persistentName" };
 
+te::AudioTrack* findAudioTrackById(setle::timeline::TrackManager* trackManager, const juce::String& trackId)
+{
+    if (trackManager == nullptr)
+        return nullptr;
+
+    for (auto* track : trackManager->getAllUserTracks())
+        if (auto* audioTrack = dynamic_cast<te::AudioTrack*>(track))
+            if (audioTrack->itemID.toString() == trackId)
+                return audioTrack;
+
+    return nullptr;
+}
+
+juce::String findSidechainSourceChoice(te::Plugin& plugin, const juce::String& trackName)
+{
+    for (const auto& choice : plugin.getSidechainSourceNames(false))
+        if (choice.endsWithIgnoreCase(trackName))
+            return choice;
+
+    return {};
+}
+
+te::CompressorPlugin* findExistingTracktionCompressor(te::AudioTrack& track)
+{
+    for (auto* plugin : track.pluginList.getPlugins())
+        if (auto* compressor = dynamic_cast<te::CompressorPlugin*>(plugin))
+            return compressor;
+
+    return nullptr;
+}
+
+te::CompressorPlugin* ensureTracktionCompressor(te::AudioTrack& track, te::Edit& edit)
+{
+    if (auto* existing = findExistingTracktionCompressor(track))
+        return existing;
+
+    auto plugin = edit.getPluginCache().createNewPlugin(te::CompressorPlugin::xmlTypeName, {});
+    auto* compressor = dynamic_cast<te::CompressorPlugin*>(plugin.get());
+    if (compressor == nullptr)
+        return nullptr;
+
+    const auto existingPlugins = track.pluginList.getPlugins();
+    const int insertIndex = juce::jmax(0, existingPlugins.size() - 2);
+    track.pluginList.insertPlugin(plugin, insertIndex, nullptr);
+    return compressor;
+}
+
+std::optional<float> measureIntegratedLoudnessLufs(const juce::AudioBuffer<float>& sourceBuffer, double sampleRate)
+{
+    if (sourceBuffer.getNumChannels() <= 0 || sourceBuffer.getNumSamples() <= 0 || sampleRate <= 0.0)
+        return std::nullopt;
+
+    juce::AudioBuffer<float> weighted(sourceBuffer.getNumChannels(), sourceBuffer.getNumSamples());
+    weighted.makeCopyOf(sourceBuffer, true);
+
+    auto highPass = juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, 38.0f);
+    auto highShelf = juce::dsp::IIR::Coefficients<float>::makeHighShelf(sampleRate, 1500.0f, 0.7071f,
+                                                                        juce::Decibels::decibelsToGain(4.0f));
+
+    for (int ch = 0; ch < weighted.getNumChannels(); ++ch)
+    {
+        juce::dsp::IIR::Filter<float> hpFilter;
+        juce::dsp::IIR::Filter<float> shelfFilter;
+        hpFilter.coefficients = highPass;
+        shelfFilter.coefficients = highShelf;
+        hpFilter.reset();
+        shelfFilter.reset();
+
+        auto* data = weighted.getWritePointer(ch);
+        for (int sampleIndex = 0; sampleIndex < weighted.getNumSamples(); ++sampleIndex)
+            data[sampleIndex] = shelfFilter.processSample(hpFilter.processSample(data[sampleIndex]));
+    }
+
+    const int blockSize = juce::jmax(1, static_cast<int>(std::round(sampleRate * 0.4)));
+    const int hopSize = juce::jmax(1, static_cast<int>(std::round(sampleRate * 0.1)));
+
+    std::vector<double> gatedBlockEnergies;
+    for (int start = 0; start + blockSize <= weighted.getNumSamples(); start += hopSize)
+    {
+        double energy = 0.0;
+        for (int ch = 0; ch < weighted.getNumChannels(); ++ch)
+        {
+            const auto* data = weighted.getReadPointer(ch, start);
+            for (int i = 0; i < blockSize; ++i)
+            {
+                const double sample = static_cast<double>(data[i]);
+                energy += sample * sample;
+            }
+        }
+
+        energy /= static_cast<double>(blockSize * weighted.getNumChannels());
+        if (energy <= 0.0)
+            continue;
+
+        const auto blockLufs = static_cast<float>(-0.691 + 10.0 * std::log10(energy));
+        if (blockLufs >= -70.0f)
+            gatedBlockEnergies.push_back(energy);
+    }
+
+    if (gatedBlockEnergies.empty())
+        return std::nullopt;
+
+    const auto absoluteMeanEnergy = std::accumulate(gatedBlockEnergies.begin(), gatedBlockEnergies.end(), 0.0)
+                                    / static_cast<double>(gatedBlockEnergies.size());
+    const auto ungatedLufs = -0.691 + 10.0 * std::log10(absoluteMeanEnergy);
+    const auto relativeGate = ungatedLufs - 10.0;
+
+    std::vector<double> integratedEnergies;
+    integratedEnergies.reserve(gatedBlockEnergies.size());
+    for (const auto energy : gatedBlockEnergies)
+    {
+        const auto blockLufs = -0.691 + 10.0 * std::log10(energy);
+        if (blockLufs >= relativeGate)
+            integratedEnergies.push_back(energy);
+    }
+
+    if (integratedEnergies.empty())
+        integratedEnergies = gatedBlockEnergies;
+
+    const auto integratedMeanEnergy = std::accumulate(integratedEnergies.begin(), integratedEnergies.end(), 0.0)
+                                      / static_cast<double>(integratedEnergies.size());
+    if (integratedMeanEnergy <= 0.0)
+        return std::nullopt;
+
+    return static_cast<float>(-0.691 + 10.0 * std::log10(integratedMeanEnergy));
+}
+
+int scoreSidechainSourceCandidate(const juce::String& trackName,
+                                  setle::instruments::InstrumentSlot::SlotType slotType)
+{
+    auto lower = trackName.toLowerCase();
+    int score = 0;
+
+    if (slotType == setle::instruments::InstrumentSlot::SlotType::DrumMachine)
+        score += 50;
+    if (lower.contains("kick"))
+        score += 120;
+    if (lower.contains("drum"))
+        score += 70;
+    if (lower.contains("beat") || lower.contains("perc"))
+        score += 25;
+
+    return score;
+}
+
+int scoreSidechainTargetCandidate(const juce::String& trackName,
+                                  setle::instruments::InstrumentSlot::SlotType slotType,
+                                  bool isFocusedTrack)
+{
+    auto lower = trackName.toLowerCase();
+    int score = 0;
+
+    if (slotType == setle::instruments::InstrumentSlot::SlotType::DrumMachine
+        || slotType == setle::instruments::InstrumentSlot::SlotType::MidiOut
+        || slotType == setle::instruments::InstrumentSlot::SlotType::Empty)
+        return -1;
+
+    if (isFocusedTrack)
+        score += 55;
+    if (lower.contains("bass") || lower.contains("sub"))
+        score += 120;
+    if (lower.contains("pad"))
+        score += 95;
+    if (lower.contains("synth") || lower.contains("poly"))
+        score += 25;
+    if (slotType == setle::instruments::InstrumentSlot::SlotType::PolySynth)
+        score += 20;
+    if (slotType == setle::instruments::InstrumentSlot::SlotType::ReelSampler
+        || slotType == setle::instruments::InstrumentSlot::SlotType::VST3)
+        score += 10;
+
+    return score;
+}
+
 class OutputCaptureTap final : public juce::AudioIODeviceCallback
 {
 public:
     explicit OutputCaptureTap(setle::capture::CircularAudioBuffer& bufferToWrite)
         : buffer(bufferToWrite)
     {
+    }
+
+    void setOnAudioBlockCaptured(std::function<void(float, int)> callback)
+    {
+        onAudioBlockCaptured = std::move(callback);
     }
 
     void audioDeviceIOCallbackWithContext(const float* const*,
@@ -123,6 +312,22 @@ public:
                                           const juce::AudioIODeviceCallbackContext&) override
     {
         buffer.pushAudioBlock(outputChannelData, numOutputChannels, numSamples);
+
+        if (onAudioBlockCaptured == nullptr || outputChannelData == nullptr || numSamples <= 0 || numOutputChannels <= 0)
+            return;
+
+        float peak = 0.0f;
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+        {
+            const auto* channel = outputChannelData[ch];
+            if (channel == nullptr)
+                continue;
+
+            for (int s = 0; s < numSamples; ++s)
+                peak = juce::jmax(peak, std::abs(channel[s]));
+        }
+
+        onAudioBlockCaptured(peak, numSamples);
     }
 
     void audioDeviceAboutToStart(juce::AudioIODevice* device) override
@@ -136,11 +341,13 @@ public:
 
 private:
     setle::capture::CircularAudioBuffer& buffer;
+    std::function<void(float, int)> onAudioBlockCaptured;
 };
 
 juce::String slotTypeToString(setle::instruments::InstrumentSlot::SlotType type)
 {
     using SlotType = setle::instruments::InstrumentSlot::SlotType;
+
     switch (type)
     {
         case SlotType::PolySynth:   return "PolySynth";
@@ -150,6 +357,7 @@ juce::String slotTypeToString(setle::instruments::InstrumentSlot::SlotType type)
         case SlotType::MidiOut:     return "MidiOut";
         case SlotType::Empty:       break;
     }
+
     return "Empty";
 }
 
@@ -241,6 +449,47 @@ juce::String nextSectionName(const juce::String& current)
             return names[(i + 1) % names.size()];
 
     return names[0];
+}
+
+juce::String relativeModeFor(const juce::String& mode)
+{
+    const auto lower = mode.trim().toLowerCase();
+    if (lower == "ionian" || lower == "major") return "dorian";
+    if (lower == "dorian") return "aeolian";
+    if (lower == "phrygian") return "aeolian";
+    if (lower == "lydian") return "mixolydian";
+    if (lower == "mixolydian") return "dorian";
+    if (lower == "aeolian" || lower == "minor") return "dorian";
+    if (lower == "locrian") return "phrygian";
+    return "dorian";
+}
+
+juce::String qualitySuffixFor(const setle::model::Chord& chord)
+{
+    const auto quality = chord.getQuality().toLowerCase();
+    if (quality.contains("major7")) return "maj7";
+    if (quality.contains("dominant")) return "7";
+    if (quality.contains("minor7")) return "m7";
+    if (quality.contains("minor")) return "m";
+    if (quality.contains("dim")) return "dim";
+    if (quality.contains("aug")) return "aug";
+    return {};
+}
+
+int nearestDegreeIndex(int pitchClass, const std::vector<int>& intervals)
+{
+    int bestIndex = 0;
+    int bestDistance = 12;
+    for (int i = 0; i < static_cast<int>(intervals.size()); ++i)
+    {
+        const auto distance = std::abs(intervals[static_cast<size_t>(i)] - pitchClass);
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            bestIndex = i;
+        }
+    }
+    return bestIndex;
 }
 
 juce::String nextFunction(const juce::String& current)
@@ -1321,9 +1570,9 @@ public:
 
             b.removeFromTop(6);
             if (editorComponent != nullptr)
-                editorComponent->setBounds(b.removeFromTop(84));
+                editorComponent->setBounds(b.removeFromTop(124));
             else
-                b.removeFromTop(84);
+                b.removeFromTop(124);
 
             b.removeFromTop(6);
             auto mix = b.removeFromTop(24);
@@ -1421,8 +1670,8 @@ public:
         int y = 6;
         for (auto& strip : strips)
         {
-            strip->setBounds(6, y, width - 12, 180);
-            y += 188;
+            strip->setBounds(6, y, width - 12, 228);
+            y += 236;
         }
 
         content.setSize(width, juce::jmax(y + 6, getHeight()));
@@ -2304,12 +2553,13 @@ private:
 WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     : engineRef(engine)
 {
+    shellTrace("constructor: begin");
     grabSamplerQueue = std::make_unique<setle::capture::GrabSamplerQueue>();
 
     setWantsKeyboardFocus(true);
 
     auto topStripLabelFont = juce::FontOptions(15.0f);
-    topTitle.setText("SETLE - IN > WORK > OUT", juce::dontSendNotification);
+    topTitle.setText("IN > WORK > OUT", juce::dontSendNotification);
     topTitle.setFont(topStripLabelFont);
     topTitle.setJustificationType(juce::Justification::centredLeft);
     topTitle.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.88f));
@@ -2319,6 +2569,8 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     interactionStatus.setJustificationType(juce::Justification::centredLeft);
     interactionStatus.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.72f));
 
+    quesoLogoComponent = std::make_unique<QuesoLogoComponent>();
+    topStrip.addAndMakeVisible(*quesoLogoComponent);
     topStrip.addAndMakeVisible(topTitle);
     topStrip.addAndMakeVisible(interactionStatus);
     topStrip.addAndMakeVisible(playButton);
@@ -2421,6 +2673,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     activeNavSection = navSectionFromString(setle::state::AppPreferences::get().getActiveNavSection("edit"));
     leftNavComponent = std::make_unique<LeftNavComponent>();
     leftNavComponent->setActiveSection(activeNavSection);
+    shellTrace(juce::String("constructor: left nav created with section=") + getNavSectionInfo(activeNavSection).id);
     leftNavComponent->onSectionChanged = [this](NavSection section)
     {
         switchNavSection(section);
@@ -2470,7 +2723,6 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         "Active editor host:\npiano roll, sequencer, notation,\nor focused plugin UI");
     addAndMakeVisible(workPanel);
     configureTheoryEditorPanel();
-    switchNavSection(activeNavSection);
 
     timelineShell = new TimelineShell(
         [this](TheoryMenuTarget target, int actionId, const juce::String& actionName)
@@ -2510,6 +2762,10 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         },
         [this] { saveLayoutState(); });
     addAndMakeVisible(timelineResizeBar);
+
+    // Defer initial section switch until core shell components exist.
+    switchNavSection(activeNavSection);
+    shellTrace("constructor: initial section switch applied");
 
     focusInButton.onClick = [this] { applyFocusMode(FocusMode::inFocused); };
     focusBalancedButton.onClick = [this] { applyFocusMode(FocusMode::balanced); };
@@ -2585,6 +2841,12 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 
     // --- Phase 4: create a single-track Tracktion Edit and sync BPM ---
     edit = te::Edit::createSingleTrackEdit(engineRef);
+    if (edit == nullptr)
+    {
+        shellTrace("constructor: fallback active, edit creation returned null");
+        interactionStatus.setText("Startup fallback: edit engine unavailable. UI running in limited mode.",
+                                  juce::dontSendNotification);
+    }
     historyBuffer = std::make_unique<setle::capture::HistoryBuffer>(
         setle::state::AppPreferences::get().getHistoryBufferMaxBeats(64));
     const auto historyBeats = juce::jmax(16, setle::state::AppPreferences::get().getHistoryBufferMaxBeats(64));
@@ -2594,6 +2856,22 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     circularAudioBuffer = std::make_unique<setle::capture::CircularAudioBuffer>(captureSeconds);
     outputCaptureTap = std::make_unique<OutputCaptureTap>(*circularAudioBuffer);
     engineRef.getDeviceManager().deviceManager.addAudioCallback(outputCaptureTap.get());
+    sessionDashboardComponent = std::make_unique<SessionDashboardComponent>(engineRef,
+                                                                            songState,
+                                                                            *circularAudioBuffer,
+                                                                            edit.get());
+    if (auto* captureTap = dynamic_cast<OutputCaptureTap*>(outputCaptureTap.get()))
+    {
+        captureTap->setOnAudioBlockCaptured(
+            [safeDashboard = juce::Component::SafePointer<SessionDashboardComponent>(sessionDashboardComponent.get())]
+            (float peakLevel, int numSamples)
+            {
+                if (safeDashboard != nullptr)
+                    safeDashboard->pushAudioCallbackMetrics(peakLevel, numSamples);
+            });
+    }
+    workPanel->addAndMakeVisible(*sessionDashboardComponent);
+    sessionDashboardComponent->setVisible(false);
     refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
     if (grabSamplerQueue != nullptr)
         grabSamplerQueue->setSong(&songState);
@@ -2603,6 +2881,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
             tempo->setBpm(songState.getBpm());
 
         trackManager = std::make_unique<setle::timeline::TrackManager>(*edit);
+        timelineStampManager = std::make_unique<setle::timeline::TimelineStampManager>(*edit);
         trackManager->ensureDefaultTracks();
         ensureInstrumentSlots();
         applyPersistedInstrumentSlotAssignments();
@@ -2677,14 +2956,30 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         {
             interactionStatus.setText(msg, juce::dontSendNotification);
         };
+        gridRollComponent->onSelectionMetadataChanged = [this](const setle::gridroll::GridRollComponent::SelectionMetadata& metadata)
+        {
+            handleGridRollSelectionChanged(metadata);
+        };
+        gridRollComponent->onConstraintLockChanged = [this](bool scaleLock, bool chordLock)
+        {
+            setle::state::AppPreferences::get().setScaleLockEnabled(scaleLock);
+            setle::state::AppPreferences::get().setChordLockEnabled(chordLock);
+            interactionStatus.setText(
+                "Constraints: Scale Lock " + juce::String(scaleLock ? "ON" : "OFF")
+                    + " | Chord Lock " + juce::String(chordLock ? "ON" : "OFF"),
+                juce::dontSendNotification);
+        };
         gridRollComponent->onDrumPatternEdited = [this](const std::vector<setle::gridroll::GridRollCell>& cells,
                                                         const juce::String& progId)
         {
             applyDrumPatternToSlots(cells, progId);
         };
+        gridRollComponent->setScaleLock(setle::state::AppPreferences::get().getScaleLockEnabled());
+        gridRollComponent->setChordLock(setle::state::AppPreferences::get().getChordLockEnabled());
         if (!selectedProgressionId.isEmpty())
             gridRollComponent->setTargetProgression(selectedProgressionId);
         workPanel->addAndMakeVisible(*gridRollComponent);
+        shellTrace("constructor: edit/timeline/gridroll initialized");
     }
     bpmEditor.setText(juce::String(songState.getBpm(), 1), juce::dontSendNotification);
 
@@ -2693,6 +2988,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     updateUndoRedoButtonState();
     startTimerHz(30);
     updateInPanelQueueView();
+    shellTrace("constructor: completed");
 }
 
 WorkspaceShellComponent::~WorkspaceShellComponent()
@@ -2706,6 +3002,14 @@ WorkspaceShellComponent::~WorkspaceShellComponent()
     saveSongState();
     ThemeManager::get().removeListener(this);
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
+}
+
+std::optional<setle::timeline::TimelineStampManager::GhostTrail> WorkspaceShellComponent::getGhostTrail(const juce::String& sectionId) const
+{
+    if (timelineStampManager == nullptr || sectionId.isEmpty())
+        return std::nullopt;
+
+    return timelineStampManager->getGhostTrail(sectionId);
 }
 
 bool WorkspaceShellComponent::keyPressed(const juce::KeyPress& key)
@@ -2736,6 +3040,13 @@ bool WorkspaceShellComponent::keyPressed(const juce::KeyPress& key)
             case 'l': case 'L': EditToolManager::get().setActiveTool(EditTool::Listen); return true;
             case 'm': case 'M': EditToolManager::get().setActiveTool(EditTool::Marquee); return true;
             case 'g': case 'G': EditToolManager::get().setActiveTool(EditTool::ScaleSnap); return true;
+            case 'h': case 'H':
+                if (activeNavSection == NavSection::edit && workPanelTabIndex == 1 && gridRollComponent != nullptr)
+                {
+                    gridRollComponent->toggleHumanizePopover();
+                    return true;
+                }
+                break;
             default: break;
         }
     }
@@ -2808,6 +3119,31 @@ void WorkspaceShellComponent::paint(juce::Graphics& g)
                                                 6.0f, 6.0f);
         g.setColour(theme.zoneC.withAlpha(0.45f + 0.50f * pulse));
         g.fillEllipse(dot);
+    }
+
+    if (theoryEditorPanel.isVisible() && activeNavSection == NavSection::edit)
+    {
+        const auto panelBounds = getLocalArea(&theoryEditorPanel, theoryEditorPanel.getLocalBounds()).toFloat();
+        const auto outer = panelBounds.expanded(2.0f);
+
+        // Pebbled matte edge treatment to make the editor feel recessed into the chassis.
+        g.setColour(theme.surface0.withAlpha(0.88f));
+        g.fillRoundedRectangle(outer, 8.0f);
+        for (int y = static_cast<int>(outer.getY()) + 2; y < static_cast<int>(outer.getBottom()) - 2; y += 2)
+        {
+            const auto alpha = ((y / 2) % 2 == 0) ? 0.010f : 0.018f;
+            g.setColour(theme.surface1.withAlpha(alpha));
+            g.fillRect(static_cast<int>(outer.getX()) + 2, y,
+                       static_cast<int>(outer.getWidth()) - 4, 1);
+        }
+
+        // Fuzzy inset shell around the full editor panel.
+        g.setColour(theme.surface3.withAlpha(0.82f));
+        g.fillRoundedRectangle(panelBounds.reduced(1.0f), 7.0f);
+        g.setColour(juce::Colours::black.withAlpha(0.22f));
+        g.drawRoundedRectangle(panelBounds.reduced(1.0f), 7.0f, 1.4f);
+        g.setColour(theme.inkLight.withAlpha(0.07f));
+        g.drawRoundedRectangle(panelBounds.reduced(2.5f), 6.0f, 0.8f);
     }
 
     drawThemePreviewHighlight(g);
@@ -3121,10 +3457,10 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
 
     auto configureEditor = [](juce::TextEditor& editor)
     {
-        editor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff1d2229));
+        editor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff151a1f));
         editor.setColour(juce::TextEditor::textColourId, juce::Colours::white.withAlpha(0.96f));
-        editor.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff3a414a));
-        editor.setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(0xff5b7894));
+        editor.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff2f353d));
+        editor.setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(0xffa84c32));
         editor.setTextToShowWhenEmpty("...", juce::Colours::white.withAlpha(0.35f));
     };
 
@@ -3134,9 +3470,23 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
     configureEditor(theoryFieldEditor4);
     configureEditor(theoryFieldEditor5);
 
-    applyTheoryEditorButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3d4f62));
+    auto wireLiveField = [this](juce::TextEditor& editor)
+    {
+        editor.onTextChange = [this]
+        {
+            if (suppressLiveCoupledFieldEvents)
+                return;
+            applyLiveCoupledTheoryMutation();
+        };
+    };
+    wireLiveField(theoryFieldEditor1);
+    wireLiveField(theoryFieldEditor2);
+    wireLiveField(theoryFieldEditor3);
+    wireLiveField(theoryFieldEditor4);
+
+    applyTheoryEditorButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff7a3b28));
     applyTheoryEditorButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.94f));
-    reloadTheoryEditorButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2f3945));
+    reloadTheoryEditorButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2b323a));
     reloadTheoryEditorButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.94f));
 
     theoryObjectSelector.onChange = [this]
@@ -3227,14 +3577,90 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
 
     // Create EffBuilderComponent
     effBuilderComponent = std::make_unique<setle::eff::EffBuilderComponent>();
-    workPanel->addAndMakeVisible(*effBuilderComponent);
-    effBuilderComponent->setVisible(false);
+    effBuilderComponent->setVisible(true);
+
+    // Create SoundWorkComponent host for the SOUND station
+    soundWorkComponent = std::make_unique<SoundWorkComponent>();
+    soundWorkComponent->setEffBuilder(effBuilderComponent.get());
+    soundWorkComponent->onFocusTrackRequested = [this](const juce::String& trackId)
+    {
+        focusSoundTrack(trackId);
+    };
+    soundWorkComponent->onSmartSidechainRequested = [this](const juce::String& focusedTrackId)
+    {
+        return buildSmartSidechainSuggestion(focusedTrackId);
+    };
+    soundWorkComponent->onSmartSidechainAccepted = [this](const SoundWorkComponent::SidechainSuggestion& suggestion)
+    {
+        applySmartSidechainSuggestion(suggestion);
+    };
+    soundWorkComponent->onAutoGainRequested = [this](const juce::String& focusedTrackId)
+    {
+        return runAutoGainForTrack(focusedTrackId);
+    };
+    soundWorkComponent->onAddMidiRequested = [this]
+    {
+        showVesselSelectionModal();
+    };
+    soundWorkComponent->onMonoModeChanged = [this](bool enabled)
+    {
+        interactionStatus.setText(enabled ? "Mono mode enabled" : "Mono mode disabled", juce::dontSendNotification);
+    };
+    workPanel->addAndMakeVisible(*soundWorkComponent);
+    soundWorkComponent->setVisible(false);
+
+    arrangeWorkComponent = std::make_unique<ArrangeWorkComponent>();
+    arrangeWorkComponent->onSectionSelected = [this](const juce::String& sectionId)
+    {
+        selectedSectionId = sectionId;
+        ensureSelectionDefaults();
+        populateTheoryObjectSelector();
+        populateTheoryFieldsForCurrentSelection();
+        refreshTimelineData();
+        interactionStatus.setText("Arrange focus: " + sectionId.substring(0, 8), juce::dontSendNotification);
+    };
+    arrangeWorkComponent->onSectionOrderChanged = [this](const juce::StringArray& orderedIds)
+    {
+        onSectionReordered(orderedIds);
+    };
+    arrangeWorkComponent->onSmartDuplicateRequested = [this](const juce::String& sectionId, ArrangeWorkComponent::DuplicateMode mode)
+    {
+        interactionStatus.setText(smartDuplicateSection(sectionId, mode), juce::dontSendNotification);
+    };
+    arrangeWorkComponent->onStructuralMeltChanged = [this](float meltFactor)
+    {
+        arrangeLogoMeltTarget = meltFactor;
+    };
+    workPanel->addAndMakeVisible(*arrangeWorkComponent);
+    arrangeWorkComponent->setVisible(false);
 
     // gridRollComponent is created later in the constructor after edit is initialised
 }
 
 void WorkspaceShellComponent::switchWorkTab(int tabIndex)
 {
+    if (workPanel == nullptr)
+    {
+        shellTrace("switchWorkTab: fallback, workPanel is null");
+        interactionStatus.setText("Fallback: WORK panel unavailable. Staying on current view.",
+                                  juce::dontSendNotification);
+        return;
+    }
+
+    // Only these tabs are currently implemented in the WORK panel.
+    const auto requestedTab = tabIndex;
+    if (tabIndex < 0 || tabIndex > 4)
+    {
+        shellTrace("switchWorkTab: invalid tab index=" + juce::String(tabIndex) + ", clamping to 0");
+        interactionStatus.setText("Fallback: unsupported tab requested, returning to Theory.",
+                                  juce::dontSendNotification);
+        tabIndex = 0;
+    }
+
+    shellTrace("switchWorkTab: requested=" + juce::String(requestedTab)
+        + " resolved=" + juce::String(tabIndex)
+        + " section=" + getNavSectionInfo(activeNavSection).id);
+
     workPanelTabIndex    = tabIndex;
     workPanelShowGridRoll = (tabIndex == 1);
 
@@ -3251,35 +3677,46 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
         gridRollComponent->setVisible(tabIndex == 1);
     }
 
+    if (soundWorkComponent != nullptr)
+        soundWorkComponent->setVisible(tabIndex == 2);
+
+    if (arrangeWorkComponent != nullptr)
+    {
+        arrangeWorkComponent->setVisible(tabIndex == 4);
+        if (tabIndex == 4)
+            refreshArrangeWorkspace();
+    }
+
     if (effBuilderComponent != nullptr)
     {
         effBuilderComponent->setVisible(tabIndex == 2);
 
         if (tabIndex == 2)
         {
-            // Wire up the first available active slot's eff processor
-            for (auto& [trackId, slot] : instrumentSlots)
+            refreshSoundRoster();
+
+            juce::String targetTrackId = selectedFxTrackId;
+            auto selectedIt = instrumentSlots.find(targetTrackId);
+            if (selectedIt == instrumentSlots.end() || selectedIt->second == nullptr || !selectedIt->second->getInfo().isActive)
             {
-                if (slot != nullptr && slot->getInfo().isActive)
+                for (auto& [trackId, slot] : instrumentSlots)
                 {
-                    selectedFxTrackId = trackId;
-                    auto* proc = slot->getEffProcessor();
-                    if (proc == nullptr)
+                    if (slot != nullptr && slot->getInfo().isActive)
                     {
-                        // Create an empty chain for this track on first visit
-                        setle::eff::EffDefinition emptyDef;
-                        emptyDef.effId    = juce::Uuid().toString();
-                        emptyDef.name     = "Track FX";
-                        emptyDef.schemaVersion = 1;
-                        slot->loadEffChain(emptyDef);
-                        proc = slot->getEffProcessor();
+                        targetTrackId = trackId;
+                        break;
                     }
-                    const auto effFile = getEffFileForTrack(trackId);
-                    effBuilderComponent->loadDefinition(proc, proc->getDefinition(), effFile);
-                    break;
                 }
             }
+
+            if (targetTrackId.isNotEmpty())
+                focusSoundTrack(targetTrackId);
         }
+    }
+
+    if (sessionDashboardComponent != nullptr)
+    {
+        sessionDashboardComponent->setVisible(tabIndex == 3);
     }
 
     // Update tab button visual state (legacy buttons kept invisible but still data-accurate)
@@ -3301,7 +3738,16 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
 
 void WorkspaceShellComponent::switchNavSection(NavSection section)
 {
+    if (leftNavComponent == nullptr || workPanel == nullptr)
+    {
+        shellTrace("switchNavSection: fallback, core shell components not ready");
+        interactionStatus.setText("Fallback: section switch requested before shell was ready.",
+                                  juce::dontSendNotification);
+        return;
+    }
+
     activeNavSection = section;
+    shellTrace(juce::String("switchNavSection: target=") + getNavSectionInfo(section).id);
     setle::state::AppPreferences::get().setActiveNavSection(getNavSectionInfo(section).id);
 
     if (leftNavComponent != nullptr)
@@ -3311,7 +3757,14 @@ void WorkspaceShellComponent::switchNavSection(NavSection section)
     const auto tabs = getContextTabs(section);
     int targetTab = workPanelTabIndex; // keep current tab if valid for this section
 
-    if (!tabs.isEmpty())
+    if (tabs.isEmpty())
+    {
+        targetTab = 0;
+        shellTrace("switchNavSection: fallback, no context tabs found for section; forcing tab 0");
+        interactionStatus.setText("Fallback: section has no tabs configured, using Theory view.",
+                                  juce::dontSendNotification);
+    }
+    else
     {
         // check if current tab is in the new section's tab list
         bool currentTabValid = false;
@@ -3323,6 +3776,8 @@ void WorkspaceShellComponent::switchNavSection(NavSection section)
 
     if (zoneHeader != nullptr)
         zoneHeader->setSection(section);
+    else
+        shellTrace("switchNavSection: zoneHeader not available yet");
 
     switchWorkTab(targetTab);
 }
@@ -3558,8 +4013,7 @@ bool WorkspaceShellComponent::perform(const juce::ApplicationCommandTarget::Invo
 
         // ---- Insert ----
         case ID::insertMidiTrack:
-            if (trackManager != nullptr)
-                trackManager->addMidiTrack("MIDI Track");
+            showVesselSelectionModal();
             return true;
         case ID::insertAudioTrack:
             if (trackManager != nullptr)
@@ -3676,6 +4130,79 @@ void WorkspaceShellComponent::updateSelectionFromSelector()
         selectedNoteId = selectedId;
     else
         selectedProgressionId = selectedId;
+}
+
+void WorkspaceShellComponent::handleGridRollSelectionChanged(const setle::gridroll::GridRollComponent::SelectionMetadata& metadata)
+{
+    if (!metadata.valid)
+    {
+        liveGridRollSelection.reset();
+        liveCoupledUndoBaseSnapshot.clear();
+        liveCoupledLastMutationMs = 0;
+        if (activeNavSection == NavSection::edit && workPanelTabIndex == 1)
+            populateTheoryFieldsForCurrentSelection();
+        return;
+    }
+
+    const bool selectionChanged = !liveGridRollSelection.has_value()
+                                  || liveGridRollSelection->target != metadata.target
+                                  || liveGridRollSelection->noteId != metadata.noteId
+                                  || liveGridRollSelection->chordId != metadata.chordId;
+    liveGridRollSelection = metadata;
+    if (selectionChanged)
+    {
+        liveCoupledUndoBaseSnapshot.clear();
+        liveCoupledLastMutationMs = 0;
+    }
+
+    if (activeNavSection == NavSection::edit && workPanelTabIndex == 1)
+        populateTheoryFieldsForCurrentSelection();
+}
+
+void WorkspaceShellComponent::applyLiveCoupledTheoryMutation()
+{
+    if (gridRollComponent == nullptr || workPanelTabIndex != 1 || !liveGridRollSelection.has_value())
+        return;
+
+    const auto root = theoryFieldEditor1.getText().trim();
+    const auto extension = theoryFieldEditor2.getText().trim();
+    const auto inversionText = theoryFieldEditor3.getText().trim();
+    const auto velocityText = theoryFieldEditor4.getText().trim();
+
+    if (root.isEmpty())
+        return;
+
+    if (inversionText.isNotEmpty() && !isStrictInt(inversionText))
+        return;
+    if (velocityText.isNotEmpty() && !isStrictDouble(velocityText))
+        return;
+
+    const auto nowMs = juce::Time::getMillisecondCounter();
+    const bool continueUndoTransaction = liveCoupledLastMutationMs != 0
+                                         && (nowMs - liveCoupledLastMutationMs) <= 700
+                                         && liveCoupledUndoBaseSnapshot.isNotEmpty();
+    if (!continueUndoTransaction)
+        liveCoupledUndoBaseSnapshot = createSongSnapshot();
+
+    const auto beforeSnapshot = liveCoupledUndoBaseSnapshot;
+    setle::gridroll::GridRollComponent::CoupledMutation mutation;
+    mutation.root = root;
+    mutation.extension = extension;
+    mutation.inversion = parseIntOr(inversionText, liveGridRollSelection->inversion);
+    mutation.velocity = juce::jlimit(0.0f, 1.0f,
+                                     velocityText.isEmpty()
+                                         ? liveGridRollSelection->velocity
+                                         : static_cast<float>(velocityText.getDoubleValue()));
+
+    if (!gridRollComponent->applyTheoryMutationToSelection(mutation))
+        return;
+
+    saveSongState();
+    if (!continueUndoTransaction)
+        captureUndoStateIfChanged(beforeSnapshot);
+    liveCoupledLastMutationMs = nowMs;
+    refreshTimelineData();
+    updateUndoRedoButtonState();
 }
 
 std::optional<model::Section> WorkspaceShellComponent::getSelectedSection()
@@ -3818,6 +4345,23 @@ void WorkspaceShellComponent::populateTheoryFieldsForCurrentSelection()
 
     applyTheoryEditorButton.setButtonText("Apply Edit");
 
+    if (activeNavSection == NavSection::edit && workPanelTabIndex == 1 && liveGridRollSelection.has_value())
+    {
+        suppressLiveCoupledFieldEvents = true;
+        theoryEditorTitle.setText("Theory Editor - Coupled Focus", juce::dontSendNotification);
+        theoryEditorHint.setText("GridRoll selection is coupled. Edits mutate selected notes immediately.",
+                                 juce::dontSendNotification);
+
+        setField(theoryFieldLabel1, theoryFieldEditor1, "Root", liveGridRollSelection->root);
+        setField(theoryFieldLabel2, theoryFieldEditor2, "Extension", liveGridRollSelection->extension);
+        setField(theoryFieldLabel3, theoryFieldEditor3, "Inversion", juce::String(liveGridRollSelection->inversion));
+        setField(theoryFieldLabel4, theoryFieldEditor4, "Velocity (0-1)", juce::String(liveGridRollSelection->velocity, 3));
+        hideField(theoryFieldLabel5, theoryFieldEditor5);
+        applyTheoryEditorButton.setButtonText("Apply Coupled Edit");
+        suppressLiveCoupledFieldEvents = false;
+        return;
+    }
+
     if (activeEditorTarget == TheoryMenuTarget::section)
     {
         if (auto section = getSelectedSection())
@@ -3921,6 +4465,8 @@ void WorkspaceShellComponent::populateTheoryFieldsForCurrentSelection()
 void WorkspaceShellComponent::commitTheoryEditorAction()
 {
     seedSongStateIfNeeded();
+    liveCoupledUndoBaseSnapshot.clear();
+    liveCoupledLastMutationMs = 0;
 
     const auto beforeSnapshot = createSongSnapshot();
     const auto actionResult = applyTheoryEditorAction();
@@ -3940,6 +4486,39 @@ void WorkspaceShellComponent::commitTheoryEditorAction()
 
 juce::String WorkspaceShellComponent::applyTheoryEditorAction()
 {
+    if (activeNavSection == NavSection::edit && workPanelTabIndex == 1
+        && liveGridRollSelection.has_value() && gridRollComponent != nullptr)
+    {
+        const auto root = theoryFieldEditor1.getText().trim();
+        const auto extension = theoryFieldEditor2.getText().trim();
+        const auto inversionText = theoryFieldEditor3.getText().trim();
+        const auto velocityText = theoryFieldEditor4.getText().trim();
+
+        if (root.isEmpty())
+            return "Coupled mutation rejected: Root is required";
+        if (inversionText.isNotEmpty() && !isStrictInt(inversionText))
+            return "Coupled mutation rejected: Inversion must be an integer";
+        if (velocityText.isNotEmpty() && !isStrictDouble(velocityText))
+            return "Coupled mutation rejected: Velocity must be a number";
+
+        const auto inversion = parseIntOr(inversionText, liveGridRollSelection->inversion);
+        const auto velocity = juce::jlimit(0.0f, 1.0f,
+                                           velocityText.isEmpty()
+                                               ? liveGridRollSelection->velocity
+                                               : static_cast<float>(velocityText.getDoubleValue()));
+
+        setle::gridroll::GridRollComponent::CoupledMutation mutation;
+        mutation.root = root;
+        mutation.extension = extension;
+        mutation.inversion = inversion;
+        mutation.velocity = velocity;
+
+        if (gridRollComponent->applyTheoryMutationToSelection(mutation))
+            return "Coupled mutation applied to GridRoll selection";
+
+        return "Coupled mutation skipped: no editable GridRoll selection";
+    }
+
     if (activeEditorTarget == TheoryMenuTarget::section)
     {
         auto section = getSelectedSection();
@@ -4282,7 +4861,360 @@ void WorkspaceShellComponent::refreshTimelineData()
                                                  : "Off");
     }
 
+    refreshArrangeWorkspace();
+
     syncTimeSignaturesToEdit();
+}
+
+void WorkspaceShellComponent::refreshArrangeWorkspace()
+{
+    if (arrangeWorkComponent == nullptr)
+        return;
+
+    std::vector<ArrangeWorkComponent::TileModel> tiles;
+    std::vector<ArrangeWorkComponent::CadenceState> cadenceStates;
+    const auto sections = songState.getSections();
+    const auto transitions = songState.getTransitions();
+
+    for (const auto& section : sections)
+    {
+        ArrangeWorkComponent::TileModel tile;
+        tile.section = section;
+        tile.lengthBeats = getSectionLengthBeats(section);
+
+        juce::StringArray chordSymbols;
+        int chordCount = 0;
+        for (const auto& ref : section.getProgressionRefs())
+        {
+            if (const auto progression = songState.findProgressionById(ref.getProgressionId()))
+            {
+                const auto progressionLength = juce::jmax(1.0, progression->getLengthBeats());
+                for (const auto& chord : progression->getChords())
+                {
+                    if (chordSymbols.size() < 6)
+                        chordSymbols.add(chord.getSymbol().isNotEmpty() ? chord.getSymbol() : chord.getName());
+
+                    const auto x = static_cast<float>(juce::jlimit(0.0, 0.95, chord.getStartBeats() / progressionLength));
+                    const auto w = static_cast<float>(juce::jlimit(0.04, 0.28, chord.getDurationBeats() / progressionLength));
+                    tile.audioPips.push_back({ x, 0.22f + 0.12f * static_cast<float>(chordCount % 3), w, 0.48f });
+
+                    for (const auto& note : chord.getNotes())
+                    {
+                        const auto pitchNorm = static_cast<float>(juce::jlimit(0.0, 1.0, 1.0 - ((note.getPitch() - 36.0) / 60.0)));
+                        tile.notePips.push_back({ x,
+                                                  0.08f + pitchNorm * 0.72f,
+                                                  juce::jmax(0.035f, w * 0.75f),
+                                                  0.06f });
+                    }
+                    ++chordCount;
+                }
+            }
+        }
+
+        if (chordSymbols.isEmpty())
+            chordSymbols.add("No progression");
+        tile.progressionSummary = chordSymbols.joinIntoString(" - ");
+        tiles.push_back(std::move(tile));
+    }
+
+    auto boundaryRoot = [this](const model::Section& section, bool wantLast)
+    {
+        std::vector<model::Chord> chords;
+        for (const auto& ref : section.getProgressionRefs())
+            if (const auto progression = songState.findProgressionById(ref.getProgressionId()))
+                for (const auto& chord : progression->getChords())
+                    chords.push_back(chord);
+
+        if (chords.empty())
+            return -1;
+
+        const auto& chord = wantLast ? chords.back() : chords.front();
+        return ((chord.getRootMidi() % 12) + 12) % 12;
+    };
+
+    for (size_t i = 0; i + 1 < sections.size(); ++i)
+    {
+        ArrangeWorkComponent::CadenceState state = ArrangeWorkComponent::CadenceState::neutral;
+        const auto& from = sections[i];
+        const auto& to = sections[i + 1];
+
+        const auto transitionIt = std::find_if(transitions.begin(), transitions.end(), [&from, &to](const auto& transition)
+        {
+            return transition.getFromSectionId() == from.getId() && transition.getToSectionId() == to.getId();
+        });
+
+        if (transitionIt != transitions.end() && transitionIt->getStrategy().containsIgnoreCase("push"))
+            state = ArrangeWorkComponent::CadenceState::standard;
+
+        const auto tonicPc = setle::theory::DiatonicHarmony::pitchClassForRoot(songState.getSessionKey());
+        const auto dominantPc = (tonicPc + 7) % 12;
+        const auto fromRootPc = boundaryRoot(from, true);
+        const auto toRootPc = boundaryRoot(to, false);
+        const auto scale = setle::theory::DiatonicHarmony::modeIntervals(songState.getSessionMode());
+        const bool toInScale = std::find(scale.begin(), scale.end(), (toRootPc - tonicPc + 12) % 12) != scale.end();
+
+        if (fromRootPc == dominantPc && toRootPc == tonicPc)
+            state = ArrangeWorkComponent::CadenceState::standard;
+        else if (fromRootPc >= 0 && toRootPc >= 0 && (!toInScale || std::abs(fromRootPc - toRootPc) == 1))
+            state = ArrangeWorkComponent::CadenceState::clash;
+
+        cadenceStates.push_back(state);
+    }
+
+    arrangeWorkComponent->setSongStructure(std::move(tiles),
+                                           selectedSectionId,
+                                           songState.getSessionKey(),
+                                           songState.getSessionMode(),
+                                           std::move(cadenceStates));
+}
+
+juce::String WorkspaceShellComponent::beginUndoableAction(const juce::String& actionLabel)
+{
+    if (edit != nullptr && actionLabel.isNotEmpty())
+        edit->getUndoManager().beginNewTransaction(actionLabel);
+    return createSongSnapshot();
+}
+
+void WorkspaceShellComponent::performUpdate(const juce::String& beforeSnapshot, const juce::String& statusMessage)
+{
+    refreshTimelineData();
+    saveSongState();
+    captureUndoStateIfChanged(beforeSnapshot);
+    if (statusMessage.isNotEmpty())
+        interactionStatus.setText(statusMessage, juce::dontSendNotification);
+}
+
+void WorkspaceShellComponent::onSectionReordered(const juce::StringArray& orderedSectionIds)
+{
+    if (orderedSectionIds.isEmpty())
+        return;
+
+    juce::StringArray previousOrder;
+    for (const auto& section : songState.getSections())
+        previousOrder.add(section.getId());
+
+    if (orderedSectionIds == previousOrder)
+        return;
+
+    const auto beforeSnapshot = beginUndoableAction("Reorder Arrange Sections");
+
+    juce::String movedSectionId;
+    int largestIndexDelta = 0;
+    for (int newIndex = 0; newIndex < orderedSectionIds.size(); ++newIndex)
+    {
+        const auto& sectionId = orderedSectionIds.getReference(newIndex);
+        const auto oldIndex = previousOrder.indexOf(sectionId);
+        if (oldIndex < 0)
+            continue;
+
+        const auto indexDelta = newIndex - oldIndex;
+        if (std::abs(indexDelta) > std::abs(largestIndexDelta))
+        {
+            largestIndexDelta = indexDelta;
+            movedSectionId = sectionId;
+        }
+    }
+
+    auto sectionStartForOrder = [this](const juce::StringArray& order, const juce::String& sectionId)
+    {
+        double beat = 0.0;
+        for (const auto& id : order)
+        {
+            if (id == sectionId)
+                break;
+
+            if (const auto section = songState.findSectionById(id); section.has_value())
+                beat += getSectionLengthBeats(section.value());
+        }
+        return beat;
+    };
+
+    double movedDeltaBeats = 0.0;
+    if (movedSectionId.isNotEmpty())
+    {
+        movedDeltaBeats = sectionStartForOrder(orderedSectionIds, movedSectionId)
+                        - sectionStartForOrder(previousOrder, movedSectionId);
+    }
+
+    for (int i = 0; i < orderedSectionIds.size(); ++i)
+        songState.moveSection(orderedSectionIds[i], i);
+
+    if (timelineStampManager != nullptr)
+    {
+        timelineStampManager->applySectionReorder(songState,
+                                                  previousOrder,
+                                                  orderedSectionIds,
+                                                  [this](const model::Section& section)
+                                                  {
+                                                      return getSectionLengthBeats(section);
+                                                  });
+    }
+
+    juce::String status = "Structural mosaic reordered";
+    if (movedSectionId.isNotEmpty())
+    {
+        status << " | Δ " << juce::String(movedDeltaBeats, 2)
+               << " beats (" << movedSectionId.substring(0, 8) << ")";
+    }
+
+    performUpdate(beforeSnapshot, status);
+}
+
+juce::String WorkspaceShellComponent::smartDuplicateSection(const juce::String& sectionId, ArrangeWorkComponent::DuplicateMode mode)
+{
+    const auto sourceSection = songState.findSectionById(sectionId);
+    if (!sourceSection.has_value())
+        return "Smart Duplicate failed: source section not found";
+
+    const auto snapshot = createSongSnapshot();
+    const auto insertionBeat = getSongStructureLengthBeats();
+    auto duplicatedSection = model::Section::create(sourceSection->getName() + " (Fork)", sourceSection->getRepeatCount());
+    duplicatedSection.setColor(sourceSection->getColor());
+    duplicatedSection.setTimeSigNumerator(sourceSection->getTimeSigNumerator());
+    duplicatedSection.setTimeSigDenominator(sourceSection->getTimeSigDenominator());
+
+    const auto originalMode = songState.getSessionMode();
+    const auto targetMode = relativeModeFor(originalMode);
+
+    for (const auto& ref : sourceSection->getProgressionRefs())
+    {
+        if (mode == ArrangeWorkComponent::DuplicateMode::exactObject)
+        {
+            duplicatedSection.addProgressionRef(ref);
+            continue;
+        }
+
+        const auto sourceProgression = songState.findProgressionById(ref.getProgressionId());
+        if (!sourceProgression.has_value())
+            continue;
+
+        auto newProgression = model::Progression::create(sourceProgression->getName(),
+                                                         sourceProgression->getKey(),
+                                                         mode == ArrangeWorkComponent::DuplicateMode::modalExtraction
+                                                             ? targetMode
+                                                             : sourceProgression->getMode());
+        newProgression.setVariantOf(sourceProgression->getId());
+        newProgression.setLengthBeats(sourceProgression->getLengthBeats()
+                                      * (mode == ArrangeWorkComponent::DuplicateMode::rhythmicDecimation ? 2.0 : 1.0));
+
+        for (const auto& chord : sourceProgression->getChords())
+        {
+            auto newChord = model::Chord::create(chord.getSymbol(), chord.getQuality(), chord.getRootMidi());
+            newChord.setName(chord.getName());
+            newChord.setFunction(chord.getFunction());
+            newChord.setSource(mode == ArrangeWorkComponent::DuplicateMode::modalExtraction ? "modalExtraction" : "rhythmicDecimation");
+            newChord.setConfidence(chord.getConfidence());
+            newChord.setTension(chord.getTension());
+            newChord.setStartBeats(chord.getStartBeats());
+            newChord.setDurationBeats(chord.getDurationBeats());
+
+            if (mode == ArrangeWorkComponent::DuplicateMode::modalExtraction)
+            {
+                const auto newRoot = setle::theory::TheoryEngine::applyModalTransform(chord.getRootMidi(),
+                                                                                       songState.getSessionKey(),
+                                                                                       sourceProgression->getMode(),
+                                                                                       targetMode);
+                newChord.setRootMidi(newRoot);
+                const auto newSymbol = chordRootNameForMidi(newRoot) + qualitySuffixFor(chord);
+                newChord.setSymbol(newSymbol);
+                newChord.setName(newSymbol);
+            }
+            else if (mode == ArrangeWorkComponent::DuplicateMode::rhythmicDecimation)
+            {
+                newChord.setStartBeats(chord.getStartBeats() * 2.0);
+                newChord.setDurationBeats(chord.getDurationBeats() * 2.0);
+                newChord.setName(chord.getName() + " HT");
+            }
+
+            for (const auto& note : chord.getNotes())
+            {
+                auto newNote = model::Note::create(note.getPitch(),
+                                                   note.getVelocity(),
+                                                   mode == ArrangeWorkComponent::DuplicateMode::rhythmicDecimation ? note.getStartBeats() * 2.0 : note.getStartBeats(),
+                                                   mode == ArrangeWorkComponent::DuplicateMode::rhythmicDecimation ? note.getDurationBeats() * 2.0 : note.getDurationBeats(),
+                                                   note.getChannel());
+                if (mode == ArrangeWorkComponent::DuplicateMode::modalExtraction)
+                {
+                    newNote.setPitch(setle::theory::TheoryEngine::applyModalTransform(note.getPitch(),
+                                                                                       songState.getSessionKey(),
+                                                                                       sourceProgression->getMode(),
+                                                                                       targetMode));
+                }
+                newChord.addNote(newNote);
+            }
+
+            newProgression.addChord(newChord);
+        }
+
+        if (mode == ArrangeWorkComponent::DuplicateMode::modalExtraction)
+            newProgression.setName(sourceProgression->getName() + " [" + targetMode + "]");
+        else if (mode == ArrangeWorkComponent::DuplicateMode::rhythmicDecimation)
+            newProgression.setName(sourceProgression->getName() + " [Half-Time]");
+
+        songState.addProgression(newProgression);
+        duplicatedSection.addProgressionRef(model::SectionProgressionRef::create(newProgression.getId(), ref.getOrderIndex(), ref.getVariantName()));
+    }
+
+    songState.addSection(duplicatedSection);
+
+    if (timelineStampManager != nullptr)
+    {
+        setle::timeline::TimelineStampManager::DuplicateStampMode stampMode = setle::timeline::TimelineStampManager::DuplicateStampMode::exactObject;
+        if (mode == ArrangeWorkComponent::DuplicateMode::modalExtraction)
+            stampMode = setle::timeline::TimelineStampManager::DuplicateStampMode::modalExtraction;
+        else if (mode == ArrangeWorkComponent::DuplicateMode::rhythmicDecimation)
+            stampMode = setle::timeline::TimelineStampManager::DuplicateStampMode::rhythmicDecimation;
+
+        timelineStampManager->stampSectionDuplicate(songState,
+                                                    sourceSection->getId(),
+                                                    duplicatedSection.getId(),
+                                                    stampMode,
+                                                    insertionBeat,
+                                                    songState.getSessionKey(),
+                                                    originalMode,
+                                                    mode == ArrangeWorkComponent::DuplicateMode::modalExtraction ? targetMode : originalMode,
+                                                    [this](const model::Section& section)
+                                                    {
+                                                        return getSectionLengthBeats(section);
+                                                    });
+    }
+
+    selectedSectionId = duplicatedSection.getId();
+    refreshTimelineData();
+    saveSongState();
+    captureUndoStateIfChanged(snapshot);
+
+    switch (mode)
+    {
+        case ArrangeWorkComponent::DuplicateMode::exactObject:
+            return "Smart Duplicate: Exact Object created";
+        case ArrangeWorkComponent::DuplicateMode::modalExtraction:
+            return "Smart Duplicate: Modal Extraction created in " + targetMode;
+        case ArrangeWorkComponent::DuplicateMode::rhythmicDecimation:
+            return "Smart Duplicate: Rhythmic Decimation created";
+    }
+    return "Smart Duplicate complete";
+}
+
+double WorkspaceShellComponent::getSectionLengthBeats(const model::Section& section) const
+{
+    double sectionLength = 0.0;
+    for (const auto& ref : section.getProgressionRefs())
+        if (const auto progression = songState.findProgressionById(ref.getProgressionId()))
+            sectionLength += juce::jmax(1.0, progression->getLengthBeats());
+
+    if (sectionLength <= 0.0)
+        sectionLength = (section.getTimeSigNumerator() * 4.0) / juce::jmax(1, section.getTimeSigDenominator());
+
+    return sectionLength * juce::jmax(1, section.getRepeatCount());
+}
+
+double WorkspaceShellComponent::getSongStructureLengthBeats() const
+{
+    double total = 0.0;
+    for (const auto& section : songState.getSections())
+        total += getSectionLengthBeats(section);
+    return juce::jmax(1.0, total);
 }
 
 void WorkspaceShellComponent::syncTimeSignaturesToEdit()
@@ -4553,6 +5485,8 @@ void WorkspaceShellComponent::rebuildOutPanelStrips()
             persistInstrumentSlotAssignments();
             rebuildOutPanelStrips();
         });
+
+    refreshSoundRoster();
 }
 
 void WorkspaceShellComponent::applyDrumPatternToSlots(const std::vector<setle::gridroll::GridRollCell>& cells,
@@ -4582,6 +5516,309 @@ void WorkspaceShellComponent::applyDrumPatternToSlots(const std::vector<setle::g
             }
         }
     }
+}
+
+std::vector<SoundWorkComponent::InstrumentRosterEntry> WorkspaceShellComponent::buildSoundRosterEntries() const
+{
+    std::vector<SoundWorkComponent::InstrumentRosterEntry> entries;
+    if (trackManager == nullptr)
+        return entries;
+
+    const auto tracks = trackManager->getAllUserTracks();
+    entries.reserve(static_cast<size_t>(tracks.size()));
+
+    for (auto* track : tracks)
+    {
+        auto* audioTrack = dynamic_cast<te::AudioTrack*>(track);
+        if (audioTrack == nullptr)
+            continue;
+
+        const auto trackId = audioTrack->itemID.toString();
+        auto it = instrumentSlots.find(trackId);
+        if (it == instrumentSlots.end() || it->second == nullptr)
+            continue;
+
+        SoundWorkComponent::InstrumentRosterEntry entry;
+        entry.trackId = trackId;
+        entry.trackName = audioTrack->getName();
+        entry.slotType = it->second->getInfo().type;
+        entries.push_back(std::move(entry));
+    }
+
+    return entries;
+}
+
+void WorkspaceShellComponent::refreshSoundRoster()
+{
+    if (soundWorkComponent == nullptr)
+        return;
+
+    soundWorkComponent->setInstrumentRoster(buildSoundRosterEntries());
+    soundWorkComponent->setFocusedTrack(selectedFxTrackId);
+}
+
+void WorkspaceShellComponent::focusSoundTrack(const juce::String& trackId)
+{
+    auto it = instrumentSlots.find(trackId);
+    if (it == instrumentSlots.end() || it->second == nullptr)
+        return;
+
+    selectedFxTrackId = trackId;
+    auto* slot = it->second.get();
+
+    auto* proc = slot->getEffProcessor();
+    if (proc == nullptr)
+    {
+        setle::eff::EffDefinition emptyDef;
+        emptyDef.effId = juce::Uuid().toString();
+        emptyDef.name = "Track FX";
+        emptyDef.schemaVersion = 1;
+        slot->loadEffChain(emptyDef);
+        proc = slot->getEffProcessor();
+    }
+
+    if (proc != nullptr && effBuilderComponent != nullptr)
+    {
+        const auto effFile = getEffFileForTrack(trackId);
+        effBuilderComponent->loadDefinition(proc, proc->getDefinition(), effFile);
+    }
+
+    if (soundWorkComponent != nullptr)
+        soundWorkComponent->setFocusedTrack(trackId);
+}
+
+SoundWorkComponent::SidechainSuggestion WorkspaceShellComponent::buildSmartSidechainSuggestion(const juce::String& focusedTrackId) const
+{
+    SoundWorkComponent::SidechainSuggestion suggestion;
+
+    if (trackManager == nullptr)
+        return suggestion;
+
+    juce::String sourceId;
+    juce::String sourceName;
+    int bestSourceScore = -1;
+
+    juce::String targetId;
+    juce::String targetName;
+    int bestTargetScore = -1;
+
+    const auto tracks = trackManager->getAllUserTracks();
+    for (auto* track : tracks)
+    {
+        auto* audioTrack = dynamic_cast<te::AudioTrack*>(track);
+        if (audioTrack == nullptr)
+            continue;
+
+        const auto name = audioTrack->getName();
+        const auto id = audioTrack->itemID.toString();
+        auto slotIt = instrumentSlots.find(id);
+        const auto slotType = (slotIt != instrumentSlots.end() && slotIt->second != nullptr)
+            ? slotIt->second->getInfo().type
+            : setle::instruments::InstrumentSlot::SlotType::Empty;
+
+        const auto sourceScore = scoreSidechainSourceCandidate(name, slotType);
+        if (sourceScore > bestSourceScore)
+        {
+            bestSourceScore = sourceScore;
+            sourceId = id;
+            sourceName = name;
+        }
+
+        if (id != sourceId)
+        {
+            const auto targetScore = scoreSidechainTargetCandidate(name, slotType, id == focusedTrackId);
+            if (targetScore > bestTargetScore)
+            {
+                bestTargetScore = targetScore;
+                targetId = id;
+                targetName = name;
+            }
+        }
+    }
+
+    if (sourceId == targetId)
+    {
+        targetId.clear();
+        targetName.clear();
+    }
+
+    if (bestSourceScore <= 0 || bestTargetScore <= 0)
+        return suggestion;
+
+    suggestion.sourceTrackId = sourceId;
+    suggestion.sourceTrackName = sourceName;
+    suggestion.targetTrackId = targetId;
+    suggestion.targetTrackName = targetName;
+    return suggestion;
+}
+
+void WorkspaceShellComponent::applySmartSidechainSuggestion(const SoundWorkComponent::SidechainSuggestion& suggestion)
+{
+    if (!suggestion.isValid())
+        return;
+
+    auto* sourceTrack = findAudioTrackById(trackManager.get(), suggestion.sourceTrackId);
+    auto* targetTrack = findAudioTrackById(trackManager.get(), suggestion.targetTrackId);
+    if (sourceTrack == nullptr || targetTrack == nullptr || edit == nullptr)
+        return;
+
+    auto* compressor = ensureTracktionCompressor(*targetTrack, *edit);
+    if (compressor == nullptr || !compressor->canSidechain())
+    {
+        interactionStatus.setText("Smart Sidechain failed: Tracktion compressor sidechain unavailable",
+                                  juce::dontSendNotification);
+        return;
+    }
+
+    const auto sidechainChoice = findSidechainSourceChoice(*compressor, suggestion.sourceTrackName);
+    if (sidechainChoice.isEmpty())
+    {
+        interactionStatus.setText("Smart Sidechain failed: source track is not available as a sidechain input",
+                                  juce::dontSendNotification);
+        return;
+    }
+
+    compressor->useSidechainTrigger = true;
+    compressor->setThreshold(juce::Decibels::decibelsToGain(-18.0f));
+    compressor->setRatio(0.25f);
+    compressor->attackMs.setParameter(25.0f, juce::sendNotification);
+    compressor->releaseMs.setParameter(180.0f, juce::sendNotification);
+    compressor->outputDb.setParameter(0.0f, juce::sendNotification);
+    compressor->sidechainDb.setParameter(0.0f, juce::sendNotification);
+    compressor->setSidechainSourceByName(sidechainChoice);
+    compressor->guessSidechainRouting();
+
+    focusSoundTrack(suggestion.targetTrackId);
+    interactionStatus.setText("Smart Sidechain: " + suggestion.sourceTrackName + " routed into "
+                              + suggestion.targetTrackName + " Tracktion compressor",
+                              juce::dontSendNotification);
+}
+
+std::optional<float> WorkspaceShellComponent::runAutoGainForTrack(const juce::String& trackId)
+{
+    if (trackManager == nullptr || circularAudioBuffer == nullptr)
+        return std::nullopt;
+
+    auto* targetTrack = findAudioTrackById(trackManager.get(), trackId);
+    if (targetTrack == nullptr)
+        return std::nullopt;
+
+    auto analysisBuffer = circularAudioBuffer->getLastSeconds(8.0);
+    if (analysisBuffer.getNumChannels() == 0 || analysisBuffer.getNumSamples() == 0)
+        return std::nullopt;
+
+    const int windowSize = juce::jmin(2048, analysisBuffer.getNumSamples());
+    if (windowSize <= 32)
+        return std::nullopt;
+
+    const int startSample = analysisBuffer.getNumSamples() - windowSize;
+    double energy = 0.0;
+    for (int ch = 0; ch < analysisBuffer.getNumChannels(); ++ch)
+    {
+        const auto* data = analysisBuffer.getReadPointer(ch, startSample);
+        for (int i = 0; i < windowSize; ++i)
+        {
+            const auto s = static_cast<double>(data[i]);
+            energy += s * s;
+        }
+    }
+
+    energy /= static_cast<double>(windowSize * analysisBuffer.getNumChannels());
+    if (energy <= 1.0e-10)
+        return std::nullopt;
+
+    const float measuredDb = static_cast<float>(20.0 * std::log10(std::sqrt(energy)));
+    const float targetLufs = -18.0f;
+    const float gainOffsetDb = juce::jlimit(-12.0f, 12.0f, targetLufs - measuredDb);
+
+    if (auto* volumePlugin = targetTrack->getVolumePlugin())
+    {
+        volumePlugin->setVolumeDb(volumePlugin->getVolumeDb() + gainOffsetDb);
+    }
+
+    interactionStatus.setText("Auto Gain (RMS 2048): " + targetTrack->getName() + " -> "
+                              + juce::String(gainOffsetDb, 1) + " dB toward "
+                              + juce::String(targetLufs, 1) + " LUFS",
+                              juce::dontSendNotification);
+    return gainOffsetDb;
+}
+
+void WorkspaceShellComponent::showVesselSelectionModal()
+{
+    if (trackManager == nullptr)
+        return;
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader("Vessel Selection");
+    menu.addItem(1, "PolySynth");
+    menu.addItem(2, "DrumMachine");
+    menu.addItem(3, "ReelSampler");
+    menu.addItem(4, "VST3");
+
+    auto options = juce::PopupMenu::Options();
+    if (soundWorkComponent != nullptr)
+        options = options.withTargetComponent(soundWorkComponent.get());
+
+    const auto selected = menu.showMenu(options);
+    if (selected <= 0)
+        return;
+
+    juce::PluginDescription vst3Description;
+    if (selected == 4)
+    {
+        for (const auto& known : engineRef.getPluginManager().knownPluginList.getTypes())
+        {
+            if (known.pluginFormatName.containsIgnoreCase("VST3"))
+            {
+                vst3Description = known;
+                break;
+            }
+        }
+
+        if (vst3Description.fileOrIdentifier.isEmpty())
+        {
+            interactionStatus.setText("Add MIDI skipped: no scanned VST3 plugin available",
+                                      juce::dontSendNotification);
+            if (soundWorkComponent != nullptr)
+                soundWorkComponent->setFocusedTrack(selectedFxTrackId);
+            return;
+        }
+    }
+
+    auto* track = trackManager->addMidiTrack("MIDI Track");
+    if (track == nullptr)
+        return;
+
+    ensureInstrumentSlots();
+
+    const auto trackId = track->itemID.toString();
+    auto it = instrumentSlots.find(trackId);
+    if (it == instrumentSlots.end() || it->second == nullptr)
+        return;
+
+    switch (selected)
+    {
+        case 1: it->second->loadPolySynth(); track->setName("PolySynth"); break;
+        case 2: it->second->loadDrumMachine(); track->setName("DrumMachine"); break;
+        case 3: it->second->loadReelSampler(); track->setName("ReelSampler"); break;
+        case 4:
+        {
+            it->second->loadVST3(vst3Description);
+            track->setName(vst3Description.name.isNotEmpty() ? vst3Description.name : "VST3");
+            break;
+        }
+        default:
+            break;
+    }
+
+    persistInstrumentSlotAssignments();
+    refreshTimelineData();
+    rebuildOutPanelStrips();
+
+    switchNavSection(NavSection::sound);
+    switchWorkTab(2);
+    focusSoundTrack(trackId);
+    interactionStatus.setText("Added MIDI vessel: " + track->getName(), juce::dontSendNotification);
 }
 
 juce::String WorkspaceShellComponent::getTrackIdForTrack(const te::Track& track) const
@@ -6306,9 +7543,55 @@ void WorkspaceShellComponent::timerCallback()
 
     const auto* tempo = edit->tempoSequence.getTempo(0);
     const auto bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
+    arrangeLogoMeltCurrent += (arrangeLogoMeltTarget - arrangeLogoMeltCurrent) * 0.18f;
+    if (arrangeLogoMeltTarget > 0.01f)
+        arrangeLogoMeltTarget *= 0.92f;
+    else
+        arrangeLogoMeltTarget = 0.0f;
+
+    if (quesoLogoComponent != nullptr)
+    {
+        quesoLogoComponent->setBpm(songState.getBpm());
+
+        float dominantHz = 0.0f;
+        float toneEnergy = 0.0f;
+        if (sessionDashboardComponent != nullptr)
+        {
+            dominantHz = sessionDashboardComponent->getDominantFrequencyHz();
+            toneEnergy = juce::jlimit(0.0f, 1.0f, sessionDashboardComponent->getDominantMagnitude() / 400.0f);
+        }
+
+        float strongestSubHz = 0.0f;
+        float strongestSubIntensity = 0.0f;
+        for (const auto& [trackId, slot] : instrumentSlots)
+        {
+            (void) trackId;
+            if (slot == nullptr)
+                continue;
+
+            float subHz = 0.0f;
+            float subIntensity = 0.0f;
+            if (slot->getDrumSubSyncHint(subHz, subIntensity) && subIntensity > strongestSubIntensity)
+            {
+                strongestSubIntensity = subIntensity;
+                strongestSubHz = subHz;
+            }
+        }
+
+        if (strongestSubIntensity > 0.02f && strongestSubHz > 0.0f)
+        {
+            dominantHz = strongestSubHz;
+            toneEnergy = juce::jmax(toneEnergy, juce::jlimit(0.0f, 1.0f, strongestSubIntensity));
+        }
+
+        quesoLogoComponent->setToneDetectorState(dominantHz, toneEnergy);
+        quesoLogoComponent->setMeltFactor(arrangeLogoMeltCurrent);
+    }
+
     const auto secPerBeat = 60.0 / juce::jmax(1.0, bpm);
     const auto playheadBeat = edit->getTransport().getPosition().inSeconds() / secPerBeat;
     const auto fraction = juce::jlimit(0.0, 1.0, playheadBeat / 32.0);
+    const auto structureFraction = juce::jlimit(0.0, 1.0, playheadBeat / getSongStructureLengthBeats());
 
     if (timelineShell != nullptr)
         timelineShell->setPlayheadFraction(fraction);
@@ -6318,6 +7601,12 @@ void WorkspaceShellComponent::timerCallback()
 
     if (gridRollComponent != nullptr)
         gridRollComponent->setPlayheadBeat(playheadBeat);
+
+    if (arrangeWorkComponent != nullptr)
+        arrangeWorkComponent->setPlayheadFraction(structureFraction);
+
+    if (quesoLogoComponent != nullptr)
+        quesoLogoComponent->setStructureProgress(static_cast<float>(structureFraction));
 
     for (auto& [trackId, slot] : instrumentSlots)
     {
@@ -6546,6 +7835,47 @@ void WorkspaceShellComponent::loadProgressionToEdit(const juce::String& progress
     }
     clip->state.setProperty("progressionSymbols", symbols.trim(), nullptr);
 
+    juce::String clipSectionId;
+    if (selectedSectionId.isNotEmpty())
+        clipSectionId = selectedSectionId;
+
+    if (clipSectionId.isEmpty())
+    {
+        juce::String uniqueSection;
+        bool ambiguous = false;
+        for (const auto& section : songState.getSections())
+        {
+            for (const auto& ref : section.getProgressionRefs())
+            {
+                if (ref.getProgressionId() != progressionId)
+                    continue;
+
+                if (uniqueSection.isEmpty())
+                    uniqueSection = section.getId();
+                else if (uniqueSection != section.getId())
+                    ambiguous = true;
+            }
+        }
+
+        if (!ambiguous)
+            clipSectionId = uniqueSection;
+    }
+
+    if (clipSectionId.isNotEmpty())
+    {
+        const auto clipStartBeat = startTimeSeconds / secPerBeat;
+        double sectionStartBeat = 0.0;
+        for (const auto& section : songState.getSections())
+        {
+            if (section.getId() == clipSectionId)
+                break;
+            sectionStartBeat += getSectionLengthBeats(section);
+        }
+
+        clip->state.setProperty("setleSectionId", clipSectionId, nullptr);
+        clip->state.setProperty("setleSectionLocalStartBeats", clipStartBeat - sectionStartBeat, nullptr);
+    }
+
     auto& seq = clip->getSequence();
     double beatPos = 0.0;
 
@@ -6662,7 +7992,16 @@ void WorkspaceShellComponent::resized()
     auto topBounds = bounds.removeFromTop(topStripHeight);
     topStrip.setBounds(topBounds);
 
-    auto buttonArea = topBounds.removeFromRight(1410);
+    // Reserve logo space first so it cannot disappear when controls compress on narrower windows.
+    auto logoSlot = topBounds.removeFromLeft(juce::jlimit(120, 360, topBounds.getWidth() / 3));
+    if (quesoLogoComponent != nullptr)
+    {
+        auto logoBounds = logoSlot.reduced(4, 4);
+        quesoLogoComponent->setBounds(logoBounds);
+        quesoLogoComponent->setVisible(!logoBounds.isEmpty());
+    }
+
+    auto buttonArea = topBounds.removeFromRight(juce::jmin(1410, topBounds.getWidth()));
     themeButton.setBounds(buttonArea.removeFromRight(72).reduced(4, 6));
     redoTheoryButton.setBounds(buttonArea.removeFromRight(112).reduced(4, 6));
     undoTheoryButton.setBounds(buttonArea.removeFromRight(122).reduced(4, 6));
@@ -6695,30 +8034,40 @@ void WorkspaceShellComponent::resized()
     bpmLabel.setBounds(bpmArea.removeFromLeft(32));
     bpmEditor.setBounds(bpmArea);
 
-    topTitle.setBounds(topBounds.removeFromLeft(250).reduced(8, 6));
+    topTitle.setBounds(topBounds.removeFromLeft(146).reduced(8, 6));
     interactionStatus.setBounds(topBounds.reduced(8, 8));
 
     auto timelineArea = bounds.removeFromBottom(timelineHeight);
     auto timelineSplitterArea = bounds.removeFromBottom(splitterThickness);
-    timelineResizeBar->setBounds(timelineSplitterArea);
-    timelineShell->setBounds(timelineArea);
-    if (timelineTracks != nullptr)
-        timelineTracks->setBounds(timelineShell->getTrackAreaBoundsInParent());
+    if (timelineResizeBar != nullptr)
+        timelineResizeBar->setBounds(timelineSplitterArea);
+    if (timelineShell != nullptr)
+    {
+        timelineShell->setBounds(timelineArea);
+        if (timelineTracks != nullptr)
+            timelineTracks->setBounds(timelineShell->getTrackAreaBoundsInParent());
+    }
 
     clampLayoutValues(bounds.getWidth(), bounds.getHeight() + timelineHeight);
 
     auto inArea = bounds.removeFromLeft(leftPanelWidth);
-    inPanel->setBounds(inArea);
+    if (inPanel != nullptr)
+        inPanel->setBounds(inArea);
 
     auto leftSplitterArea = bounds.removeFromLeft(splitterThickness);
-    leftResizeBar->setBounds(leftSplitterArea);
+    if (leftResizeBar != nullptr)
+        leftResizeBar->setBounds(leftSplitterArea);
 
     auto outArea = bounds.removeFromRight(rightPanelWidth);
     if (outPanelHost != nullptr)
         outPanelHost->setBounds(outArea);
 
     auto rightSplitterArea = bounds.removeFromRight(splitterThickness);
-    rightResizeBar->setBounds(rightSplitterArea);
+    if (rightResizeBar != nullptr)
+        rightResizeBar->setBounds(rightSplitterArea);
+
+    if (workPanel == nullptr)
+        return;
 
     workPanel->setBounds(bounds);
 
@@ -6740,6 +8089,12 @@ void WorkspaceShellComponent::resized()
 
     if (effBuilderComponent != nullptr)
         effBuilderComponent->setBounds(editorBounds);
+
+    if (soundWorkComponent != nullptr)
+        soundWorkComponent->setBounds(editorBounds);
+
+    if (arrangeWorkComponent != nullptr)
+        arrangeWorkComponent->setBounds(editorBounds);
 
     auto panelBounds = theoryEditorPanel.getLocalBounds().reduced(10);
 

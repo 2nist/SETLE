@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <random>
 
 namespace setle::eff
 {
@@ -379,6 +380,7 @@ void EffProcessor::processMidiBlock(EffBlock& block, BlockState& state,
         return;
 
     juce::MidiBuffer out;
+    const int numSmp = juce::jmax(1, blockSize);
 
     switch (block.type)
     {
@@ -514,14 +516,164 @@ void EffProcessor::processMidiBlock(EffBlock& block, BlockState& state,
         }
 
         // ── MidiArpeggiate ───────────────────────────────────────────────────
-        // Simplified: just pass through (full arp needs persistent note state across blocks)
         case BlockType::MidiArpeggiate:
-            break;
+        {
+            const float rateBeat = juce::jlimit(0.0625f, 1.0f,
+                                                getParam(block, "rate", 0.25f));
+            const int   patternVal = static_cast<int>(
+                                        getParam(block, "pattern", 0.0f));
+            // pattern 0=Up 1=Down 2=UpDown 3=Random
 
-        // ── MidiBeatRepeat ────────────────────────────────────────────────────
-        // Simplified: pass through (requires cross-buffer state)
-        case BlockType::MidiBeatRepeat:
+            // Collect note-on events into heldNotes
+            for (const auto meta : midiIn)
+            {
+                auto msg = meta.getMessage();
+                if (msg.isNoteOn())
+                {
+                    if (std::find(state.heldNotes.begin(),
+                                  state.heldNotes.end(),
+                                  msg.getNoteNumber()) == state.heldNotes.end())
+                        state.heldNotes.push_back(msg.getNoteNumber());
+                }
+                else if (msg.isNoteOff())
+                {
+                    state.heldNotes.erase(
+                        std::remove(state.heldNotes.begin(),
+                                    state.heldNotes.end(),
+                                    msg.getNoteNumber()),
+                        state.heldNotes.end());
+                }
+            }
+
+            if (state.heldNotes.empty()) break;
+
+            std::sort(state.heldNotes.begin(), state.heldNotes.end());
+
+            // Build the step sequence based on pattern
+            std::vector<int> sequence;
+            switch (patternVal)
+            {
+                case 1: // Down
+                    sequence = state.heldNotes;
+                    std::reverse(sequence.begin(), sequence.end());
+                    break;
+                case 2: // UpDown
+                    sequence = state.heldNotes;
+                    if (sequence.size() > 2)
+                        for (int i = (int)sequence.size() - 2; i > 0; --i)
+                            sequence.push_back(sequence[static_cast<size_t>(i)]);
+                    break;
+                case 3: // Random
+                    sequence = state.heldNotes;
+                    std::shuffle(sequence.begin(), sequence.end(),
+                                 std::default_random_engine(
+                                     static_cast<unsigned>(state.rng.nextInt())));
+                    break;
+                default: // Up
+                    sequence = state.heldNotes;
+                    break;
+            }
+
+            if (sequence.empty()) break;
+            state.arpStepIndex = state.arpStepIndex % (int)sequence.size();
+
+            // Emit one note per rate interval
+            // Use bpm passed to processMidi (add bpm parameter thread-through if needed)
+            const double samplesPerBeat = sampleRate * 60.0 / juce::jmax(1.0, bpm);
+            const double stepSamples = rateBeat * samplesPerBeat;
+
+            out.clear();
+            int pos = 0;
+            const int noteLen = juce::jmax(1,
+                static_cast<int>(stepSamples * 0.9)); // 90% duty cycle
+
+            while (pos < numSmp)
+            {
+                const int noteNum = sequence[
+                    static_cast<size_t>(state.arpStepIndex % sequence.size())];
+
+                out.addEvent(
+                    juce::MidiMessage::noteOn(1, noteNum, (juce::uint8)90),
+                    pos);
+                out.addEvent(
+                    juce::MidiMessage::noteOff(1, noteNum),
+                    juce::jmin(numSmp - 1, pos + noteLen));
+
+                state.arpStepIndex = (state.arpStepIndex + 1)
+                                     % (int)sequence.size();
+                pos += static_cast<int>(stepSamples);
+            }
+
+            midiIn = out;
             break;
+        }
+
+        case BlockType::MidiBeatRepeat:
+        {
+            const float lengthBeats = juce::jlimit(0.25f, 4.0f,
+                                          getParam(block, "length", 1.0f));
+            const float trigger     = getParam(block, "trigger", 0.0f);
+            const bool  isTriggered = trigger > 0.5f;
+
+            const double samplesPerBeat = sampleRate * 60.0
+                                          / juce::jmax(1.0, bpm);
+
+            if (isTriggered)
+            {
+                // Capture incoming notes into repeat buffer
+                // Reset phase on first activation
+                if (!state.beatRepeatActive)
+                {
+                    state.beatRepeatBuffer.clear();
+                    state.beatRepeatPhaseBeats = 0.0;
+                    state.beatRepeatLengthBeats = lengthBeats;
+                    state.beatRepeatActive = true;
+                }
+
+                // Collect new notes into buffer
+                for (const auto meta : midiIn)
+                    state.beatRepeatBuffer.addEvent(
+                        meta.getMessage(), meta.samplePosition);
+
+                // Replay buffer cyclically
+                out.clear();
+                const double phaseEnd = state.beatRepeatPhaseBeats
+                                        + (double)numSmp / samplesPerBeat;
+
+                for (const auto meta : state.beatRepeatBuffer)
+                {
+                    const double noteBeats = meta.samplePosition / samplesPerBeat;
+                    // Find all occurrences within this block's phase window
+                    double notePhase = std::fmod(noteBeats,
+                                                 state.beatRepeatLengthBeats);
+                    while (notePhase < phaseEnd)
+                    {
+                        if (notePhase >= state.beatRepeatPhaseBeats)
+                        {
+                            const int samplePos = static_cast<int>(
+                                (notePhase - state.beatRepeatPhaseBeats)
+                                * samplesPerBeat);
+                            out.addEvent(meta.getMessage(),
+                                         juce::jlimit(0, numSmp - 1, samplePos));
+                        }
+                        notePhase += state.beatRepeatLengthBeats;
+                    }
+                }
+
+                state.beatRepeatPhaseBeats = std::fmod(phaseEnd,
+                                                state.beatRepeatLengthBeats);
+                midiIn = out;
+            }
+            else
+            {
+                // Not triggered — clear state, pass through normally
+                state.beatRepeatActive = false;
+                state.beatRepeatBuffer.clear();
+                state.beatRepeatPhaseBeats = 0.0;
+            }
+            break;
+        }
+
 
         // ── MidiStrumSpread ───────────────────────────────────────────────────
         case BlockType::MidiStrumSpread:

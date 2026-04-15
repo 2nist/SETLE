@@ -1,171 +1,208 @@
 #include "DrumMachineEditorComponent.h"
-#include "DrumVoiceParams.h"
-#include "FmDrumVoice.h"
+
+#include "../../theme/ThemeManager.h"
+#include "../../theme/ThemeStyleHelpers.h"
 
 #include <cmath>
 
 namespace setle::instruments::drum
 {
 
+namespace
+{
+constexpr int kArcCount = 5;
+}
+
 DrumMachineEditorComponent::DrumMachineEditorComponent(DrumMachineProcessor& processorRef)
     : processor(processorRef)
 {
-    setOpaque(true);
+    setOpaque(false);
 
-    setupRow(rows[0], "Kick", 0);
-    setupRow(rows[1], "Snare", 1);
-    setupRow(rows[2], "HH C", 2);
-    setupRow(rows[3], "HH O", 3);
-    setupRow(rows[4], "Clap", 4);
+    voices[0] = { "Kick",      static_cast<int>(DrumVoiceId::Kick),      0, 210.0f };
+    voices[1] = { "Sub",       static_cast<int>(DrumVoiceId::Sub),       1, 330.0f };
+    voices[2] = { "Snare",     static_cast<int>(DrumVoiceId::Snare),     2,  34.0f };
+    voices[3] = { "Perc",      static_cast<int>(DrumVoiceId::Perc),      3, 152.0f };
+    voices[4] = { "HH Closed", static_cast<int>(DrumVoiceId::HatClosed), 4, 250.0f };
+    voices[5] = { "HH Open",   static_cast<int>(DrumVoiceId::HatOpen),   4, 292.0f };
+    voices[6] = { "Clap",      static_cast<int>(DrumVoiceId::Clap),      3,  96.0f };
 
-    masterLabel.setText("Master", juce::dontSendNotification);
-    masterLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.8f));
-    addAndMakeVisible(masterLabel);
+    setupKnob(knobs[static_cast<size_t>(DrumMacroId::Thump)], "THUMP", static_cast<int>(DrumMacroId::Thump));
+    setupKnob(knobs[static_cast<size_t>(DrumMacroId::Sizzle)], "SIZZLE", static_cast<int>(DrumMacroId::Sizzle));
+    setupKnob(knobs[static_cast<size_t>(DrumMacroId::Choke)], "CHOKE", static_cast<int>(DrumMacroId::Choke));
+    setupKnob(knobs[static_cast<size_t>(DrumMacroId::Texture)], "TEXTURE", static_cast<int>(DrumMacroId::Texture));
+    setupKnob(knobs[static_cast<size_t>(DrumMacroId::Arc)], "ARC", static_cast<int>(DrumMacroId::Arc));
+    setupKnob(knobs[static_cast<size_t>(DrumMacroId::Gloss)], "GLOSS", static_cast<int>(DrumMacroId::Gloss));
 
-    master.setSliderStyle(juce::Slider::LinearHorizontal);
-    master.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 16);
-    master.setRange(0.0, 1.2, 0.01);
-    master.setValue(processor.getMasterVolume(), juce::dontSendNotification);
-    master.onValueChange = [this]
-    {
-        processor.setMasterVolume(static_cast<float>(master.getValue()));
-    };
-    addAndMakeVisible(master);
-
-    startTimerHz(20);
+    syncKnobValuesFromProcessor();
+    startTimerHz(30);
 }
 
-void DrumMachineEditorComponent::setupRow(VoiceRow& row, const juce::String& name, int voiceIndex)
+void DrumMachineEditorComponent::setupKnob(MacroKnob& knob, const juce::String& label, int macroIndex)
 {
-    row.name.setText(name, juce::dontSendNotification);
-    row.name.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.85f));
-    row.name.setJustificationType(juce::Justification::centredLeft);
-    addAndMakeVisible(row.name);
-
-    for (auto* slider : { &row.tune, &row.decay, &row.level })
+    knob.label = label;
+    knob.slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    knob.slider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    knob.slider.setRange(0.0, 1.0, 0.001);
+    knob.slider.onValueChange = [this, macroIndex, &knob]
     {
-        slider->setSliderStyle(juce::Slider::LinearHorizontal);
-        slider->setTextBoxStyle(juce::Slider::TextBoxRight, false, 50, 16);
-        addAndMakeVisible(*slider);
-    }
-
-    row.tune.setRange(30.0, 2000.0, 1.0);
-    row.decay.setRange(0.02, 1.0, 0.01);
-    row.level.setRange(0.0, 1.0, 0.01);
-
-    row.tune.setValue(processor.getVoiceTune(voiceIndex), juce::dontSendNotification);
-    row.decay.setValue(processor.getVoiceDecay(voiceIndex), juce::dontSendNotification);
-    row.level.setValue(processor.getVoiceLevel(voiceIndex), juce::dontSendNotification);
-
-    row.tune.onValueChange = [this, voiceIndex, &row]
-    {
-        processor.setVoiceTune(voiceIndex, static_cast<float>(row.tune.getValue()));
+        processor.setMacro(macroIndex, static_cast<float>(knob.slider.getValue()));
     };
-    row.decay.onValueChange = [this, voiceIndex, &row]
-    {
-        processor.setVoiceDecay(voiceIndex, static_cast<float>(row.decay.getValue()));
-    };
-    row.level.onValueChange = [this, voiceIndex, &row]
-    {
-        processor.setVoiceLevel(voiceIndex, static_cast<float>(row.level.getValue()));
-    };
+    addAndMakeVisible(knob.slider);
+}
+
+void DrumMachineEditorComponent::syncKnobValuesFromProcessor()
+{
+    for (int i = 0; i < static_cast<int>(DrumMacroId::Count); ++i)
+        knobs[static_cast<size_t>(i)].slider.setValue(processor.getMacro(i), juce::dontSendNotification);
+}
+
+juce::Rectangle<float> DrumMachineEditorComponent::getRadarBounds() const
+{
+    auto area = getLocalBounds().toFloat().reduced(6.0f);
+    area.removeFromBottom(54.0f);
+    return area;
+}
+
+juce::Rectangle<float> DrumMachineEditorComponent::getFooterBounds() const
+{
+    auto area = getLocalBounds().toFloat().reduced(6.0f);
+    return area.removeFromBottom(50.0f);
+}
+
+juce::Point<float> DrumMachineEditorComponent::radarPointFor(const juce::Rectangle<float>& radarBounds,
+                                                             int arcIndex,
+                                                             float angleDegrees) const
+{
+    const auto centre = radarBounds.getCentre();
+    const auto maxRadius = juce::jmin(radarBounds.getWidth(), radarBounds.getHeight()) * 0.42f;
+    const auto arcNorm = juce::jlimit(0.0f, 1.0f, static_cast<float>(arcIndex) / static_cast<float>(kArcCount - 1));
+    const auto radius = maxRadius * (0.33f + arcNorm * 0.64f);
+    const auto radians = juce::degreesToRadians(angleDegrees - 90.0f);
+    return { centre.x + std::cos(radians) * radius, centre.y + std::sin(radians) * radius };
 }
 
 void DrumMachineEditorComponent::timerCallback()
 {
-    for (int i = 0; i < DrumMachineProcessor::kVoiceCount; ++i)
+    for (auto& voice : voices)
     {
-        rows[static_cast<size_t>(i)].meter = processor.getVoiceMeter(i);
-        refreshWavePreview(i);
+        voice.meter = processor.getVoiceMeter(voice.voiceIndex);
+        if (voice.meter > voice.lastMeter + 0.18f && voice.meter > 0.12f)
+        {
+            voice.bloom = juce::jmax(voice.bloom, voice.meter);
+            voice.detonation = 1.0f;
+        }
+
+        voice.lastMeter = voice.meter * 0.9f + voice.lastMeter * 0.1f;
+        voice.bloom *= 0.88f;
+        voice.detonation *= 0.84f;
     }
+
+    const auto arcValue = processor.getMacro(static_cast<int>(DrumMacroId::Arc));
+    arcSpecularNudge += (arcValue - arcSpecularNudge) * 0.20f;
     repaint();
-}
-
-void DrumMachineEditorComponent::refreshWavePreview(int voiceIndex)
-{
-    if (voiceIndex < 0 || voiceIndex >= DrumMachineProcessor::kVoiceCount)
-        return;
-
-    auto& row = rows[static_cast<size_t>(voiceIndex)];
-
-    DrumVoiceParams params;
-    params.tuneHz = processor.getVoiceTune(voiceIndex);
-    params.decaySeconds = processor.getVoiceDecay(voiceIndex);
-    params.level = processor.getVoiceLevel(voiceIndex);
-
-    FmDrumVoice previewVoice;
-    previewVoice.setSampleRate(44100.0);
-    previewVoice.trigger(params, 1.0f, false);
-
-    float peak = 0.0001f;
-    for (auto& v : row.preview)
-    {
-        v = previewVoice.renderSample();
-        peak = juce::jmax(peak, std::abs(v));
-    }
-
-    for (auto& v : row.preview)
-        v = v / peak;
 }
 
 void DrumMachineEditorComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff121417));
+    const auto& theme = ThemeManager::get().theme();
+    auto body = getLocalBounds().toFloat().reduced(2.0f);
+    setle::theme::drawChassis(g,
+                              body,
+                              theme.windowBackground.interpolatedWith(theme.surfaceVariant, 0.62f),
+                              theme,
+                              8.0f);
 
-    auto area = getLocalBounds().reduced(8);
-    area.removeFromTop(4);
-    for (int i = 0; i < DrumMachineProcessor::kVoiceCount; ++i)
+    auto radarBounds = getRadarBounds();
+    auto footerBounds = getFooterBounds();
+
+    const auto brushedPlate = theme.surfaceLow.interpolatedWith(theme.surfaceVariant, 0.65f);
+    setle::theme::drawChassis(g, radarBounds, brushedPlate, theme, 8.0f);
+
+    for (int y = static_cast<int>(radarBounds.getY()) + 2; y < static_cast<int>(radarBounds.getBottom()) - 2; y += 2)
     {
-        auto row = area.removeFromTop(20);
-        auto meter = juce::Rectangle<int>(row.getRight() - 42, row.getY() + 4, 36, 10);
-        auto wave = juce::Rectangle<int>(meter.getX() - 78, row.getY() + 2, 72, 14);
+        const auto alpha = ((y % 7) == 0 ? 0.06f : 0.03f);
+        g.setColour(theme.inkLight.withAlpha(alpha));
+        g.drawHorizontalLine(y, radarBounds.getX() + 4.0f, radarBounds.getRight() - 4.0f);
+    }
 
-        g.setColour(juce::Colour(0xff1f2b33));
-        g.fillRect(wave);
-        g.setColour(juce::Colour(0xff3e5867));
-        g.drawRect(wave);
+    const auto centre = radarBounds.getCentre();
+    const auto maxRadius = juce::jmin(radarBounds.getWidth(), radarBounds.getHeight()) * 0.42f;
+    const auto ringColor = theme.secondaryAccent.interpolatedWith(theme.signalAudio, 0.5f);
+    for (int arc = 0; arc < kArcCount; ++arc)
+    {
+        const auto arcNorm = static_cast<float>(arc) / static_cast<float>(kArcCount - 1);
+        const auto radius = maxRadius * (0.33f + arcNorm * 0.64f);
+        g.setColour(ringColor.withAlpha(0.56f - arcNorm * 0.16f));
+        g.drawEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f, 1.3f);
+    }
 
-        juce::Path previewPath;
-        const auto& preview = rows[static_cast<size_t>(i)].preview;
-        const float midY = static_cast<float>(wave.getCentreY());
-        const float halfH = static_cast<float>(wave.getHeight()) * 0.42f;
-        for (size_t s = 0; s < preview.size(); ++s)
+    for (const auto& voice : voices)
+    {
+        const auto p = radarPointFor(radarBounds, voice.arcIndex, voice.angleDeg + (voice.arcIndex == 4 ? arcSpecularNudge * 6.0f : 0.0f));
+        const auto cobalt = theme.focusOutline.interpolatedWith(theme.signalAudio, 0.35f);
+        const auto saffronBloom = theme.primaryAccent.interpolatedWith(theme.signalMidi, 0.5f);
+
+        if (voice.detonation > 0.01f)
         {
-            const float x = static_cast<float>(wave.getX()) + (static_cast<float>(s) / static_cast<float>(preview.size() - 1))
-                                                       * static_cast<float>(wave.getWidth());
-            const float y = midY - preview[s] * halfH;
-            if (s == 0)
-                previewPath.startNewSubPath(x, y);
-            else
-                previewPath.lineTo(x, y);
+            setle::theme::drawIndicatorGlow(g,
+                                            p,
+                                            5.5f + voice.bloom * 4.0f,
+                                            saffronBloom,
+                                            theme,
+                                            juce::jlimit(0.0f, 1.0f, voice.detonation),
+                                            true);
         }
-        g.setColour(juce::Colour(0xff79b4e2));
-        g.strokePath(previewPath, juce::PathStrokeType(1.0f));
 
-        g.setColour(juce::Colour(0xff22313a));
-        g.fillRect(meter);
-        g.setColour(juce::Colour(0xff58a6d6));
-        g.fillRect(meter.withWidth(static_cast<int>(meter.getWidth() * juce::jlimit(0.0f, 1.0f, rows[static_cast<size_t>(i)].meter))));
+        const auto beadRadius = 2.6f + voice.meter * 2.8f;
+        g.setColour(cobalt.withAlpha(0.88f));
+        g.fillEllipse(p.x - beadRadius, p.y - beadRadius, beadRadius * 2.0f, beadRadius * 2.0f);
+        g.setColour(theme.inkLight.withAlpha(0.62f));
+        g.fillEllipse(p.x - beadRadius * 0.34f, p.y - beadRadius * 0.68f, beadRadius * 0.66f, beadRadius * 0.66f);
+    }
+
+    setle::theme::drawGlassPanel(g,
+                                 radarBounds,
+                                 theme.secondaryAccent.interpolatedWith(theme.surfaceLow, 0.78f),
+                                 theme,
+                                 true,
+                                 8.0f);
+
+    const auto specNudge = (arcSpecularNudge - 0.5f) * 14.0f;
+    juce::Path specularPath;
+    specularPath.startNewSubPath(radarBounds.getX() + radarBounds.getWidth() * 0.15f + specNudge,
+                                 radarBounds.getY() + radarBounds.getHeight() * 0.20f);
+    specularPath.quadraticTo(radarBounds.getCentreX() + specNudge * 0.6f,
+                             radarBounds.getY() + radarBounds.getHeight() * 0.10f,
+                             radarBounds.getRight() - radarBounds.getWidth() * 0.20f + specNudge,
+                             radarBounds.getY() + radarBounds.getHeight() * 0.30f);
+    g.setColour(theme.inkLight.withAlpha(0.22f));
+    g.strokePath(specularPath, juce::PathStrokeType(2.0f));
+
+    setle::theme::drawFuzzyInsetPanel(g, footerBounds, theme.surfaceVariant, theme, true, 8.0f);
+
+    g.setColour(theme.inkLight.withAlpha(0.86f));
+    g.setFont(juce::FontOptions(9.5f).withStyle("Bold"));
+    for (const auto& knob : knobs)
+    {
+        auto labelBounds = knob.slider.getBounds().translated(0, -1);
+        labelBounds.setY(footerBounds.getBottom() - 14.0f);
+        labelBounds.setHeight(12.0f);
+        g.drawFittedText(knob.label, labelBounds.toNearestInt(), juce::Justification::centred, 1);
     }
 }
 
 void DrumMachineEditorComponent::resized()
 {
-    auto area = getLocalBounds().reduced(8);
+    auto footer = getFooterBounds().reduced(6.0f, 2.0f);
+    const int knobCount = static_cast<int>(knobs.size());
+    const auto slotW = footer.getWidth() / juce::jmax(1, knobCount);
 
-    for (auto& row : rows)
+    for (int i = 0; i < knobCount; ++i)
     {
-        auto r = area.removeFromTop(20);
-        row.name.setBounds(r.removeFromLeft(48));
-        row.tune.setBounds(r.removeFromLeft(96));
-        row.decay.setBounds(r.removeFromLeft(86));
-        row.level.setBounds(r.removeFromLeft(78));
+        auto x = footer.getX() + static_cast<float>(i * slotW);
+        auto knobBounds = juce::Rectangle<float>(x + 1.0f, footer.getY(), static_cast<float>(slotW) - 2.0f, footer.getHeight() - 14.0f);
+        knobs[static_cast<size_t>(i)].slider.setBounds(knobBounds.toNearestInt());
     }
-
-    area.removeFromTop(4);
-    auto m = area.removeFromTop(20);
-    masterLabel.setBounds(m.removeFromLeft(56));
-    master.setBounds(m.removeFromLeft(240));
 }
 
 } // namespace setle::instruments::drum

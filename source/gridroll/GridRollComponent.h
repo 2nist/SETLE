@@ -10,6 +10,8 @@
 #include "../theory/MeterContext.h"
 #include "../theme/ThemeManager.h"
 
+#include <optional>
+
 namespace te = tracktion::engine;
 
 namespace setle::gridroll
@@ -24,6 +26,33 @@ class GridRollComponent : public juce::Component
 {
 public:
     enum class Mode { ChordGrid, NoteMode, DrumGrid, Split };
+
+    struct SelectionMetadata
+    {
+        enum class Target
+        {
+            none,
+            chord,
+            note
+        };
+
+        Target target { Target::none };
+        bool valid { false };
+        juce::String chordId;
+        juce::String noteId;
+        juce::String root;
+        juce::String extension;
+        int inversion { 0 };
+        float velocity { 0.8f };
+    };
+
+    struct CoupledMutation
+    {
+        juce::String root;
+        juce::String extension;
+        int inversion { 0 };
+        float velocity { 0.8f };
+    };
 
     static constexpr int kHeaderHeight = 32; // mode buttons + name + zoom
 
@@ -43,6 +72,14 @@ public:
     /** Propagate the theory snap setting from the workspace. */
     void setTheorySnap(const juce::String& snap);
     void setMeterContext(const setle::theory::MeterContext& meter);
+    std::optional<SelectionMetadata> getSelectionMetadata() const;
+    bool applyTheoryMutationToSelection(const CoupledMutation& mutation);
+    bool applyHumanizeToSelection(int timingJitterMs, int velocityDeviation);
+    void toggleHumanizePopover();
+    void setScaleLock(bool enabled);
+    void setChordLock(bool enabled);
+    bool getScaleLock() const noexcept { return scaleLockEnabled; }
+    bool getChordLock() const noexcept { return chordLockEnabled; }
 
     /** Called when a chord edit should be persisted back to the model. */
     std::function<void(const juce::String& progressionId)> onProgressionEdited;
@@ -55,6 +92,8 @@ public:
 
     /** Called when drum pattern cells change and should be pushed to drum instruments. */
     std::function<void(const std::vector<GridRollCell>&, const juce::String& progressionId)> onDrumPatternEdited;
+    std::function<void(const SelectionMetadata&)> onSelectionMetadataChanged;
+    std::function<void(bool scaleLock, bool chordLock)> onConstraintLockChanged;
 
     void resized() override;
     void paint(juce::Graphics& g) override;
@@ -75,6 +114,12 @@ private:
     void adjustHorizontalZoom(double factorMultiplier);
     void resetHorizontalZoom();
     void adjustPitchZoom(int semitoneDelta);
+    void updateSelectionFromChordCell(int cellIndex);
+    void updateSelectionFromNoteMetadata(const NoteModeView::SelectionMetadata& metadata);
+    void emitSelectionChanged();
+    void updateLockButtonStyles();
+    void showHumanizePopover(bool shouldShow);
+    bool applyChordMutationToSelection(const CoupledMutation& mutation);
 
     // ---------------------------------------------------------------
     // State
@@ -96,6 +141,10 @@ private:
     double noteVisibleEndBeat { 16.0 };
     int noteLowestMidi { 48 };
     int noteHighestMidi { 72 };
+    int selectedChordCellIndex { -1 };
+    std::optional<SelectionMetadata> currentSelection;
+    bool scaleLockEnabled { false };
+    bool chordLockEnabled { false };
 
     juce::String progressionId;
 
@@ -113,6 +162,16 @@ private:
     juce::Label      pitchLabel { {}, "Pitch:" };
     juce::TextButton pitchInButton   { "+" };
     juce::TextButton pitchOutButton  { "-" };
+    juce::TextButton scaleLockButton { "Scale Lock" };
+    juce::TextButton chordLockButton { "Chord Lock" };
+    juce::TextButton humanizeButton  { "Humanize" };
+
+    juce::Component humanizePopover;
+    juce::Slider timingJitterSlider;
+    juce::Slider velocityDeviationSlider;
+    juce::Label timingJitterLabel;
+    juce::Label velocityDeviationLabel;
+    juce::TextButton applyHumanizeButton { "Apply" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GridRollComponent)
 };

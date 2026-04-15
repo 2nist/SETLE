@@ -44,9 +44,9 @@ void AppPreferences::setCaptureSource(const juce::String& deviceId)
 juce::String AppPreferences::getActiveThemeName() const
 {
     if (auto* s = settings())
-        return s->getValue("setle.theme.active", "Slate Dark");
+        return s->getValue("setle.theme.active", "Espresso Laboratory");
 
-    return "Slate Dark";
+    return "Espresso Laboratory";
 }
 
 void AppPreferences::setActiveThemeName(const juce::String& name)

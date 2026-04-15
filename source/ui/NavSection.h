@@ -104,11 +104,20 @@ inline juce::Array<ContextTabInfo> getContextTabs(NavSection section)
         case NavSection::sound:
             result.add({ 2, "FX",       "FX chain builder per track",              NavSection::sound });
             break;
+        case NavSection::create:
+            result.add({ 0, "Desk", "Examination window and commit desk for captured material", NavSection::create });
+            break;
         case NavSection::library:
             result.add({ 0, "Theory",   "View and apply progression templates",    NavSection::library });
             break;
+        case NavSection::arrange:
+            result.add({ 4, "Mosaic", "Structural mosaic and section workbench", NavSection::arrange });
+            break;
+        case NavSection::session:
+            result.add({ 3, "Dashboard", "Harmonic intelligence and project health", NavSection::session });
+            break;
         default:
-            break;  // create, arrange, mix, session: no sub-tabs in first pass
+            break;  // arrange, mix: no sub-tabs in first pass
     }
     return result;
 }

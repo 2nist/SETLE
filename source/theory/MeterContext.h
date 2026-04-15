@@ -33,7 +33,7 @@ struct MeterContext
         return 4.0 / denominator;
     }
 
-    // Steps per bar at eighth-note resolution
+// Steps per bar at eighth-note resolution
     // 4/4: 8 (4 quarter * 2)
     // 11/8: 11 (11 denominator-unit eighths)
     // 7/8: 7
@@ -46,7 +46,7 @@ struct MeterContext
         // denominator=4 (quarter note): numerator quarters = numerator*2 eighths
         // denominator=2 (half note): numerator halves = numerator*4 eighths
         // denominator=1 (whole note): numerator wholes = numerator*8 eighths
-        return (numerator * 8) / denominator;
+        return (numerator * 4) / denominator;
     }
 
     // Steps per bar at sixteenth-note resolution

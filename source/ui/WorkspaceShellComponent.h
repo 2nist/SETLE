@@ -6,6 +6,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "../capture/GrabSamplerQueue.h"
@@ -13,10 +14,12 @@
 #include "../capture/CircularAudioBuffer.h"
 #include "../instruments/InstrumentSlot.h"
 #include "../model/SetleSongModel.h"
+#include "../timeline/TimelineStampManager.h"
 #include "../timeline/TimelineTracksComponent.h"
 #include "../timeline/TrackManager.h"
 #include "../gridroll/GridRollComponent.h"
 #include "../eff/EffBuilderComponent.h"
+#include "SessionDashboardComponent.h"
 #include "../eff/EffSerializer.h"
 #include "../state/AppPreferences.h"
 #include "../theme/SetleLookAndFeel.h"
@@ -24,12 +27,15 @@
 #include "../theme/ThemeManager.h"
 #include "ProgressionLibraryBrowser.h"
 #include "ProgressionChordPalette.h"
+#include "ArrangeWorkComponent.h"
+#include "SoundWorkComponent.h"
 #include "ToolPaletteComponent.h"
 #include "AppCommands.h"
 #include "AppMenuBarModel.h"
 #include "LeftNavComponent.h"
 #include "NavSection.h"
 #include "ZoneHeaderComponent.h"
+#include "QuesoLogoComponent.h"
 
 namespace te = tracktion::engine;
 
@@ -45,6 +51,8 @@ class WorkspaceShellComponent final : public juce::Component,
 public:
     explicit WorkspaceShellComponent(te::Engine& engine);
     ~WorkspaceShellComponent() override;
+
+    std::optional<setle::timeline::TimelineStampManager::GhostTrail> getGhostTrail(const juce::String& sectionId) const;
 
     bool keyPressed(const juce::KeyPress& key) override;
     void mouseDown(const juce::MouseEvent& event) override;
@@ -134,6 +142,8 @@ private:
     void commitTheoryEditorAction();
     juce::String applyTheoryEditorAction();
     void updateSelectionFromSelector();
+    void handleGridRollSelectionChanged(const setle::gridroll::GridRollComponent::SelectionMetadata& metadata);
+    void applyLiveCoupledTheoryMutation();
 
     std::optional<model::Section> getSelectedSection();
     std::optional<model::Progression> getSelectedProgression();
@@ -155,6 +165,20 @@ private:
     void rebuildOutPanelStrips();
     void applyDrumPatternToSlots(const std::vector<setle::gridroll::GridRollCell>& cells,
                                  const juce::String& progressionId);
+    std::vector<SoundWorkComponent::InstrumentRosterEntry> buildSoundRosterEntries() const;
+    void refreshSoundRoster();
+    void refreshArrangeWorkspace();
+    void focusSoundTrack(const juce::String& trackId);
+    SoundWorkComponent::SidechainSuggestion buildSmartSidechainSuggestion(const juce::String& focusedTrackId) const;
+    void applySmartSidechainSuggestion(const SoundWorkComponent::SidechainSuggestion& suggestion);
+    std::optional<float> runAutoGainForTrack(const juce::String& trackId);
+    void onSectionReordered(const juce::StringArray& orderedSectionIds);
+    juce::String smartDuplicateSection(const juce::String& sectionId, ArrangeWorkComponent::DuplicateMode mode);
+    double getSectionLengthBeats(const model::Section& section) const;
+    double getSongStructureLengthBeats() const;
+    juce::String beginUndoableAction(const juce::String& actionLabel);
+    void performUpdate(const juce::String& beforeSnapshot, const juce::String& statusMessage);
+    void showVesselSelectionModal();
     juce::String getTrackIdForTrack(const te::Track& track) const;
     void clampLayoutValues(int totalTopWidth, int totalBodyHeight);
     void loadLayoutState();
@@ -220,6 +244,7 @@ private:
     juce::ComboBox sessionModeSelector;
 
     juce::Label topTitle;
+    std::unique_ptr<QuesoLogoComponent> quesoLogoComponent;
     juce::Label interactionStatus;
 
     SetleLookAndFeel setleLookAndFeel;
@@ -230,6 +255,7 @@ private:
     std::unique_ptr<setle::capture::CircularAudioBuffer> circularAudioBuffer;
     std::unique_ptr<juce::AudioIODeviceCallback> outputCaptureTap;
     std::unique_ptr<setle::timeline::TrackManager> trackManager;
+    std::unique_ptr<setle::timeline::TimelineStampManager> timelineStampManager;
     std::map<juce::String, std::unique_ptr<setle::instruments::InstrumentSlot>> instrumentSlots;
     model::Song songState;
     std::vector<juce::String> undoSnapshots;
@@ -269,13 +295,22 @@ private:
     juce::TextButton workTabTheoryButton   { "Theory Editor" };
     juce::TextButton workTabGridRollButton { "GridRoll" };
     juce::TextButton workTabFxButton       { "FX" };
-    int workPanelTabIndex { 0 };  // 0=Theory, 1=GridRoll, 2=FX
+    int workPanelTabIndex { 0 };  // 0=Theory, 1=GridRoll, 2=FX, 3=SESSION, 4=ARRANGE
     bool workPanelShowGridRoll { false };
     std::unique_ptr<ProgressionLibraryBrowser> libraryBrowser;
     std::unique_ptr<ProgressionChordPalette> chordPalette;
     std::unique_ptr<setle::gridroll::GridRollComponent> gridRollComponent;
     std::unique_ptr<setle::eff::EffBuilderComponent> effBuilderComponent;
+    std::unique_ptr<ArrangeWorkComponent> arrangeWorkComponent;
+    std::unique_ptr<SoundWorkComponent> soundWorkComponent;
+    std::unique_ptr<SessionDashboardComponent> sessionDashboardComponent;
+    std::optional<setle::gridroll::GridRollComponent::SelectionMetadata> liveGridRollSelection;
+    bool suppressLiveCoupledFieldEvents { false };
+    juce::String liveCoupledUndoBaseSnapshot;
+    juce::uint32 liveCoupledLastMutationMs { 0 };
     juce::String selectedFxTrackId;
+    float arrangeLogoMeltTarget { 0.0f };
+    float arrangeLogoMeltCurrent { 0.0f };
     TheoryMenuTarget activeEditorTarget { TheoryMenuTarget::section };
     int activeEditorActionId = 0;
 

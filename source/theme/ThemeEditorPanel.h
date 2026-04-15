@@ -41,6 +41,9 @@ private:
                          float minValue,
                          float maxValue,
                          float step);
+    void addBoolControl(int sectionIndex,
+                        const juce::String& name,
+                        bool ThemeData::* member);
 
     void resetSectionToBaseline(int sectionIndex);
     void resetThemeToDefault();
@@ -78,6 +81,16 @@ private:
         juce::String name;
     };
 
+    struct BoolControl
+    {
+        juce::Label label;
+        juce::ToggleButton toggle;
+        juce::TextButton resetButton { "Reset" };
+        bool ThemeData::* member { nullptr };
+        int sectionIndex { -1 };
+        juce::String name;
+    };
+
     struct SectionControl
     {
         juce::Label label;
@@ -85,6 +98,7 @@ private:
         juce::String name;
         std::vector<size_t> colourIndices;
         std::vector<size_t> floatIndices;
+        std::vector<size_t> boolIndices;
     };
 
     juce::Label title;
@@ -108,4 +122,5 @@ private:
     std::vector<std::unique_ptr<SectionControl>> sections;
     std::vector<std::unique_ptr<ColourControl>> colourControls;
     std::vector<std::unique_ptr<FloatControl>> floatControls;
+    std::vector<std::unique_ptr<BoolControl>> boolControls;
 };

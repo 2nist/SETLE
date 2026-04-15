@@ -4,7 +4,9 @@
 #include <tracktion_engine/tracktion_engine.h>
 
 #include "../model/SetleSongModel.h"
+#include "../midi/MidiConstraintEngine.h"
 
+#include <optional>
 #include <vector>
 
 namespace te = tracktion::engine;
@@ -16,6 +18,18 @@ class NoteModeView : public juce::Component,
                      private juce::Timer
 {
 public:
+    struct SelectionMetadata
+    {
+        bool valid { false };
+        juce::String noteId;
+        juce::String chordId;
+        juce::String chordSymbol;
+        juce::String root;
+        juce::String extension;
+        int inversion { 0 };
+        float velocity { 0.8f };
+    };
+
     explicit NoteModeView(model::Song& song, te::Edit& edit);
 
     void setTargetProgression(const juce::String& progressionId);
@@ -32,6 +46,16 @@ public:
     void scrollToBeat(double beat, bool centreBeat);
     void scrollByBeats(double deltaBeats);
     void refreshFromEdit();
+    std::optional<SelectionMetadata> getCurrentSelectionMetadata() const;
+    bool applyTheoryMutationToSelection(const juce::String& root,
+                                        const juce::String& extension,
+                                        int inversion,
+                                        float velocity);
+    bool applyHumanizeToSelection(int timingJitterMs, int velocityDeviation);
+    void setScaleLockEnabled(bool enabled);
+    void setChordLockEnabled(bool enabled);
+    bool getScaleLockEnabled() const noexcept { return scaleLockEnabled; }
+    bool getChordLockEnabled() const noexcept { return chordLockEnabled; }
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -45,6 +69,7 @@ public:
     std::function<void(double startBeat, double endBeat)> onVisibleBeatRangeChanged;
     std::function<void(int lowMidi, int highMidi)> onVisiblePitchRangeChanged;
     std::function<void(const juce::String&)> onStatusMessage;
+    std::function<void(const SelectionMetadata&)> onSelectionChanged;
 
 private:
     struct NoteEntry
@@ -105,6 +130,8 @@ private:
                           float velocity);
     juce::String createNoteAtBeatAndPitch(double beat, int midiNote);
     void auditionNote(int midiNote);
+    void syncNotesToSongModel();
+    void emitSelectionChanged();
 
     void emitBeatRangeChanged();
     void emitPitchRangeChanged();
@@ -135,6 +162,9 @@ private:
     double dragOrigDuration { 0.25 };
     int dragOrigMidiNote { 60 };
     juce::String dragNoteId;
+    midi::MidiConstraintEngine constraintEngine;
+    bool scaleLockEnabled { false };
+    bool chordLockEnabled { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NoteModeView)
 };

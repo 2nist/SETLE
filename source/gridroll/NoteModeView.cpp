@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <random>
 
 namespace setle::gridroll
 {
@@ -46,6 +47,7 @@ void NoteModeView::setTargetProgression(const juce::String& id)
     selectedNoteId.clear();
     dragNoteId.clear();
     rebuildNoteCache();
+    emitSelectionChanged();
 
     const auto total = progressionLengthBeats();
     visibleStartBeat = 0.0;
@@ -233,16 +235,32 @@ void NoteModeView::rebuildNoteCache()
                       return a.midiNote < b.midiNote;
                   return a.startBeat < b.startBeat;
               });
+
+    if (!selectedNoteId.isEmpty())
+    {
+        const auto hasSelected = std::any_of(notes.begin(), notes.end(),
+                                             [this](const NoteEntry& entry)
+                                             {
+                                                 return entry.noteId == selectedNoteId;
+                                             });
+        if (!hasSelected)
+            selectedNoteId.clear();
+    }
 }
 
 void NoteModeView::updateActiveChordPitchClasses()
 {
     activeChordPitchClasses.clear();
+    constraintEngine.setScaleContext(song.getSessionKey(), song.getSessionMode());
     const auto* boundary = findChordBoundaryForBeat(playheadBeat);
     if (boundary == nullptr)
+    {
+        constraintEngine.setChordSymbol({});
         return;
+    }
 
     activeChordPitchClasses = theory::BachTheory::getChordPitchClasses(boundary->symbol);
+    constraintEngine.setChordSymbol(boundary->symbol);
 }
 
 juce::Rectangle<int> NoteModeView::keyBounds() const
@@ -573,7 +591,16 @@ void NoteModeView::paint(juce::Graphics& g)
         const bool isScale = containsPitchClass(scalePitchClasses, midi);
         const bool isChord = containsPitchClass(activeChordPitchClasses, midi);
 
-        if (isChord)
+        if (scaleLockEnabled || chordLockEnabled)
+        {
+            const auto analysis = constraintEngine.analyzeNote(midi, playheadBeat);
+            const bool allowed = !analysis.wouldChange;
+            if (allowed)
+                g.setColour(theme.zoneC.withAlpha(isChord ? 0.24f : 0.18f));
+            else
+                g.setColour(theme.signalMidi.withAlpha(0.28f));
+        }
+        else if (isChord)
             g.setColour(theme.zoneB.withAlpha(0.18f));
         else if (isScale)
             g.setColour(theme.zoneC.withAlpha(0.10f));
@@ -764,6 +791,7 @@ void NoteModeView::mouseDown(const juce::MouseEvent& e)
 
         rebuildNoteCache();
         selectedNoteId = id;
+        emitSelectionChanged();
         dragNoteId = id;
         dragStart = e.getPosition();
         isDragging = true;
@@ -779,6 +807,7 @@ void NoteModeView::mouseDown(const juce::MouseEvent& e)
             break;
         }
 
+        syncNotesToSongModel();
         if (onNotesChanged != nullptr)
             onNotesChanged();
         repaint();
@@ -795,6 +824,8 @@ void NoteModeView::mouseDown(const juce::MouseEvent& e)
             {
                 selectedNoteId.clear();
                 rebuildNoteCache();
+                emitSelectionChanged();
+                syncNotesToSongModel();
                 repaint();
                 if (onNotesChanged != nullptr)
                     onNotesChanged();
@@ -809,6 +840,7 @@ void NoteModeView::mouseDown(const juce::MouseEvent& e)
         if (noteIndex < 0)
         {
             selectedNoteId.clear();
+            emitSelectionChanged();
             repaint();
             return;
         }
@@ -822,6 +854,7 @@ void NoteModeView::mouseDown(const juce::MouseEvent& e)
         dragStart = e.getPosition();
         isDragging = true;
         isResizing = e.getPosition().x > noteRightEdgeX(note) - 6;
+        emitSelectionChanged();
         repaint();
     }
 }
@@ -871,8 +904,12 @@ void NoteModeView::mouseUp(const juce::MouseEvent&)
 {
     isDragging = false;
     isResizing = false;
-    if (dragChanged && onNotesChanged != nullptr)
-        onNotesChanged();
+    if (dragChanged)
+    {
+        syncNotesToSongModel();
+        if (onNotesChanged != nullptr)
+            onNotesChanged();
+    }
     dragChanged = false;
 }
 
@@ -902,7 +939,9 @@ void NoteModeView::mouseDoubleClick(const juce::MouseEvent& e)
 
     selectedNoteId = id;
     rebuildNoteCache();
+    emitSelectionChanged();
     repaint();
+    syncNotesToSongModel();
     if (onNotesChanged != nullptr)
         onNotesChanged();
 }
@@ -935,6 +974,328 @@ void NoteModeView::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWh
 
     const auto delta = -static_cast<double>(wheelPrimary) * visibleBeatSpan() * 0.15;
     scrollByBeats(delta);
+}
+
+std::optional<NoteModeView::SelectionMetadata> NoteModeView::getCurrentSelectionMetadata() const
+{
+    if (selectedNoteId.isEmpty())
+        return std::nullopt;
+
+    const auto found = std::find_if(notes.begin(), notes.end(),
+                                    [this](const NoteEntry& entry)
+                                    {
+                                        return entry.noteId == selectedNoteId;
+                                    });
+    if (found == notes.end())
+        return std::nullopt;
+
+    SelectionMetadata metadata;
+    metadata.valid = true;
+    metadata.noteId = found->noteId;
+    metadata.chordId = found->chordId;
+    metadata.chordSymbol = found->chordSymbol;
+    metadata.velocity = found->velocity;
+
+    auto symbol = found->chordSymbol.trim();
+    if (symbol.isEmpty())
+    {
+        metadata.root = juce::MidiMessage::getMidiNoteName(found->midiNote, true, true, 4)
+                            .retainCharacters("ABCDEFG#b");
+        metadata.extension = {};
+        metadata.inversion = 0;
+        return metadata;
+    }
+
+    auto slash = symbol.indexOfChar('/');
+    if (slash >= 0)
+    {
+        const auto inversionToken = symbol.substring(slash + 1).trim();
+        if (inversionToken.isNotEmpty())
+            metadata.inversion = juce::jmax(0, inversionToken.getIntValue());
+        symbol = symbol.substring(0, slash).trim();
+    }
+
+    if (symbol.isNotEmpty())
+    {
+        metadata.root << symbol[0];
+        if (symbol.length() > 1 && (symbol[1] == '#' || symbol[1] == 'b'))
+        {
+            metadata.root << symbol[1];
+            metadata.extension = symbol.substring(2);
+        }
+        else
+        {
+            metadata.extension = symbol.substring(1);
+        }
+    }
+
+    return metadata;
+}
+
+bool NoteModeView::applyTheoryMutationToSelection(const juce::String& root,
+                                                  const juce::String& extension,
+                                                  int inversion,
+                                                  float velocity)
+{
+    const auto selected = getCurrentSelectionMetadata();
+    if (!selected.has_value())
+        return false;
+
+    auto* clip = findClipForProgression();
+    if (clip == nullptr)
+        return false;
+
+    const auto found = std::find_if(notes.begin(), notes.end(),
+                                    [this](const NoteEntry& entry)
+                                    {
+                                        return entry.noteId == selectedNoteId;
+                                    });
+    if (found == notes.end())
+        return false;
+
+    const auto selectedBeat = found->startBeat;
+    const auto* boundary = findChordBoundaryForBeat(selectedBeat);
+    const auto symbol = (root + extension).trim();
+    auto pitchClasses = theory::BachTheory::getChordPitchClasses(symbol);
+    if (pitchClasses.empty())
+        pitchClasses = theory::BachTheory::getChordPitchClasses(selected->chordSymbol);
+
+    std::vector<NoteEntry> targetNotes;
+    for (const auto& note : notes)
+    {
+        bool inTarget = (note.noteId == selectedNoteId);
+        if (boundary != nullptr)
+            inTarget = note.startBeat >= boundary->startBeat - 0.0001 && note.startBeat < boundary->endBeat + 0.0001;
+        if (inTarget)
+            targetNotes.push_back(note);
+    }
+
+    if (targetNotes.empty())
+        return false;
+
+    std::sort(targetNotes.begin(), targetNotes.end(),
+              [](const NoteEntry& a, const NoteEntry& b) { return a.midiNote < b.midiNote; });
+
+    std::vector<int> targetPitches;
+    targetPitches.reserve(targetNotes.size());
+
+    for (size_t i = 0; i < targetNotes.size(); ++i)
+    {
+        auto pitch = targetNotes[i].midiNote;
+        if (!pitchClasses.empty())
+        {
+            const int pc = pitchClasses[i % pitchClasses.size()];
+            int best = pitch;
+            int bestDistance = std::numeric_limits<int>::max();
+            const int octave = pitch / 12;
+            for (int o = octave - 2; o <= octave + 2; ++o)
+            {
+                const int candidate = o * 12 + pc;
+                if (candidate < 0 || candidate > 127)
+                    continue;
+                const int distance = std::abs(candidate - pitch);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = candidate;
+                }
+            }
+            pitch = best;
+        }
+        targetPitches.push_back(juce::jlimit(0, 127, pitch));
+    }
+
+    const int absInversion = std::abs(inversion);
+    const int shiftCount = juce::jmin(absInversion, static_cast<int>(targetPitches.size()));
+    if (inversion > 0)
+    {
+        for (int i = 0; i < shiftCount; ++i)
+            targetPitches[static_cast<size_t>(i)] = juce::jmin(127, targetPitches[static_cast<size_t>(i)] + 12);
+    }
+    else if (inversion < 0)
+    {
+        for (int i = 0; i < shiftCount; ++i)
+        {
+            const auto idx = static_cast<size_t>(targetPitches.size() - 1 - i);
+            targetPitches[idx] = juce::jmax(0, targetPitches[idx] - 12);
+        }
+    }
+
+    const auto clampedVelocity = juce::jlimit(0.0f, 1.0f, velocity);
+    bool changed = false;
+    for (size_t i = 0; i < targetNotes.size(); ++i)
+    {
+        changed |= updateNoteInClip(targetNotes[i].noteId,
+                                    targetNotes[i].startBeat,
+                                    targetNotes[i].durationBeats,
+                                    targetPitches[i],
+                                    clampedVelocity);
+    }
+
+    if (!changed)
+        return false;
+
+    rebuildNoteCache();
+    emitSelectionChanged();
+    syncNotesToSongModel();
+    repaint();
+    if (onNotesChanged != nullptr)
+        onNotesChanged();
+    return true;
+}
+
+bool NoteModeView::applyHumanizeToSelection(int timingJitterMs, int velocityDeviation)
+{
+    const auto selected = getCurrentSelectionMetadata();
+    if (!selected.has_value())
+        return false;
+
+    auto found = std::find_if(notes.begin(), notes.end(),
+                              [this](const NoteEntry& entry)
+                              {
+                                  return entry.noteId == selectedNoteId;
+                              });
+    if (found == notes.end())
+        return false;
+
+    const auto selectedBeat = found->startBeat;
+    const auto* boundary = findChordBoundaryForBeat(selectedBeat);
+    std::vector<NoteEntry> targetNotes;
+    for (const auto& note : notes)
+    {
+        bool inTarget = (note.noteId == selectedNoteId);
+        if (boundary != nullptr)
+            inTarget = note.startBeat >= boundary->startBeat - 0.0001 && note.startBeat < boundary->endBeat + 0.0001;
+        if (inTarget)
+            targetNotes.push_back(note);
+    }
+
+    if (targetNotes.empty())
+        return false;
+
+    const auto bpm = juce::jmax(1.0, song.getBpm());
+    const auto secondsPerBeat = 60.0 / bpm;
+    const auto jitterBeats = juce::jmax(0.0, static_cast<double>(timingJitterMs) / 1000.0 / secondsPerBeat);
+    const auto velocityNorm = juce::jmax(0.0f, static_cast<float>(velocityDeviation) / 127.0f);
+
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    std::uniform_real_distribution<double> jitterDist(-jitterBeats, jitterBeats);
+    std::uniform_real_distribution<float> velDist(-velocityNorm, velocityNorm);
+
+    bool changed = false;
+    for (const auto& note : targetNotes)
+    {
+        const auto updatedStart = juce::jmax(0.0, note.startBeat + jitterDist(rng));
+        const auto updatedVel = juce::jlimit(0.0f, 1.0f, note.velocity + velDist(rng));
+        changed |= updateNoteInClip(note.noteId,
+                                    updatedStart,
+                                    note.durationBeats,
+                                    note.midiNote,
+                                    updatedVel);
+    }
+
+    if (!changed)
+        return false;
+
+    rebuildNoteCache();
+    emitSelectionChanged();
+    syncNotesToSongModel();
+    repaint();
+    if (onNotesChanged != nullptr)
+        onNotesChanged();
+    return true;
+}
+
+void NoteModeView::setScaleLockEnabled(bool enabled)
+{
+    scaleLockEnabled = enabled;
+    constraintEngine.setScaleLock(enabled);
+    repaint();
+}
+
+void NoteModeView::setChordLockEnabled(bool enabled)
+{
+    chordLockEnabled = enabled;
+    constraintEngine.setChordLock(enabled);
+    repaint();
+}
+
+void NoteModeView::syncNotesToSongModel()
+{
+    auto progression = song.findProgressionById(progressionId);
+    if (!progression.has_value())
+        return;
+
+    auto progressionTree = progression->valueTree();
+    if (!progressionTree.isValid())
+        return;
+
+    std::vector<ChordBoundary> boundaries;
+    for (const auto& boundary : chordBoundaries)
+        boundaries.push_back(boundary);
+
+    for (int chordIndex = 0; chordIndex < progressionTree.getNumChildren(); ++chordIndex)
+    {
+        auto chordTree = progressionTree.getChild(chordIndex);
+        if (!chordTree.hasType(model::Schema::chordType))
+            continue;
+
+        const auto chordId = chordTree.getProperty(model::Schema::idProp).toString();
+        const auto chordStart = chordTree.getProperty(model::Schema::startBeatsProp);
+
+        for (int i = chordTree.getNumChildren(); --i >= 0;)
+        {
+            if (chordTree.getChild(i).hasType(model::Schema::noteType))
+                chordTree.removeChild(i, nullptr);
+        }
+
+        for (const auto& note : notes)
+        {
+            bool belongsToChord = (note.chordId == chordId);
+            if (!belongsToChord)
+            {
+                for (const auto& boundary : boundaries)
+                {
+                    if (boundary.chordId != chordId)
+                        continue;
+
+                    if (note.startBeat >= boundary.startBeat - 0.0001
+                        && note.startBeat < boundary.endBeat + 0.0001)
+                    {
+                        belongsToChord = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!belongsToChord)
+                continue;
+
+            auto newNote = model::Note::create(note.midiNote,
+                                               note.velocity,
+                                               juce::jmax(0.0, note.startBeat - static_cast<double>(chordStart)),
+                                               note.durationBeats,
+                                               1);
+            chordTree.appendChild(newNote.valueTree(), nullptr);
+        }
+    }
+}
+
+void NoteModeView::emitSelectionChanged()
+{
+    if (onSelectionChanged == nullptr)
+        return;
+
+    auto metadata = getCurrentSelectionMetadata();
+    if (metadata.has_value())
+    {
+        onSelectionChanged(*metadata);
+        return;
+    }
+
+    SelectionMetadata empty;
+    onSelectionChanged(empty);
 }
 
 } // namespace setle::gridroll

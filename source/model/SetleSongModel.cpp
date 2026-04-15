@@ -418,6 +418,96 @@ void Song::addTransition(const Transition& transition)
     getOrCreateContainer(Schema::transitionsContainerType).appendChild(transition.valueTree().createCopy(), nullptr);
 }
 
+juce::String Song::createNewMidiClip(const juce::String& clipName,
+                                     const std::vector<Note>& notes,
+                                     double clipLengthBeats,
+                                     const juce::String& sourceTrackId)
+{
+    if (!isValid())
+        return {};
+
+    auto progression = Progression::create(clipName.isNotEmpty()
+                                               ? clipName
+                                               : ("Capture " + juce::Time::getCurrentTime().toString(true, true, false, true)),
+                                           getSessionKey(),
+                                           getSessionMode());
+    progression.setLengthBeats(juce::jmax(0.25, clipLengthBeats));
+    if (sourceTrackId.isNotEmpty())
+        progression.valueTree().setProperty("sourceTrackId", sourceTrackId, nullptr);
+
+    if (notes.empty())
+    {
+        auto fallback = Chord::create("Capture", "captured", 60);
+        fallback.setName("Capture");
+        fallback.setStartBeats(0.0);
+        fallback.setDurationBeats(progression.getLengthBeats());
+        fallback.addNote(Note::create(60, 0.8f, 0.0, juce::jmax(0.25, progression.getLengthBeats()), 1));
+        progression.addChord(fallback);
+    }
+    else
+    {
+        auto captureChord = Chord::create("Capture", "captured", notes.front().getPitch());
+        captureChord.setName("Capture");
+        captureChord.setStartBeats(0.0);
+        captureChord.setDurationBeats(progression.getLengthBeats());
+        for (const auto& note : notes)
+            captureChord.addNote(note);
+        progression.addChord(captureChord);
+    }
+
+    addProgression(progression);
+
+    auto sections = getSections();
+    if (sections.empty())
+    {
+        auto section = Section::create("Captured Section", 1);
+        section.addProgressionRef(SectionProgressionRef::create(progression.getId(), 0, "capture"));
+        addSection(section);
+    }
+    else
+    {
+        auto targetSection = sections.back();
+        targetSection.addProgressionRef(SectionProgressionRef::create(progression.getId(),
+                                                                      static_cast<int>(targetSection.getProgressionRefs().size()),
+                                                                      "capture"));
+    }
+
+    return progression.getId();
+}
+
+void Song::moveSection(const juce::String& id, int newIndex)
+{
+    if (!isValid() || id.isEmpty())
+        return;
+
+    auto container = getOrCreateContainer(Schema::sectionsContainerType);
+    const auto childCount = container.getNumChildren();
+    if (childCount <= 1)
+        return;
+
+    int currentIndex = -1;
+    for (int i = 0; i < childCount; ++i)
+    {
+        auto child = container.getChild(i);
+        if (child.hasType(Schema::sectionType) && getString(child, Schema::idProp) == id)
+        {
+            currentIndex = i;
+            break;
+        }
+    }
+
+    if (currentIndex < 0)
+        return;
+
+    const auto clampedIndex = juce::jlimit(0, childCount - 1, newIndex);
+    if (clampedIndex == currentIndex)
+        return;
+
+    auto child = container.getChild(currentIndex);
+    container.removeChild(currentIndex, nullptr);
+    container.addChild(child, clampedIndex, nullptr);
+}
+
 void Song::removeSection(const juce::String& id)
 {
     if (!isValid() || id.isEmpty())

@@ -271,6 +271,20 @@ void InstrumentSlot::setTransportBeat(double beat)
         drum->setTransportBeat(beat);
 }
 
+bool InstrumentSlot::getDrumSubSyncHint(float& frequencyHz, float& intensity) const
+{
+    if (auto* drum = dynamic_cast<setle::instruments::drum::TracktionDrumMachinePlugin*>(loadedPlugin.get()))
+    {
+        frequencyHz = drum->getSubSyncFrequencyHz();
+        intensity = drum->getSubSyncIntensity();
+        return frequencyHz > 0.0f && intensity > 0.0f;
+    }
+
+    frequencyHz = 0.0f;
+    intensity = 0.0f;
+    return false;
+}
+
 void InstrumentSlot::loadEffChain(const setle::eff::EffDefinition& def)
 {
     if (effProcessor == nullptr)

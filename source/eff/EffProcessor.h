@@ -35,17 +35,29 @@ private:
     std::vector<EffBlock*> audioBlocks;
     std::map<int, float> drumSwingByMidiNote;
 
-    struct BlockState
-    {
-        juce::dsp::IIR::Filter<float> filterL;
-        juce::dsp::IIR::Filter<float> filterR;
-        juce::dsp::DelayLine<float>   delayLine { 192000 };
-        juce::Reverb                  reverb;
-        float lfoPhase    { 0.0f };
-        float lfoPhaseR   { 0.0f };   // for stereo chorus spread
-        float envFollower { 0.0f };
-        juce::Random rng;
-    };
+struct BlockState
+{
+    juce::dsp::IIR::Filter<float> filterL;
+    juce::dsp::IIR::Filter<float> filterR;
+    juce::dsp::DelayLine<float>   delayLine { 192000 };
+    juce::Reverb                  reverb;
+    float lfoPhase    { 0.0f };
+    float lfoPhaseR   { 0.0f };   // for stereo chorus spread
+    float envFollower { 0.0f };
+    juce::Random rng;
+
+    
+// Beat repeat state
+    juce::MidiBuffer    beatRepeatBuffer;     // captured notes
+    double              beatRepeatLengthBeats { 1.0 };
+    double              beatRepeatPhaseBeats  { 0.0 };
+    bool                beatRepeatActive      { false };
+
+    // Arpeggiator state
+    std::vector<int>    heldNotes;
+    int                 arpStepIndex { 0 };
+};
+
 
     std::map<juce::String, BlockState> blockStates;
 
