@@ -4,6 +4,8 @@
 #include <map>
 
 #include "../theme/ThemeStyleHelpers.h"
+#include "../theory/BachTheory.h"
+#include "../theory/DiatonicHarmony.h"
 
 namespace setle::gridroll
 {
@@ -26,7 +28,11 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
 
     chordGrid->onCellDoubleClicked = [this](int idx) { jumpToChordInNoteMode(idx); };
     chordGrid->onOpenNoteDetail = [this](int idx) { jumpToChordInNoteMode(idx); };
-    chordGrid->onCellSelected = [this](int) { repaint(); };
+    chordGrid->onCellSelected = [this](int idx)
+    {
+        updateSelectionFromChordCell(idx);
+        repaint();
+    };
     chordGrid->onCellsChanged = [this]
     {
         syncChordCellsToModel();
@@ -76,6 +82,10 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
         if (onStatusMessage)
             onStatusMessage(msg);
     };
+    noteModeView->onSelectionChanged = [this](const NoteModeView::SelectionMetadata& metadata)
+    {
+        updateSelectionFromNoteMetadata(metadata);
+    };
 
     addAndMakeVisible(chordViewport);
     addAndMakeVisible(drumViewport);
@@ -91,7 +101,8 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
     splitModeButton.onClick = setActiveModeButton(Mode::Split);
 
     for (auto* btn : { &chordModeButton, &noteModeButton, &drumModeButton, &splitModeButton,
-                       &zoomInButton, &zoomOutButton, &zoomResetButton, &pitchInButton, &pitchOutButton })
+                       &zoomInButton, &zoomOutButton, &zoomResetButton, &pitchInButton, &pitchOutButton,
+                       &scaleLockButton, &chordLockButton, &humanizeButton })
     {
         const auto& theme = ThemeManager::get().theme();
         btn->setColour(juce::TextButton::buttonColourId, theme.controlBg);
@@ -100,6 +111,61 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
         btn->setClickingTogglesState(false);
         addAndMakeVisible(*btn);
     }
+
+    scaleLockButton.setClickingTogglesState(true);
+    chordLockButton.setClickingTogglesState(true);
+    scaleLockButton.onClick = [this]
+    {
+        setScaleLock(scaleLockButton.getToggleState());
+        if (onConstraintLockChanged)
+            onConstraintLockChanged(scaleLockEnabled, chordLockEnabled);
+    };
+    chordLockButton.onClick = [this]
+    {
+        setChordLock(chordLockButton.getToggleState());
+        if (onConstraintLockChanged)
+            onConstraintLockChanged(scaleLockEnabled, chordLockEnabled);
+    };
+    humanizeButton.onClick = [this] { toggleHumanizePopover(); };
+
+    addAndMakeVisible(humanizePopover);
+    humanizePopover.setVisible(false);
+    humanizePopover.setInterceptsMouseClicks(false, true);
+
+    timingJitterSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    timingJitterSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 18);
+    timingJitterSlider.setRange(0.0, 60.0, 1.0);
+    timingJitterSlider.setValue(12.0);
+    timingJitterSlider.setTextValueSuffix(" ms");
+    humanizePopover.addAndMakeVisible(timingJitterSlider);
+
+    velocityDeviationSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    velocityDeviationSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 18);
+    velocityDeviationSlider.setRange(0.0, 40.0, 1.0);
+    velocityDeviationSlider.setValue(10.0);
+    velocityDeviationSlider.setTextValueSuffix(" vel");
+    humanizePopover.addAndMakeVisible(velocityDeviationSlider);
+
+    timingJitterLabel.setText("Timing Jitter", juce::dontSendNotification);
+    velocityDeviationLabel.setText("Velocity Deviation", juce::dontSendNotification);
+    for (auto* l : { &timingJitterLabel, &velocityDeviationLabel })
+    {
+        l->setJustificationType(juce::Justification::centredLeft);
+        l->setColour(juce::Label::textColourId, ThemeManager::get().theme().inkLight.withAlpha(0.90f));
+        humanizePopover.addAndMakeVisible(*l);
+    }
+
+    applyHumanizeButton.onClick = [this]
+    {
+        const auto applied = applyHumanizeToSelection(juce::roundToInt(timingJitterSlider.getValue()),
+                                                      juce::roundToInt(velocityDeviationSlider.getValue()));
+        if (onStatusMessage)
+            onStatusMessage(applied ? "Humanize applied" : "Humanize skipped: no selected notes");
+        showHumanizePopover(false);
+    };
+    humanizePopover.addAndMakeVisible(applyHumanizeButton);
+
+    updateLockButtonStyles();
 
     progressionName.setColour(juce::Label::textColourId,
                               setle::theme::textForRole(ThemeManager::get().theme(),
@@ -144,6 +210,9 @@ GridRollComponent::GridRollComponent(model::Song& songRef, te::Edit& editRef)
 void GridRollComponent::setTargetProgression(const juce::String& id)
 {
     progressionId = id;
+    selectedChordCellIndex = -1;
+    currentSelection.reset();
+    emitSelectionChanged();
 
     if (onPrepareProgressionForNoteMode != nullptr && id.isNotEmpty())
         onPrepareProgressionForNoteMode(id);
@@ -162,6 +231,8 @@ void GridRollComponent::setTargetProgression(const juce::String& id)
 
     chordGrid->loadProgression(id);
     noteModeView->setTargetProgression(id);
+    noteModeView->setScaleLockEnabled(scaleLockEnabled);
+    noteModeView->setChordLockEnabled(chordLockEnabled);
 
     const auto beats = totalBeats();
     noteVisibleStartBeat = 0.0;
@@ -241,11 +312,48 @@ void GridRollComponent::paint(juce::Graphics& g)
     const auto& theme = ThemeManager::get().theme();
     g.fillAll(setle::theme::panelBackground(theme, setle::theme::ZoneRole::timeline));
 
+    for (int y = 0; y < getHeight(); y += 2)
+    {
+        const auto alpha = ((y / 2) % 2 == 0) ? 0.012f : 0.02f;
+        g.setColour(theme.surface0.withAlpha(alpha));
+        g.fillRect(0, y, getWidth(), 1);
+    }
+
     g.setColour(setle::theme::panelHeaderBackground(theme, setle::theme::ZoneRole::timeline));
     g.fillRect(0, 0, getWidth(), kHeaderHeight);
+    g.setColour(theme.inkLight.withAlpha(0.06f));
+    g.fillRoundedRectangle(2.0f, 2.0f, static_cast<float>(getWidth() - 4), static_cast<float>(kHeaderHeight - 4), 6.0f);
     g.setColour(setle::theme::timelineGridLine(theme, true).withAlpha(0.85f));
     g.drawLine(0.0f, static_cast<float>(kHeaderHeight), static_cast<float>(getWidth()), static_cast<float>(kHeaderHeight),
                setle::theme::stroke(theme, setle::theme::StrokeRole::normal));
+
+    auto drawLockGlow = [&g, &theme](juce::TextButton& button)
+    {
+        if (!button.getToggleState())
+            return;
+
+        auto b = button.getBounds().toFloat();
+        g.setColour(theme.signalMidi.withAlpha(0.30f));
+        g.drawRoundedRectangle(b.expanded(2.0f), 6.0f, 2.0f);
+        g.setColour(theme.signalMidi.withAlpha(0.16f));
+        g.fillRoundedRectangle(b.expanded(1.0f), 5.0f);
+    };
+
+    drawLockGlow(scaleLockButton);
+    drawLockGlow(chordLockButton);
+
+    if (humanizePopover.isVisible())
+    {
+        const auto popBounds = humanizePopover.getBounds().toFloat();
+        g.setColour(theme.surface0.withAlpha(0.88f));
+        g.fillRoundedRectangle(popBounds, 8.0f);
+        g.setColour(theme.inkLight.withAlpha(0.06f));
+        g.fillRoundedRectangle(popBounds.reduced(1.0f), 8.0f);
+        g.setColour(theme.surfaceEdge.withAlpha(0.92f));
+        g.drawRoundedRectangle(popBounds, 8.0f, 1.3f);
+        g.setColour(theme.signalMidi.withAlpha(0.18f));
+        g.drawRoundedRectangle(popBounds.reduced(2.0f), 7.0f, 1.0f);
+    }
 }
 
 void GridRollComponent::resized()
@@ -261,6 +369,25 @@ void GridRollComponent::resized()
 
     progressionName.setBounds(header.removeFromLeft(180).reduced(4, 4));
     sessionKeyDisplay.setBounds(header.removeFromLeft(96).reduced(4, 4));
+    header.removeFromLeft(6);
+
+    humanizeButton.setBounds(header.removeFromLeft(88).reduced(4, 6));
+    chordLockButton.setBounds(header.removeFromLeft(102).reduced(4, 6));
+    scaleLockButton.setBounds(header.removeFromLeft(102).reduced(4, 6));
+
+    auto pop = humanizeButton.getBounds().withWidth(252).withHeight(116);
+    pop.setX(juce::jmax(0, juce::jmin(getWidth() - pop.getWidth() - 6, humanizeButton.getRight() - pop.getWidth())));
+    pop.setY(kHeaderHeight + 6);
+    humanizePopover.setBounds(pop);
+
+    auto popArea = humanizePopover.getLocalBounds().reduced(10, 8);
+    timingJitterLabel.setBounds(popArea.removeFromTop(16));
+    timingJitterSlider.setBounds(popArea.removeFromTop(24));
+    popArea.removeFromTop(8);
+    velocityDeviationLabel.setBounds(popArea.removeFromTop(16));
+    velocityDeviationSlider.setBounds(popArea.removeFromTop(24));
+    popArea.removeFromTop(8);
+    applyHumanizeButton.setBounds(popArea.removeFromTop(24).removeFromRight(72));
 
     pitchInButton.setBounds(header.removeFromRight(28).reduced(4, 6));
     pitchOutButton.setBounds(header.removeFromRight(28).reduced(4, 6));
@@ -395,6 +522,254 @@ void GridRollComponent::adjustPitchZoom(int semitoneDelta)
     }
 
     setNotePitchRange(juce::jmax(0, low), juce::jmin(127, high));
+}
+
+std::optional<GridRollComponent::SelectionMetadata> GridRollComponent::getSelectionMetadata() const
+{
+    return currentSelection;
+}
+
+bool GridRollComponent::applyTheoryMutationToSelection(const CoupledMutation& mutation)
+{
+    if (!currentSelection.has_value())
+        return false;
+
+    if (currentSelection->target == SelectionMetadata::Target::note)
+    {
+        const auto changed = noteModeView->applyTheoryMutationToSelection(mutation.root,
+                                                                           mutation.extension,
+                                                                           mutation.inversion,
+                                                                           mutation.velocity);
+        if (changed)
+            refreshNoteModeCache();
+        return changed;
+    }
+
+    if (currentSelection->target == SelectionMetadata::Target::chord)
+        return applyChordMutationToSelection(mutation);
+
+    return false;
+}
+
+bool GridRollComponent::applyHumanizeToSelection(int timingJitterMs, int velocityDeviation)
+{
+    if (noteModeView == nullptr)
+        return false;
+
+    const auto changed = noteModeView->applyHumanizeToSelection(timingJitterMs, velocityDeviation);
+    if (changed)
+        refreshNoteModeCache();
+    return changed;
+}
+
+void GridRollComponent::toggleHumanizePopover()
+{
+    showHumanizePopover(!humanizePopover.isVisible());
+}
+
+void GridRollComponent::setScaleLock(bool enabled)
+{
+    scaleLockEnabled = enabled;
+    scaleLockButton.setToggleState(enabled, juce::dontSendNotification);
+    noteModeView->setScaleLockEnabled(enabled);
+    updateLockButtonStyles();
+    repaint();
+}
+
+void GridRollComponent::setChordLock(bool enabled)
+{
+    chordLockEnabled = enabled;
+    chordLockButton.setToggleState(enabled, juce::dontSendNotification);
+    noteModeView->setChordLockEnabled(enabled);
+    updateLockButtonStyles();
+    repaint();
+}
+
+void GridRollComponent::updateSelectionFromChordCell(int cellIndex)
+{
+    selectedChordCellIndex = cellIndex;
+
+    const auto& cells = chordGrid->getCells();
+    if (cellIndex < 0 || cellIndex >= static_cast<int>(cells.size()))
+    {
+        currentSelection.reset();
+        emitSelectionChanged();
+        return;
+    }
+
+    const auto& cell = cells[static_cast<size_t>(cellIndex)];
+    SelectionMetadata metadata;
+    metadata.valid = true;
+    metadata.target = SelectionMetadata::Target::chord;
+    metadata.chordId = cell.cellId;
+    metadata.velocity = cell.velocity;
+
+    auto symbol = cell.chordSymbol.trim();
+    auto slash = symbol.indexOfChar('/');
+    if (slash >= 0)
+    {
+        const auto inversionToken = symbol.substring(slash + 1).trim();
+        if (inversionToken.isNotEmpty())
+            metadata.inversion = juce::jmax(0, inversionToken.getIntValue());
+        symbol = symbol.substring(0, slash).trim();
+    }
+
+    if (symbol.isNotEmpty())
+    {
+        metadata.root << symbol[0];
+        if (symbol.length() > 1 && (symbol[1] == '#' || symbol[1] == 'b'))
+        {
+            metadata.root << symbol[1];
+            metadata.extension = symbol.substring(2);
+        }
+        else
+        {
+            metadata.extension = symbol.substring(1);
+        }
+    }
+
+    currentSelection = metadata;
+    emitSelectionChanged();
+}
+
+void GridRollComponent::updateSelectionFromNoteMetadata(const NoteModeView::SelectionMetadata& metadata)
+{
+    if (!metadata.valid)
+    {
+        if (currentSelection.has_value() && currentSelection->target == SelectionMetadata::Target::note)
+        {
+            currentSelection.reset();
+            emitSelectionChanged();
+        }
+        return;
+    }
+
+    SelectionMetadata next;
+    next.valid = true;
+    next.target = SelectionMetadata::Target::note;
+    next.noteId = metadata.noteId;
+    next.chordId = metadata.chordId;
+    next.root = metadata.root;
+    next.extension = metadata.extension;
+    next.inversion = metadata.inversion;
+    next.velocity = metadata.velocity;
+
+    currentSelection = next;
+    emitSelectionChanged();
+}
+
+void GridRollComponent::emitSelectionChanged()
+{
+    if (onSelectionMetadataChanged == nullptr)
+        return;
+
+    SelectionMetadata empty;
+    onSelectionMetadataChanged(currentSelection.has_value() ? *currentSelection : empty);
+}
+
+void GridRollComponent::updateLockButtonStyles()
+{
+    const auto& theme = ThemeManager::get().theme();
+    auto apply = [&theme](juce::TextButton& button, bool active)
+    {
+        button.setColour(juce::TextButton::buttonColourId,
+                         active ? theme.signalMidi.withAlpha(0.70f) : theme.controlBg);
+        button.setColour(juce::TextButton::textColourOffId,
+                         active ? theme.inkLight : theme.controlText.withAlpha(0.92f));
+        button.setColour(juce::TextButton::buttonOnColourId,
+                         theme.signalMidi.withAlpha(0.80f));
+    };
+
+    apply(scaleLockButton, scaleLockEnabled);
+    apply(chordLockButton, chordLockEnabled);
+}
+
+void GridRollComponent::showHumanizePopover(bool shouldShow)
+{
+    humanizePopover.setVisible(shouldShow);
+    if (shouldShow)
+        humanizePopover.toFront(false);
+    repaint();
+}
+
+bool GridRollComponent::applyChordMutationToSelection(const CoupledMutation& mutation)
+{
+    if (!currentSelection.has_value() || currentSelection->chordId.isEmpty())
+        return false;
+
+    auto progression = song.findProgressionById(progressionId);
+    if (!progression.has_value())
+        return false;
+
+    const auto progressionTree = progression->valueTree();
+    if (!progressionTree.isValid())
+        return false;
+
+    const auto symbol = (mutation.root + mutation.extension).trim();
+    auto pitchClasses = theory::BachTheory::getChordPitchClasses(symbol);
+    if (pitchClasses.empty())
+        return false;
+
+    bool updated = false;
+    for (auto chordTree : progressionTree)
+    {
+        if (!chordTree.hasType(model::Schema::chordType))
+            continue;
+        if (chordTree.getProperty(model::Schema::idProp).toString() != currentSelection->chordId)
+            continue;
+
+        chordTree.setProperty(model::Schema::symbolProp, symbol, nullptr);
+        chordTree.setProperty(model::Schema::nameProp, symbol, nullptr);
+        chordTree.setProperty(model::Schema::qualityProp, mutation.extension, nullptr);
+
+        const auto rootName = mutation.root.trim();
+        const auto rootPc = theory::DiatonicHarmony::pitchClassForRoot(rootName);
+        if (rootPc >= 0)
+            chordTree.setProperty(model::Schema::rootMidiProp, 48 + rootPc, nullptr);
+
+        std::vector<juce::ValueTree> noteTrees;
+        for (auto child : chordTree)
+            if (child.hasType(model::Schema::noteType))
+                noteTrees.push_back(child);
+
+        for (size_t i = 0; i < noteTrees.size(); ++i)
+        {
+            auto noteTree = noteTrees[i];
+            const int oldPitch = static_cast<int>(noteTree.getProperty(model::Schema::pitchProp));
+            const int targetPc = pitchClasses[i % pitchClasses.size()];
+            int best = oldPitch;
+            int bestDistance = std::numeric_limits<int>::max();
+            const int octave = oldPitch / 12;
+            for (int o = octave - 2; o <= octave + 2; ++o)
+            {
+                const int candidate = o * 12 + targetPc;
+                if (candidate < 0 || candidate > 127)
+                    continue;
+                const int distance = std::abs(candidate - oldPitch);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = candidate;
+                }
+            }
+            noteTree.setProperty(model::Schema::pitchProp, juce::jlimit(0, 127, best), nullptr);
+            noteTree.setProperty(model::Schema::velocityProp, juce::jlimit(0.0f, 1.0f, mutation.velocity), nullptr);
+        }
+
+        updated = true;
+        break;
+    }
+
+    if (!updated)
+        return false;
+
+    chordGrid->loadProgression(progressionId);
+    noteModeView->setTargetProgression(progressionId);
+    refreshNoteModeCache();
+    updateSelectionFromChordCell(selectedChordCellIndex);
+    if (onProgressionEdited)
+        onProgressionEdited(progressionId);
+    return true;
 }
 
 void GridRollComponent::syncChordCellsToModel()

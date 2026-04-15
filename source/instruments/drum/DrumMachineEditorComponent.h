@@ -22,23 +22,36 @@ public:
 private:
     void timerCallback() override;
 
-    struct VoiceRow
+    struct VoiceVisual
     {
-        juce::Label name;
-        juce::Slider tune;
-        juce::Slider decay;
-        juce::Slider level;
+        juce::String name;
+        int voiceIndex { 0 };
+        int arcIndex { 0 };
+        float angleDeg { 0.0f };
         float meter { 0.0f };
-        std::array<float, 96> preview {};
+        float lastMeter { 0.0f };
+        float bloom { 0.0f };
+        float detonation { 0.0f };
     };
 
-    void setupRow(VoiceRow& row, const juce::String& name, int voiceIndex);
-    void refreshWavePreview(int voiceIndex);
+    struct MacroKnob
+    {
+        juce::String label;
+        juce::Slider slider;
+    };
+
+    void setupKnob(MacroKnob& knob, const juce::String& label, int macroIndex);
+    void syncKnobValuesFromProcessor();
+    juce::Rectangle<float> getRadarBounds() const;
+    juce::Rectangle<float> getFooterBounds() const;
+    juce::Point<float> radarPointFor(const juce::Rectangle<float>& radarBounds,
+                                     int arcIndex,
+                                     float angleDegrees) const;
 
     DrumMachineProcessor& processor;
-    std::array<VoiceRow, DrumMachineProcessor::kVoiceCount> rows;
-    juce::Slider master;
-    juce::Label masterLabel;
+    std::array<VoiceVisual, DrumMachineProcessor::kVoiceCount> voices;
+    std::array<MacroKnob, static_cast<size_t>(DrumMacroId::Count)> knobs;
+    float arcSpecularNudge { 0.0f };
 };
 
 } // namespace setle::instruments::drum

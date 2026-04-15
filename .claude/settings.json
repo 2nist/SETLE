@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"zoneA\\\\|zoneB\\\\|zoneC\\\\|zoneD\\\\|accentWarm\\\\|accentCool\\\\|inkGhost\\\\|inkMuted\\\\|inkLight\\\\|inkMid\\\\|surface0\\\\|surface1\\\\|surface2\\\\|surface3\\\\|surfaceEdge\" /c/Dev/setle/source/theme/*.h)",
+      "Bash(cmake --build build --target setle_app --config Debug)",
+      "Bash(cmake --build /c/Dev/setle/build/windows-debug --target SETLE --config Debug)",
+      "Bash(xargs -I{} head -30 {})",
+      "Bash(xargs grep:*)",
+      "Bash(xargs python3 -c ':*)",
+      "Bash(find /c/Dev/setle/assets/progressions -name \"*.setle-prg\" -exec grep -l '\"diminished\"' {} \\\\;)",
+      "Bash(xargs -I{} cat {})",
+      "Bash(node -e ':*)",
+      "Bash(node -e \"const fs=require\\('fs'\\);const c=require\\('child_process'\\);const f=c.execSync\\('find /c/Dev/setle/assets/progressions -name *.setle-prg'\\).toString\\(\\).trim\\(\\).split\\('\\\\n'\\);const q={};for\\(const p of f\\){try{const d=JSON.parse\\(fs.readFileSync\\(p,'utf8'\\)\\);for\\(const ch of\\(d.chords||[]\\)\\){const k=ch.quality||'none';if\\(!q[k]\\)q[k]=[];q[k].push\\(ch.symbol||''\\)}}catch\\(e\\){}}for\\(const k of Object.keys\\(q\\).sort\\(\\)\\){const u=[...new Set\\(q[k]\\)].sort\\(\\).slice\\(0,8\\);console.log\\(k+':'+u.join\\('|'\\)\\)};\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);console.log\\('hello'\\)\")"
+    ]
+  }
+}

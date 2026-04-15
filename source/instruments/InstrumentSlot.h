@@ -42,6 +42,7 @@ public:
     void clear();
     void setDrumPattern(const std::vector<setle::gridroll::GridRollCell>& cells);
     void setTransportBeat(double beat);
+    bool getDrumSubSyncHint(float& frequencyHz, float& intensity) const;
 
     // FX chain
     void loadEffChain(const setle::eff::EffDefinition& def);

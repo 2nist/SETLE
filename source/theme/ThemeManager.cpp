@@ -14,7 +14,22 @@ struct FloatField
     float ThemeData::* member;
 };
 
+struct BoolField
+{
+    const char* name;
+    bool ThemeData::* member;
+};
+
 constexpr ColourField kColourFields[] {
+    { "windowBackground", &ThemeData::windowBackground },
+    { "surfaceLow", &ThemeData::surfaceLow },
+    { "surfaceVariant", &ThemeData::surfaceVariant },
+    { "primaryAccent", &ThemeData::primaryAccent },
+    { "secondaryAccent", &ThemeData::secondaryAccent },
+    { "signalMidi", &ThemeData::signalMidi },
+    { "signalAudio", &ThemeData::signalAudio },
+    { "alertColor", &ThemeData::alertColor },
+
     { "surface0", &ThemeData::surface0 },
     { "surface1", &ThemeData::surface1 },
     { "surface2", &ThemeData::surface2 },
@@ -57,8 +72,6 @@ constexpr ColourField kColourFields[] {
     { "zoneBgC", &ThemeData::zoneBgC },
     { "zoneBgD", &ThemeData::zoneBgD },
 
-    { "signalAudio", &ThemeData::signalAudio },
-    { "signalMidi", &ThemeData::signalMidi },
     { "signalCv", &ThemeData::signalCv },
     { "signalGate", &ThemeData::signalGate },
 
@@ -120,7 +133,18 @@ constexpr FloatField kFloatFields[] {
     { "switchWidth", &ThemeData::switchWidth },
     { "switchHeight", &ThemeData::switchHeight },
     { "switchCornerRadius", &ThemeData::switchCornerRadius },
-    { "switchThumbInset", &ThemeData::switchThumbInset }
+    { "switchThumbInset", &ThemeData::switchThumbInset },
+
+    { "glassDistortion", &ThemeData::glassDistortion },
+    { "glowWarmth", &ThemeData::glowWarmth },
+    { "materialChassisTexture", &ThemeData::materialChassisTexture },
+    { "materialGlassDepth", &ThemeData::materialGlassDepth },
+    { "materialInsetFuzz", &ThemeData::materialInsetFuzz },
+    { "materialGlowAmount", &ThemeData::materialGlowAmount }
+};
+
+constexpr BoolField kBoolFields[] {
+    { "isPebbled", &ThemeData::isPebbled }
 };
 
 juce::String colourToString(juce::Colour colour)
@@ -134,6 +158,95 @@ juce::Colour stringToColour(const juce::String& text)
         return juce::Colour(static_cast<uint32_t>(text.substring(2).getHexValue64()));
 
     return juce::Colour::fromString(text);
+}
+
+juce::Colour ThemeData::* memberForKey(ThemeManager::ThemeKey key)
+{
+    using ThemeKey = ThemeManager::ThemeKey;
+
+    switch (key)
+    {
+        case ThemeKey::windowBackground: return &ThemeData::windowBackground;
+        case ThemeKey::surfaceLow: return &ThemeData::surfaceLow;
+        case ThemeKey::surfaceVariant: return &ThemeData::surfaceVariant;
+        case ThemeKey::primaryAccent: return &ThemeData::primaryAccent;
+        case ThemeKey::secondaryAccent: return &ThemeData::secondaryAccent;
+        case ThemeKey::signalMidi: return &ThemeData::signalMidi;
+        case ThemeKey::signalAudio: return &ThemeData::signalAudio;
+        case ThemeKey::alertColor: return &ThemeData::alertColor;
+        case ThemeKey::surface0: return &ThemeData::surface0;
+        case ThemeKey::surface1: return &ThemeData::surface1;
+        case ThemeKey::surface2: return &ThemeData::surface2;
+        case ThemeKey::surface3: return &ThemeData::surface3;
+        case ThemeKey::surface4: return &ThemeData::surface4;
+        case ThemeKey::surfaceEdge: return &ThemeData::surfaceEdge;
+        case ThemeKey::inkLight: return &ThemeData::inkLight;
+        case ThemeKey::inkMid: return &ThemeData::inkMid;
+        case ThemeKey::inkMuted: return &ThemeData::inkMuted;
+        case ThemeKey::inkGhost: return &ThemeData::inkGhost;
+        case ThemeKey::inkDark: return &ThemeData::inkDark;
+        case ThemeKey::accent: return &ThemeData::accent;
+        case ThemeKey::accentWarm: return &ThemeData::accentWarm;
+        case ThemeKey::accentDim: return &ThemeData::accentDim;
+        case ThemeKey::headerBg: return &ThemeData::headerBg;
+        case ThemeKey::cardBg: return &ThemeData::cardBg;
+        case ThemeKey::rowBg: return &ThemeData::rowBg;
+        case ThemeKey::rowHover: return &ThemeData::rowHover;
+        case ThemeKey::rowSelected: return &ThemeData::rowSelected;
+        case ThemeKey::badgeBg: return &ThemeData::badgeBg;
+        case ThemeKey::controlBg: return &ThemeData::controlBg;
+        case ThemeKey::controlOnBg: return &ThemeData::controlOnBg;
+        case ThemeKey::controlText: return &ThemeData::controlText;
+        case ThemeKey::controlTextOn: return &ThemeData::controlTextOn;
+        case ThemeKey::focusOutline: return &ThemeData::focusOutline;
+        case ThemeKey::sliderTrack: return &ThemeData::sliderTrack;
+        case ThemeKey::sliderThumb: return &ThemeData::sliderThumb;
+        case ThemeKey::zoneA: return &ThemeData::zoneA;
+        case ThemeKey::zoneB: return &ThemeData::zoneB;
+        case ThemeKey::zoneC: return &ThemeData::zoneC;
+        case ThemeKey::zoneD: return &ThemeData::zoneD;
+        case ThemeKey::zoneMenu: return &ThemeData::zoneMenu;
+        case ThemeKey::zoneBgA: return &ThemeData::zoneBgA;
+        case ThemeKey::zoneBgB: return &ThemeData::zoneBgB;
+        case ThemeKey::zoneBgC: return &ThemeData::zoneBgC;
+        case ThemeKey::zoneBgD: return &ThemeData::zoneBgD;
+        case ThemeKey::signalCv: return &ThemeData::signalCv;
+        case ThemeKey::signalGate: return &ThemeData::signalGate;
+        case ThemeKey::tapeBase: return &ThemeData::tapeBase;
+        case ThemeKey::tapeClipBg: return &ThemeData::tapeClipBg;
+        case ThemeKey::tapeClipBorder: return &ThemeData::tapeClipBorder;
+        case ThemeKey::tapeSeam: return &ThemeData::tapeSeam;
+        case ThemeKey::tapeBeatTick: return &ThemeData::tapeBeatTick;
+        case ThemeKey::playheadColor: return &ThemeData::playheadColor;
+        case ThemeKey::housingEdge: return &ThemeData::housingEdge;
+    }
+
+    return &ThemeData::primaryAccent;
+}
+
+void syncLegacyMaterialFields(ThemeData& theme)
+{
+    theme.glassDistortion = juce::jlimit(0.0f, 1.0f, theme.glassDistortion);
+    theme.glowWarmth = juce::jlimit(0.0f, 1.0f, theme.glowWarmth);
+    theme.materialChassisTexture = theme.isPebbled ? 1.0f : 0.0f;
+    theme.materialGlassDepth = theme.glassDistortion;
+    theme.materialGlowAmount = theme.glowWarmth;
+}
+
+void onFloatEdited(ThemeData& theme, float ThemeData::* member)
+{
+    if (member == &ThemeData::glassDistortion)
+        theme.glassDistortion = juce::jlimit(0.0f, 1.0f, theme.glassDistortion);
+    else if (member == &ThemeData::glowWarmth)
+        theme.glowWarmth = juce::jlimit(0.0f, 1.0f, theme.glowWarmth);
+    else if (member == &ThemeData::materialChassisTexture)
+        theme.isPebbled = theme.materialChassisTexture >= 0.5f;
+    else if (member == &ThemeData::materialGlassDepth)
+        theme.glassDistortion = juce::jlimit(0.0f, 1.0f, theme.materialGlassDepth);
+    else if (member == &ThemeData::materialGlowAmount)
+        theme.glowWarmth = juce::jlimit(0.0f, 1.0f, theme.materialGlowAmount);
+
+    syncLegacyMaterialFields(theme);
 }
 
 ThemeData readThemeData(const juce::ValueTree& tree, const ThemeData& baseTheme)
@@ -155,6 +268,21 @@ ThemeData readThemeData(const juce::ValueTree& tree, const ThemeData& baseTheme)
             out.*(field.member) = static_cast<float>(tree[field.name]);
     }
 
+    for (const auto& field : kBoolFields)
+    {
+        if (tree.hasProperty(field.name))
+            out.*(field.member) = static_cast<bool>(tree[field.name]);
+    }
+
+    if (!tree.hasProperty("isPebbled") && tree.hasProperty("materialChassisTexture"))
+        out.isPebbled = static_cast<float>(tree["materialChassisTexture"]) >= 0.5f;
+    if (!tree.hasProperty("glassDistortion") && tree.hasProperty("materialGlassDepth"))
+        out.glassDistortion = static_cast<float>(tree["materialGlassDepth"]);
+    if (!tree.hasProperty("glowWarmth") && tree.hasProperty("materialGlowAmount"))
+        out.glowWarmth = static_cast<float>(tree["materialGlowAmount"]);
+
+    syncLegacyMaterialFields(out);
+
     if (!tree.hasProperty("radiusMd") && tree.hasProperty("surfaceRadius"))
         out.radiusMd = static_cast<float>(tree["surfaceRadius"]);
 
@@ -172,6 +300,9 @@ void writeThemeData(const ThemeData& theme, juce::ValueTree& tree)
     for (const auto& field : kFloatFields)
         tree.setProperty(field.name, theme.*(field.member), nullptr);
 
+    for (const auto& field : kBoolFields)
+        tree.setProperty(field.name, theme.*(field.member), nullptr);
+
     // Legacy alias for older theme files.
     tree.setProperty("surfaceRadius", theme.radiusMd, nullptr);
     tree.setProperty("presetName", theme.presetName, nullptr);
@@ -184,6 +315,96 @@ ThemeManager& ThemeManager::get()
     return instance;
 }
 
+ThemeData ThemeManager::loadDefaultTheme()
+{
+    ThemeData theme;
+    theme.presetName = "Espresso Laboratory";
+
+    theme.windowBackground = juce::Colour(0xFF1F1A1B);
+    theme.surfaceLow = juce::Colour(0xFF3A2E2E);
+    theme.surfaceVariant = juce::Colour(0xFF140F0F);
+    theme.primaryAccent = juce::Colour(0xFFF4C430);
+    theme.secondaryAccent = juce::Colour(0xFF40E0D0);
+    theme.signalMidi = juce::Colour(0xFFEE8131);
+    theme.signalAudio = juce::Colour(0xFF2ABA9E);
+    theme.alertColor = juce::Colour(0xFFFF4500);
+
+    theme.surface0 = theme.windowBackground;
+    theme.surface1 = theme.surfaceLow;
+    theme.surface2 = theme.surfaceLow;
+    theme.surface3 = theme.surfaceVariant;
+    theme.surface4 = theme.surfaceLow;
+    theme.surfaceEdge = theme.surfaceLow.interpolatedWith(theme.inkDark, 0.35f);
+
+    theme.accent = theme.primaryAccent;
+    theme.accentWarm = theme.signalMidi;
+    theme.zoneB = theme.primaryAccent;
+    theme.zoneC = theme.secondaryAccent;
+
+    theme.isPebbled = true;
+    theme.glassDistortion = 0.30f;
+    theme.glowWarmth = 0.70f;
+    syncLegacyMaterialFields(theme);
+
+    return theme;
+}
+
+ThemeManager::ThemeManager()
+    : currentTheme(loadDefaultTheme())
+{
+}
+
+juce::Colour ThemeManager::getColor(ThemeKey key) const noexcept
+{
+    return currentTheme.*memberForKey(key);
+}
+
+void ThemeManager::setColor(ThemeKey key, juce::Colour value)
+{
+    setColour(memberForKey(key), value);
+}
+
+ThemeManager::MeltColors ThemeManager::getMeltColors() const noexcept
+{
+    return { getColor(ThemeKey::primaryAccent), getColor(ThemeKey::alertColor) };
+}
+
+bool ThemeManager::isPebbled() const noexcept
+{
+    return currentTheme.isPebbled;
+}
+
+float ThemeManager::glassDistortion() const noexcept
+{
+    return currentTheme.glassDistortion;
+}
+
+float ThemeManager::glowWarmth() const noexcept
+{
+    return currentTheme.glowWarmth;
+}
+
+void ThemeManager::setPebbled(bool enabled)
+{
+    currentTheme.isPebbled = enabled;
+    syncLegacyMaterialFields(currentTheme);
+    broadcast();
+}
+
+void ThemeManager::setGlassDistortion(float amount)
+{
+    currentTheme.glassDistortion = juce::jlimit(0.0f, 1.0f, amount);
+    syncLegacyMaterialFields(currentTheme);
+    broadcast();
+}
+
+void ThemeManager::setGlowWarmth(float amount)
+{
+    currentTheme.glowWarmth = juce::jlimit(0.0f, 1.0f, amount);
+    syncLegacyMaterialFields(currentTheme);
+    broadcast();
+}
+
 void ThemeManager::setColour(juce::Colour ThemeData::* member, juce::Colour value)
 {
     currentTheme.*member = value;
@@ -193,12 +414,14 @@ void ThemeManager::setColour(juce::Colour ThemeData::* member, juce::Colour valu
 void ThemeManager::setFloat(float ThemeData::* member, float value)
 {
     currentTheme.*member = value;
+    onFloatEdited(currentTheme, member);
     broadcast();
 }
 
 void ThemeManager::applyTheme(const ThemeData& themeData)
 {
     currentTheme = themeData;
+    syncLegacyMaterialFields(currentTheme);
     broadcast();
 }
 
@@ -255,7 +478,7 @@ bool ThemeManager::loadFromFile(const juce::File& file)
 
 ThemeData ThemeManager::themeFromValueTree(const juce::ValueTree& tree)
 {
-    ThemeData defaults;
+    ThemeData defaults = loadDefaultTheme();
     return readThemeData(tree, defaults);
 }
 

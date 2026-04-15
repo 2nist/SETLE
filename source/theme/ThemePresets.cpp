@@ -89,7 +89,7 @@ ThemeData ThemePresets::neon()
 
 juce::Array<ThemeData> ThemePresets::builtInPresets()
 {
-    return { slateDark(), espresso(), midnight(), highContrast(), neon() };
+    return { ThemeManager::loadDefaultTheme(), slateDark(), espresso(), midnight(), highContrast(), neon() };
 }
 
 ThemeData ThemePresets::presetByName(const juce::String& name)
@@ -102,7 +102,7 @@ ThemeData ThemePresets::presetByName(const juce::String& name)
         if (theme.presetName == name)
             return theme;
 
-    return slateDark();
+    return ThemeManager::loadDefaultTheme();
 }
 
 juce::Array<ThemeData> ThemePresets::userPresets()

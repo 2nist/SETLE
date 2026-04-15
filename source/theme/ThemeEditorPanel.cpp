@@ -133,7 +133,30 @@ juce::String floatTokenName(float ThemeData::* member)
     if (member == &ThemeData::switchHeight) return "switchHeight";
     if (member == &ThemeData::switchCornerRadius) return "switchCornerRadius";
     if (member == &ThemeData::switchThumbInset) return "switchThumbInset";
+    if (member == &ThemeData::materialChassisTexture) return "materialChassisTexture";
+    if (member == &ThemeData::materialGlassDepth) return "materialGlassDepth";
+    if (member == &ThemeData::materialInsetFuzz) return "materialInsetFuzz";
+    if (member == &ThemeData::materialGlowAmount) return "materialGlowAmount";
     return {};
+}
+
+juce::String boolTokenName(bool ThemeData::* member)
+{
+    if (member == &ThemeData::isPebbled) return "isPebbled";
+    return {};
+}
+
+void setThemeBoolMember(bool ThemeData::* member, bool value)
+{
+    if (member == &ThemeData::isPebbled)
+    {
+        ThemeManager::get().setPebbled(value);
+        return;
+    }
+
+    auto theme = ThemeManager::get().theme();
+    theme.*member = value;
+    ThemeManager::get().applyTheme(theme);
 }
 } // namespace
 
@@ -751,6 +774,13 @@ ThemeEditorPanel::ThemeEditorPanel()
     addFloatControl(metrics, "switchCornerRadius", &ThemeData::switchCornerRadius, 2.0f, 20.0f, 0.5f);
     addFloatControl(metrics, "switchThumbInset", &ThemeData::switchThumbInset, 0.0f, 6.0f, 0.1f);
 
+    const int material = addSection("Material Toggles");
+    addBoolControl(material, "isPebbled", &ThemeData::isPebbled);
+    addFloatControl(material, "materialChassisTexture", &ThemeData::materialChassisTexture, 0.0f, 1.0f, 0.01f);
+    addFloatControl(material, "materialGlassDepth", &ThemeData::materialGlassDepth, 0.0f, 1.0f, 0.01f);
+    addFloatControl(material, "materialInsetFuzz", &ThemeData::materialInsetFuzz, 0.0f, 1.0f, 0.01f);
+    addFloatControl(material, "materialGlowAmount", &ThemeData::materialGlowAmount, 0.0f, 1.0f, 0.01f);
+
     const int tape = addSection("Timeline / Tape");
     addColourControl(tape, "tapeBase", &ThemeData::tapeBase);
     addColourControl(tape, "tapeClipBg", &ThemeData::tapeClipBg);
@@ -940,6 +970,46 @@ void ThemeEditorPanel::addFloatControl(int sectionIndex,
     floatControls.push_back(std::move(control));
 }
 
+void ThemeEditorPanel::addBoolControl(int sectionIndex,
+                                      const juce::String& name,
+                                      bool ThemeData::* member)
+{
+    auto control = std::make_unique<BoolControl>();
+    const auto canonicalName = boolTokenName(member);
+    control->member = member;
+    control->name = canonicalName.isNotEmpty() ? canonicalName : name;
+    control->sectionIndex = sectionIndex;
+    control->label.setText(control->name, juce::dontSendNotification);
+    control->label.setJustificationType(juce::Justification::centredLeft);
+    control->toggle.setButtonText("Enabled");
+
+    auto* c = control.get();
+    control->toggle.onClick = [this, c]
+    {
+        if (suppressCallbacks || c == nullptr)
+            return;
+
+        setPreviewTargetToken(c->name);
+        setThemeBoolMember(c->member, c->toggle.getToggleState());
+    };
+
+    control->resetButton.onClick = [this, c]
+    {
+        if (c == nullptr)
+            return;
+
+        setPreviewTargetToken(c->name);
+        setThemeBoolMember(c->member, baselineTheme.*(c->member));
+    };
+
+    content.addAndMakeVisible(control->label);
+    content.addAndMakeVisible(control->toggle);
+    content.addAndMakeVisible(control->resetButton);
+
+    sections[static_cast<size_t>(sectionIndex)]->boolIndices.push_back(boolControls.size());
+    boolControls.push_back(std::move(control));
+}
+
 void ThemeEditorPanel::populatePresetCombo()
 {
     presets.clear(juce::dontSendNotification);
@@ -980,13 +1050,23 @@ void ThemeEditorPanel::resetSectionToBaseline(int sectionIndex)
             ThemeManager::get().setFloat(control.member, baselineTheme.*(control.member));
         }
     }
+
+    for (const auto index : section.boolIndices)
+    {
+        if (index < boolControls.size())
+        {
+            auto& control = *boolControls[index];
+            setThemeBoolMember(control.member, baselineTheme.*(control.member));
+        }
+    }
 }
 
 void ThemeEditorPanel::resetThemeToDefault()
 {
-    ThemeManager::get().applyTheme(ThemePresets::presetByName("Slate Dark"));
-    setle::state::AppPreferences::get().setActiveThemeName("Slate Dark");
-    presets.setText("Slate Dark", juce::dontSendNotification);
+    auto defaultTheme = ThemeManager::loadDefaultTheme();
+    ThemeManager::get().applyTheme(defaultTheme);
+    setle::state::AppPreferences::get().setActiveThemeName(defaultTheme.presetName);
+    presets.setText(defaultTheme.presetName, juce::dontSendNotification);
     captureBaselineTheme();
 }
 
@@ -1214,6 +1294,20 @@ void ThemeEditorPanel::resized()
             y += 26;
         }
 
+        for (const auto idx : section.boolIndices)
+        {
+            if (idx >= boolControls.size())
+                continue;
+
+            auto& c = *boolControls[idx];
+            auto row = juce::Rectangle<int>(10, y, contentWidth - 20, 24);
+            c.label.setBounds(row.removeFromLeft(130));
+            c.resetButton.setBounds(row.removeFromRight(50));
+            row.removeFromRight(6);
+            c.toggle.setBounds(row.removeFromRight(92));
+            y += 26;
+        }
+
         y += 8;
     }
 
@@ -1261,6 +1355,20 @@ void ThemeEditorPanel::mouseMove(const juce::MouseEvent& event)
 
     if (hoveredToken.isEmpty())
     {
+        for (const auto& control : boolControls)
+        {
+            if (containsScreen(control->label)
+                || containsScreen(control->toggle)
+                || containsScreen(control->resetButton))
+            {
+                hoveredToken = control->name;
+                break;
+            }
+        }
+    }
+
+    if (hoveredToken.isEmpty())
+    {
         for (const auto& section : sections)
         {
             if (containsScreen(section->label) || containsScreen(section->resetButton))
@@ -1269,6 +1377,8 @@ void ThemeEditorPanel::mouseMove(const juce::MouseEvent& event)
                     hoveredToken = colourControls[section->colourIndices.front()]->name;
                 else if (!section->floatIndices.empty() && section->floatIndices.front() < floatControls.size())
                     hoveredToken = floatControls[section->floatIndices.front()]->name;
+                else if (!section->boolIndices.empty() && section->boolIndices.front() < boolControls.size())
+                    hoveredToken = boolControls[section->boolIndices.front()]->name;
                 break;
             }
         }
@@ -1313,6 +1423,18 @@ void ThemeEditorPanel::refreshControls()
         control->label.setColour(juce::Label::textColourId, changed ? t.accentWarm : t.inkMid);
     }
 
+    for (auto& control : boolControls)
+    {
+        const auto value = t.*(control->member);
+        control->toggle.setToggleState(value, juce::dontSendNotification);
+
+        const bool changed = value != baselineTheme.*(control->member);
+        control->label.setText(control->name + (changed ? " *" : ""), juce::dontSendNotification);
+        control->label.setColour(juce::Label::textColourId, changed ? t.accentWarm : t.inkMid);
+        control->toggle.setColour(juce::ToggleButton::tickColourId, t.accent.withAlpha(value ? 0.95f : 0.7f));
+        control->toggle.setColour(juce::ToggleButton::textColourId, value ? t.inkLight : t.inkMuted);
+    }
+
     for (auto& section : sections)
     {
         bool sectionChanged = false;
@@ -1338,6 +1460,22 @@ void ThemeEditorPanel::refreshControls()
                 {
                     auto& c = *floatControls[idx];
                     if (std::abs((t.*(c.member)) - (baselineTheme.*(c.member))) > 0.0001f)
+                    {
+                        sectionChanged = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!sectionChanged)
+        {
+            for (const auto idx : section->boolIndices)
+            {
+                if (idx < boolControls.size())
+                {
+                    auto& c = *boolControls[idx];
+                    if ((t.*(c.member)) != (baselineTheme.*(c.member)))
                     {
                         sectionChanged = true;
                         break;

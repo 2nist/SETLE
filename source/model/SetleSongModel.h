@@ -295,6 +295,11 @@ public:
     void addProgression(const Progression& progression);
     void addSection(const Section& section);
     void addTransition(const Transition& transition);
+    juce::String createNewMidiClip(const juce::String& clipName,
+                                   const std::vector<Note>& notes,
+                                   double clipLengthBeats,
+                                   const juce::String& sourceTrackId = {});
+    void moveSection(const juce::String& id, int newIndex);
     void removeSection(const juce::String& id);
 
     std::vector<Progression> getProgressions() const;

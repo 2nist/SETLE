@@ -1233,6 +1233,168 @@ bool testT4BachTheoryExtendedChordQualities()
     return ok;
 }
 
+// T-MeterContext-1: beatsPerBar correct
+bool testMeterContextBeatsPerBar()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(std::abs(MeterContext{4, 4}.beatsPerBar() - 4.0) < 0.001, "4/4 should return 4.0");
+    ok &= expect(std::abs(MeterContext{11, 8}.beatsPerBar() - 5.5) < 0.001, "11/8 should return 5.5");
+    ok &= expect(std::abs(MeterContext{7, 8}.beatsPerBar() - 3.5) < 0.001, "7/8 should return 3.5");
+    ok &= expect(std::abs(MeterContext{5, 4}.beatsPerBar() - 5.0) < 0.001, "5/4 should return 5.0");
+    ok &= expect(std::abs(MeterContext{6, 8}.beatsPerBar() - 3.0) < 0.001, "6/8 should return 3.0");
+    ok &= expect(std::abs(MeterContext{3, 4}.beatsPerBar() - 3.0) < 0.001, "3/4 should return 3.0");
+    return ok;
+}
+
+// T-MeterContext-2: beatUnit correct
+bool testMeterContextBeatUnit()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(std::abs(MeterContext{4, 4}.beatUnit() - 1.0) < 0.001, "4/4 should return 1.0");
+    ok &= expect(std::abs(MeterContext{11, 8}.beatUnit() - 0.5) < 0.001, "11/8 should return 0.5");
+    ok &= expect(std::abs(MeterContext{7, 8}.beatUnit() - 0.5) < 0.001, "7/8 should return 0.5");
+    ok &= expect(std::abs(MeterContext{5, 4}.beatUnit() - 1.0) < 0.001, "5/4 should return 1.0");
+    return ok;
+}
+
+// T-MeterContext-3: stepsPerBarEighths correct
+bool testMeterContextStepsPerBarEighths()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(MeterContext{4, 4}.stepsPerBarEighths() == 8, "4/4 should return 8");
+    ok &= expect(MeterContext{11, 8}.stepsPerBarEighths() == 11, "11/8 should return 11");
+    ok &= expect(MeterContext{7, 8}.stepsPerBarEighths() == 7, "7/8 should return 7");
+    ok &= expect(MeterContext{5, 4}.stepsPerBarEighths() == 10, "5/4 should return 10");
+    return ok;
+}
+
+// ---- MeterContext: beatsPerBar ----
+bool testMeterContextBeatsPerBar()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(std::abs(MeterContext{4, 4}.beatsPerBar() - 4.0) < 0.001, "4/4 beatsPerBar should be 4.0");
+    ok &= expect(std::abs(MeterContext{3, 4}.beatsPerBar() - 3.0) < 0.001, "3/4 beatsPerBar should be 3.0");
+    ok &= expect(std::abs(MeterContext{11, 8}.beatsPerBar() - 5.5) < 0.001, "11/8 beatsPerBar should be 5.5");
+    ok &= expect(std::abs(MeterContext{7, 8}.beatsPerBar() - 3.5) < 0.001, "7/8 beatsPerBar should be 3.5");
+    ok &= expect(std::abs(MeterContext{5, 4}.beatsPerBar() - 5.0) < 0.001, "5/4 beatsPerBar should be 5.0");
+    ok &= expect(std::abs(MeterContext{6, 8}.beatsPerBar() - 3.0) < 0.001, "6/8 beatsPerBar should be 3.0");
+    return ok;
+}
+
+// ---- MeterContext: beatUnit ----
+bool testMeterContextBeatUnit()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(std::abs(MeterContext{4, 4}.beatUnit() - 1.0) < 0.001, "4/4 beatUnit should be 1.0");
+    ok &= expect(std::abs(MeterContext{3, 4}.beatUnit() - 1.0) < 0.001, "3/4 beatUnit should be 1.0");
+    ok &= expect(std::abs(MeterContext{11, 8}.beatUnit() - 0.5) < 0.001, "11/8 beatUnit should be 0.5");
+    ok &= expect(std::abs(MeterContext{7, 8}.beatUnit() - 0.5) < 0.001, "7/8 beatUnit should be 0.5");
+    ok &= expect(std::abs(MeterContext{6, 8}.beatUnit() - 0.5) < 0.001, "6/8 beatUnit should be 0.5");
+    return ok;
+}
+
+// ---- MeterContext: stepsPerBarSixteenths ----
+bool testMeterContextStepsPerBarSixteenths()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(MeterContext{4, 4}.stepsPerBarSixteenths() == 16, "4/4 stepsPerBarSixteenths should be 16");
+    ok &= expect(MeterContext{11, 8}.stepsPerBarSixteenths() == 22, "11/8 stepsPerBarSixteenths should be 22");
+    ok &= expect(MeterContext{7, 8}.stepsPerBarSixteenths() == 14, "7/8 stepsPerBarSixteenths should be 14");
+    return ok;
+}
+
+// ---- MeterContext: toString ----
+bool testMeterContextToString()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(MeterContext{4, 4}.toString() == "4/4", "4/4 toString should be '4/4'");
+    ok &= expect(MeterContext{11, 8}.toString() == "11/8", "11/8 toString should be '11/8'");
+    ok &= expect(MeterContext{7, 8}.toString() == "7/8", "7/8 toString should be '7/8'");
+    ok &= expect(MeterContext{3, 4}.toString() == "3/4", "3/4 toString should be '3/4'");
+    return ok;
+}
+
+// ---- MeterContext: isCompound ----
+bool testMeterContextIsCompound()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(MeterContext{6, 8}.isCompound() == true, "6/8 isCompound should be true");
+    ok &= expect(MeterContext{9, 8}.isCompound() == true, "9/8 isCompound should be true");
+    ok &= expect(MeterContext{12, 8}.isCompound() == true, "12/8 isCompound should be true");
+    ok &= expect(MeterContext{4, 4}.isCompound() == false, "4/4 isCompound should be false");
+    ok &= expect(MeterContext{7, 8}.isCompound() == false, "7/8 isCompound should be false");
+    ok &= expect(MeterContext{11, 8}.isCompound() == false, "11/8 isCompound should be false");
+    return ok;
+}
+
+// ---- MeterContext: isSimple ----
+bool testMeterContextIsSimple()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(MeterContext{4, 4}.isSimple() == true, "4/4 isSimple should be true");
+    ok &= expect(MeterContext{3, 4}.isSimple() == true, "3/4 isSimple should be true");
+    ok &= expect(MeterContext{2, 4}.isSimple() == true, "2/4 isSimple should be true");
+    ok &= expect(MeterContext{6, 8}.isSimple() == false, "6/8 isSimple should be false");
+    ok &= expect(MeterContext{11, 8}.isSimple() == false, "11/8 isSimple should be false");
+    return ok;
+}
+
+bool testT5RomanNumeralCIonian()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(BachTheory::getChordPitchClasses("I", "C", "ionian") == std::vector<int>({ 0, 4, 7 }),
+                 "T5: I in C ionian should map to [0,4,7]");
+    ok &= expect(BachTheory::getChordPitchClasses("ii", "C", "ionian") == std::vector<int>({ 2, 5, 9 }),
+                 "T5: ii in C ionian should map to [2,5,9]");
+    ok &= expect(BachTheory::getChordPitchClasses("V7", "C", "ionian") == std::vector<int>({ 2, 5, 7, 11 }),
+                 "T5: V7 in C ionian should map to [2,5,7,11]");
+    ok &= expect(BachTheory::getChordPitchClasses("viio", "C", "ionian") == std::vector<int>({ 2, 5, 11 }),
+                 "T5: viio in C ionian should map to [2,5,11]");
+    ok &= expect(BachTheory::getChordPitchClasses("IV", "C", "ionian") == std::vector<int>({ 0, 5, 9 }),
+                 "T5: IV in C ionian should map to [0,5,9]");
+    return ok;
+}
+
+bool testT6RomanNumeralGIonian()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    ok &= expect(BachTheory::getChordPitchClasses("V7", "G", "ionian") == std::vector<int>({ 0, 2, 6, 9 }),
+                 "T6: V7 in G ionian should map to [0,2,6,9]");
+    return ok;
+}
+
+bool testT7RomanNumeralKeyPrefix()
+{
+    using namespace setle::theory;
+
+    bool ok = true;
+    const auto result = BachTheory::getChordPitchClasses("A majorV7/IV", "C", "ionian");
+    ok &= expect(!result.empty(), "T7: 'A majorV7/IV' should return non-empty pitch class set");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -1274,6 +1436,18 @@ int main()
     ok &= testT2MeterContextBeatsPerBar();                // T2
     ok &= testT3SnapInElevenEight();                      // T3
     ok &= testT4BachTheoryExtendedChordQualities();       // T4
+    ok &= testT5RomanNumeralCIonian();                   // T5
+    ok &= testT6RomanNumeralGIonian();                   // T6
+    ok &= testT7RomanNumeralKeyPrefix();                 // T7
+    ok &= testMeterContextBeatsPerBar();                  // T-MeterContext-1
+    ok &= testMeterContextBeatUnit();                     // T-MeterContext-2
+    ok &= testMeterContextStepsPerBarEighths();           // T-MeterContext-3
+    ok &= testMeterContextBeatsPerBar();                  // MeterContext: beatsPerBar
+    ok &= testMeterContextBeatUnit();                     // MeterContext: beatUnit
+    ok &= testMeterContextStepsPerBarSixteenths();        // MeterContext: stepsPerBarSixteenths
+    ok &= testMeterContextToString();                     // MeterContext: toString
+    ok &= testMeterContextIsCompound();                   // MeterContext: isCompound
+    ok &= testMeterContextIsSimple();                     // MeterContext: isSimple
 
     if (!ok)
         return 1;

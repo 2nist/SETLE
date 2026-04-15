@@ -123,6 +123,15 @@ juce_add_gui_app(SETLE
     BUNDLE_ID       "com.2nist.setle"
 )
 
+# Legacy compatibility for third-party JUCE modules that still include
+# Projucer-style headers like JuceHeader.h and AppConfig.h.
+juce_generate_juce_header(SETLE)
+
+target_include_directories(SETLE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}/SETLE_artefacts/JuceLibraryCode
+)
+
 # Sources — just Main.cpp to start
 target_sources(SETLE PRIVATE
     source/Main.cpp
@@ -203,6 +212,8 @@ target_sources(SETLE PRIVATE
     source/theory/TheoryAdapter.h
     source/theory/BachTheory.cpp
     source/theory/BachTheory.h
+    source/theory/TheoryEngine.cpp
+    source/theory/TheoryEngine.h
     source/state/AppPreferences.cpp
     source/state/AppPreferences.h
     source/theme/ThemeData.h
@@ -231,6 +242,8 @@ target_sources(SETLE PRIVATE
     source/timeline/TrackLane.h
     source/timeline/TimelineTracksComponent.cpp
     source/timeline/TimelineTracksComponent.h
+    source/timeline/TimelineStampManager.cpp
+    source/timeline/TimelineStampManager.h
     source/ui/WorkspaceShellComponent.cpp
     source/ui/WorkspaceShellComponent.h
     source/ui/EditToolManager.cpp
@@ -241,6 +254,12 @@ target_sources(SETLE PRIVATE
     source/ui/ProgressionLibraryBrowser.h
     source/ui/ProgressionChordPalette.cpp
     source/ui/ProgressionChordPalette.h
+    source/ui/ArrangeWorkComponent.cpp
+    source/ui/ArrangeWorkComponent.h
+    source/ui/SoundWorkComponent.cpp
+    source/ui/SoundWorkComponent.h
+    source/ui/QuesoLogoComponent.cpp
+    source/ui/QuesoLogoComponent.h
     source/ui/AppCommands.h
     source/ui/NavSection.h
     source/ui/AppMenuBarModel.h
@@ -249,6 +268,8 @@ target_sources(SETLE PRIVATE
     source/ui/LeftNavComponent.cpp
     source/ui/ZoneHeaderComponent.h
     source/ui/ZoneHeaderComponent.cpp
+    source/ui/SessionDashboardComponent.h
+    source/ui/SessionDashboardComponent.cpp
     source/eff/EffModel.h
     source/eff/EffSerializer.h
     source/eff/EffSerializer.cpp

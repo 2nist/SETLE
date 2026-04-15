@@ -225,6 +225,58 @@ void TrackLane::resized()
     soloButton.setToggleState(trackRef.isSolo(false), juce::dontSendNotification);
 }
 
+void TrackLane::mouseDown(const juce::MouseEvent& e)
+{
+    if (e.mods.isLeftButtonDown())
+    {
+        const auto* painted = findPaintedClipAt(e.getPosition());
+        if (painted == nullptr || painted->clip == nullptr)
+            return;
+
+        // Check if click is in bottom 8px of the clip (pip strip area)
+        const auto clipRect = painted->bounds;
+        const auto pipStripBottom = clipRect.getBottom() - 4; // pip strip is 4px at bottom
+        const auto pipStripTop = pipStripBottom - 8; // 8px height for pip strip click area
+
+        if (e.y >= pipStripTop && e.y <= pipStripBottom)
+        {
+            // Compute which pip was clicked
+            const auto blockLeft = clipRect.getX();
+            const auto blockWidth = clipRect.getWidth();
+            const auto repeatCells = painted->clip->state.getProperty("repeatCells").toString();
+            const auto repeatCellsArray = juce::JSON::parse(repeatCells);
+
+            if (repeatCellsArray.isArray())
+            {
+                const int pipIndex = juce::jlimit(0, repeatCellsArray.size() - 1,
+                    static_cast<int>((e.x - blockLeft) * repeatCellsArray.size() / blockWidth));
+
+                if (pipIndex >= 0 && pipIndex < repeatCellsArray.size())
+                {
+                    const auto progressionId = repeatCellsArray[pipIndex]["progressionId"].toString();
+
+                    if (progressionId.isNotEmpty())
+                    {
+                        // Call GridRoll tab switch
+                        if (onClipClicked)
+                            onClipClicked(*painted->clip);
+
+                        // Call gridRollComponent->setTargetProgression(progressionId)
+                        // This would need to be implemented in the calling context
+
+                        // Call loadProgressionToEdit(progressionId, 0.0, true, nullptr)
+                        // This would need to be implemented in the calling context
+
+#ifdef SETLE_DEV_TOOLS
+                        juce::Logger::writeToLog("section-pip, pipClick, " + progressionId);
+#endif
+                    }
+                }
+            }
+        }
+    }
+}
+
 void TrackLane::mouseUp(const juce::MouseEvent& e)
 {
     if (!e.mods.isRightButtonDown())

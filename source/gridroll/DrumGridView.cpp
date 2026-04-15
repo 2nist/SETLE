@@ -13,10 +13,12 @@ namespace setle::gridroll
 // GM drum colours
 static juce::Colour gmDrumColour(int midiNote)
 {
-    if (midiNote == 36) return juce::Colour(0xffcc3333); // Kick — red
-    if (midiNote == 38) return juce::Colour(0xffddaa22); // Snare — yellow
-    if (midiNote == 39) return juce::Colour(0xffddaa22); // Clap
-    if (midiNote == 42) return juce::Colour(0xff3377cc); // HH Closed — blue
+    if (midiNote == 36) return juce::Colour(0xffcc3333); // Kick
+    if (midiNote == 35) return juce::Colour(0xffa72828); // Sub
+    if (midiNote == 38) return juce::Colour(0xffddaa22); // Snare
+    if (midiNote == 45) return juce::Colour(0xffd57a2a); // Perc
+    if (midiNote == 39) return juce::Colour(0xffd99b52); // Clap
+    if (midiNote == 42) return juce::Colour(0xff3377cc); // HH Closed
     if (midiNote == 46) return juce::Colour(0xff5599ee); // HH Open
     return juce::Colour(0xff557799);                      // Other — slate
 }
@@ -158,7 +160,9 @@ void DrumGridView::buildDefaultRows()
     struct DefaultRow { const char* name; int note; };
     static const DefaultRow defaults[] = {
         { "Kick",      36 },
+        { "Sub",       35 },
         { "Snare",     38 },
+        { "Perc",      45 },
         { "HH Closed", 42 },
         { "HH Open",   46 },
         { "Clap",      39 },

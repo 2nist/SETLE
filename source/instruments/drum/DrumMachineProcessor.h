@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <array>
+#include <atomic>
 #include <vector>
 
 #include "DrumModuleState.h"
@@ -29,9 +30,15 @@ public:
     float getVoiceTune(int voiceIndex) const;
     float getVoiceDecay(int voiceIndex) const;
     float getVoiceLevel(int voiceIndex) const;
+
+    void setMacro(int macroIndex, float value);
+    float getMacro(int macroIndex) const;
+
     void setMasterVolume(float value);
     float getMasterVolume() const;
     float getVoiceMeter(int voiceIndex) const;
+    float getSubSyncFrequencyHz() const noexcept;
+    float getSubSyncIntensity() const noexcept;
 
     const juce::String getName() const override;
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
@@ -61,12 +68,15 @@ private:
     std::vector<setle::gridroll::GridRollCell> pattern;
     std::vector<FmDrumVoice> activeHits;
     DrumModuleState moduleState;
-    std::array<float, kVoiceCount> voiceMeters { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    std::array<float, kVoiceCount> voiceMeters {};
     double sampleRate { 44100.0 };
     double transportBeat { 0.0 };
     double previousBeat { 0.0 };
     int loopCounter { 0 };
     uint32_t loopSeed { 0x12345678u };
+    float glossLp { 0.0f };
+    std::atomic<float> subSyncFrequencyHz { 0.0f };
+    std::atomic<float> subSyncIntensity { 0.0f };
 };
 
 } // namespace setle::instruments::drum

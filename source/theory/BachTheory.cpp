@@ -87,4 +87,98 @@ std::vector<int> BachTheory::getChordPitchClasses(const juce::String& chordSymbo
     return out;
 }
 
+static bool isRomanNumeralSymbol(const juce::String& sym)
+{
+    auto s = sym.trim().toLowerCase();
+    const int spacePos = s.indexOfChar(' ');
+    if (spacePos > 0 && spacePos <= 2)
+        s = s.substring(spacePos + 1).trim();
+    return s.startsWith("i") || s.startsWith("v")
+           || s.startsWith("ii") || s.startsWith("iii")
+           || s.startsWith("iv") || s.startsWith("vi")
+           || s.startsWith("vii");
+}
+
+static juce::String romanToLetterSymbol(
+    const juce::String& rawSym,
+    const juce::String& key,
+    const juce::String& mode)
+{
+    auto sym = rawSym.trim();
+    const int spacePos = sym.indexOfChar(' ');
+    if (spacePos > 0 && spacePos <= 2)
+        sym = sym.substring(spacePos + 1).trim();
+    const int slashPos = sym.indexOfChar('/');
+    if (slashPos > 0)
+        sym = sym.substring(0, slashPos).trim();
+    sym = sym.replace("[", "").replace("]", "")
+             .replace("(", "").replace(")", "");
+    const auto lower = sym.toLowerCase();
+    int degree = -1;
+    juce::String suffix;
+    if      (lower.startsWith("vii")) { degree = 6; suffix = sym.substring(3); }
+    else if (lower.startsWith("vi"))  { degree = 5; suffix = sym.substring(2); }
+    else if (lower.startsWith("iv"))  { degree = 3; suffix = sym.substring(2); }
+    else if (lower.startsWith("iii")) { degree = 2; suffix = sym.substring(3); }
+    else if (lower.startsWith("ii"))  { degree = 1; suffix = sym.substring(2); }
+    else if (lower.startsWith("v"))   { degree = 4; suffix = sym.substring(1); }
+    else if (lower.startsWith("i"))   { degree = 0; suffix = sym.substring(1); }
+    if (degree < 0)
+        return sym;
+    const int rootPc = DiatonicHarmony::pitchClassForRoot(key);
+    const auto intervals = DiatonicHarmony::modeIntervals(mode);
+    const int scaleDegreeInterval = intervals[degree % 7];
+    const int chordRootPc = (rootPc + scaleDegreeInterval) % 12;
+    static const char* noteNames[] = {
+        "C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"
+    };
+    juce::String letterRoot = noteNames[chordRootPc];
+    const bool isUppercase = juce::CharacterFunctions::isUpperCase(sym[0]);
+    const bool isDim = suffix.toLowerCase().startsWith("o")
+                       || suffix.toLowerCase().contains("dim");
+    const bool isHalfDim = suffix.startsWith(juce::CharPointer_UTF8("\xc3\xb8"))
+                           || suffix.toLowerCase().contains("m7b5");
+    juce::String resolved = letterRoot;
+    if (isDim)
+    {
+        resolved += "dim";
+        if (suffix.containsAnyOf("7"))
+            resolved += "7";
+    }
+    else if (isHalfDim)
+    {
+        resolved += "m7b5";
+    }
+    else if (!isUppercase)
+    {
+        resolved += "m";
+        if (suffix.contains("maj7"))        resolved += "maj7";
+        else if (suffix.containsAnyOf("7")) resolved += "7";
+        else if (suffix.contains("9"))      resolved += "9";
+    }
+    else
+    {
+        if (suffix.contains("maj7"))        resolved += "maj7";
+        else if (suffix.containsAnyOf("7")) resolved += "7";
+        else if (suffix.contains("9"))      resolved += "9";
+        else if (suffix.contains("sus4"))   resolved += "sus4";
+        else if (suffix.contains("sus2"))   resolved += "sus2";
+        else if (suffix.contains("add9"))   resolved += "add9";
+    }
+    return resolved;
+}
+
+std::vector<int> BachTheory::getChordPitchClasses(
+    const juce::String& symbol,
+    const juce::String& key,
+    const juce::String& mode)
+{
+    if (isRomanNumeralSymbol(symbol))
+    {
+        const auto resolved = romanToLetterSymbol(symbol, key, mode);
+        return getChordPitchClasses(resolved);
+    }
+    return getChordPitchClasses(symbol);
+}
+
 } // namespace setle::theory

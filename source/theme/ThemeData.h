@@ -4,13 +4,23 @@
 
 struct ThemeData
 {
-    // SURFACES
-    juce::Colour surface0     { 0xFF0f0d09 };
-    juce::Colour surface1     { 0xFF1c1610 };
-    juce::Colour surface2     { 0xFF26201a };
-    juce::Colour surface3     { 0xFF322a22 };
-    juce::Colour surface4     { 0xFF3e342a };
-    juce::Colour surfaceEdge  { 0xFF4a3e32 };
+    // ESPRESSO LABORATORY THEME
+    juce::Colour windowBackground { 0xFF1F1A1B }; // Industrial Espresso
+    juce::Colour surfaceLow       { 0xFF3A2E2E }; // Smoked Amber
+    juce::Colour surfaceVariant   { 0xFF140F0F }; // Felt Charcoal
+    juce::Colour primaryAccent    { 0xFFF4C430 }; // Molten Saffron
+    juce::Colour secondaryAccent  { 0xFF40E0D0 }; // Liquid Turquoise
+    juce::Colour signalMidi       { 0xFFEE8131 }; // Saffron Spark
+    juce::Colour signalAudio      { 0xFF2ABA9E }; // Cool Lagoon
+    juce::Colour alertColor       { 0xFFFF4500 }; // Boiling Orange
+
+    // SURFACES (legacy compatibility)
+    juce::Colour surface0     { windowBackground };
+    juce::Colour surface1     { surfaceLow };
+    juce::Colour surface2     { surfaceLow };
+    juce::Colour surface3     { surfaceVariant };
+    juce::Colour surface4     { surfaceLow };
+    juce::Colour surfaceEdge  { surfaceLow };
 
     // INK
     juce::Colour inkLight  { 0xFFf8f4ec };
@@ -53,8 +63,6 @@ struct ThemeData
     juce::Colour zoneBgD  { 0xFF1c1610 };
 
     // SIGNAL
-    juce::Colour signalAudio { 0xFF4a9eff };
-    juce::Colour signalMidi  { 0xFFee7c4a };
     juce::Colour signalCv    { 0xFF4aee8a };
     juce::Colour signalGate  { 0xFFeec44a };
 
@@ -123,5 +131,16 @@ struct ThemeData
     float switchCornerRadius   { 7.0f };
     float switchThumbInset     { 2.0f };
 
-    juce::String presetName { "Slate Dark" };
+    // MATERIAL LOGIC
+    bool isPebbled { true }; // Pebbled chassis texture
+    float glassDistortion { 0.3f }; // 0=flat, 1=wet glass
+    float glowWarmth { 0.7f }; // 0=tight, 1=organic bloom
+
+    // MATERIAL TOGGLES / INTENSITY (legacy compatibility)
+    float materialChassisTexture { isPebbled ? 1.0f : 0.0f };
+    float materialGlassDepth     { glassDistortion };
+    float materialInsetFuzz      { 1.0f };
+    float materialGlowAmount     { glowWarmth };
+
+    juce::String presetName { "Espresso Laboratory" };
 };

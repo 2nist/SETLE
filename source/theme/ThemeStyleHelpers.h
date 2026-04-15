@@ -77,10 +77,20 @@ struct TimelineBlockStyle
     juce::Colour badgeText;
 };
 
+struct MaterialToggles
+{
+    float chassisTexture { 1.0f };
+    float glassDepth { 1.0f };
+    float insetFuzz { 1.0f };
+    float glowAmount { 1.0f };
+};
+
 juce::Colour panelBackground(const ThemeData& theme, ZoneRole zone);
 juce::Colour panelHeaderBackground(const ThemeData& theme, ZoneRole zone);
 juce::Colour textForRole(const ThemeData& theme, TextRole role);
 juce::Colour stateOverlay(const ThemeData& theme, SurfaceState state);
+
+MaterialToggles materialToggles(const ThemeData& theme);
 
 SurfaceStyle cardStyle(const ThemeData& theme, SurfaceState state);
 SurfaceStyle rowStyle(const ThemeData& theme, SurfaceState state);
@@ -96,5 +106,33 @@ TimelineBlockStyle progressionBlockStyle(const ThemeData& theme,
 juce::Colour timelineGridLine(const ThemeData& theme, bool barLine, bool majorMarker = false);
 float radius(const ThemeData& theme, RadiusRole role);
 float stroke(const ThemeData& theme, StrokeRole role);
+
+void drawChassis(juce::Graphics& g,
+                 const juce::Rectangle<float>& bounds,
+                 juce::Colour baseColour,
+                 const ThemeData& theme,
+                 float cornerRadius = 10.0f);
+
+void drawGlassPanel(juce::Graphics& g,
+                    const juce::Rectangle<float>& bounds,
+                    juce::Colour baseColour,
+                    const ThemeData& theme,
+                    bool drawBorder = true,
+                    float cornerRadius = 10.0f);
+
+void drawFuzzyInsetPanel(juce::Graphics& g,
+                         const juce::Rectangle<float>& bounds,
+                         juce::Colour baseColour,
+                         const ThemeData& theme,
+                         bool drawBorder = true,
+                         float cornerRadius = 8.0f);
+
+void drawIndicatorGlow(juce::Graphics& g,
+                       const juce::Point<float>& centre,
+                       float radius,
+                       juce::Colour accentColour,
+                       const ThemeData& theme,
+                       float glowFactor,
+                       bool active = true);
 
 } // namespace setle::theme

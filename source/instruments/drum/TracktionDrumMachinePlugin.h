@@ -35,6 +35,8 @@ public:
     void setPattern(const std::vector<setle::gridroll::GridRollCell>& cells);
     void setTransportBeat(double beat);
     DrumMachineProcessor& getProcessor() noexcept { return processor; }
+    float getSubSyncFrequencyHz() const noexcept { return processor.getSubSyncFrequencyHz(); }
+    float getSubSyncIntensity() const noexcept { return processor.getSubSyncIntensity(); }
 
 private:
     juce::CriticalSection lock;

@@ -1,4 +1,5 @@
 #include "ProgressionChordPalette.h"
+#include "../theme/ThemeManager.h"
 
 namespace setle::ui
 {
@@ -11,7 +12,8 @@ ProgressionChordPalette::ProgressionChordPalette(const juce::String& sessionKey,
 
 void ProgressionChordPalette::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff1a1a1a));
+    const auto& theme = ThemeManager::get().theme();
+    g.fillAll(theme.surfaceLow);
 }
 
 void ProgressionChordPalette::resized()
@@ -54,15 +56,16 @@ void ProgressionChordPalette::updatePalette()
 {
     // Stub palette with 7 diatonic scale degrees
     // In full implementation, would use DiatonicHarmony::buildPalette()
+    const auto& theme = ThemeManager::get().theme();
     std::array<PaletteCell, 7> paletteCells = {
         {
-            { "I", "C", "T", juce::Colour(0xff8B4513) },      // Tonic (brown)
-            { "ii", "D", "SD", juce::Colour(0xff6495ED) },    // Subdominant (blue)
-            { "iii", "E", "T", juce::Colour(0xff8B4513) },    // Tonic (brown)
-            { "IV", "F", "SD", juce::Colour(0xff6495ED) },    // Subdominant (blue)
-            { "V", "G", "D", juce::Colour(0xffDC143C) },      // Dominant (red)
-            { "vi", "A", "T", juce::Colour(0xff8B4513) },     // Tonic (brown)
-            { "vii°", "B", "D", juce::Colour(0xffDC143C) }    // Dominant (red)
+            { "I", "C", "T", theme.primaryAccent },      // Tonic (brown)
+            { "ii", "D", "SD", theme.secondaryAccent },    // Subdominant (blue)
+            { "iii", "E", "T", theme.primaryAccent },    // Tonic (brown)
+            { "IV", "F", "SD", theme.secondaryAccent },    // Subdominant (blue)
+            { "V", "G", "D", theme.alertColor },      // Dominant (red)
+            { "vi", "A", "T", theme.primaryAccent },     // Tonic (brown)
+            { "vii°", "B", "D", theme.alertColor }    // Dominant (red)
         }
     };
 
