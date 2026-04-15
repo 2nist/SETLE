@@ -195,6 +195,12 @@ target_sources(SETLE PRIVATE
     source/gridroll/GridRollComponent.h
     source/midi/MidiConstraintEngine.cpp
     source/midi/MidiConstraintEngine.h
+    source/midi/MidiFileImporter.cpp
+    source/midi/MidiFileImporter.h
+    source/midi/MidiChordAnalyzer.cpp
+    source/midi/MidiChordAnalyzer.h
+    source/midi/MidiToProgressionConverter.cpp
+    source/midi/MidiToProgressionConverter.h
     source/theory/DiatonicHarmony.cpp
     source/theory/DiatonicHarmony.h
     source/theory/MeterContext.cpp

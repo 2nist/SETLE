@@ -41,6 +41,7 @@ public:
     std::function<void(te::Track&)> onOpenFx;
     std::function<void(te::Track&)> onArmToggle;
     std::function<void(te::Track&)> onBounceToAudio;
+    std::function<void(te::Clip&)> onAnalyzeImportedClip;
 
     void paint(juce::Graphics& g) override;
     void resized() override;

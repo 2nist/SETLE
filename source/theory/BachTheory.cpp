@@ -87,4 +87,13 @@ std::vector<int> BachTheory::getChordPitchClasses(const juce::String& chordSymbo
     return out;
 }
 
+std::vector<int> BachTheory::getChordPitchClasses(const juce::String& chordSymbol,
+                                                  const juce::String& keyRoot,
+                                                  const juce::String& mode)
+{
+    (void) keyRoot;
+    (void) mode;
+    return getChordPitchClasses(chordSymbol);
+}
+
 } // namespace setle::theory

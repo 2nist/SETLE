@@ -206,6 +206,14 @@ void TimelineTracksComponent::rebuildLanes()
                 onStatusMessage("GridRoll: " + clip.getName());
         };
 
+        lane->onAnalyzeImportedClip = [this](te::Clip& clip)
+        {
+            if (onAnalyzeImportedClip)
+                onAnalyzeImportedClip(clip);
+            else if (onStatusMessage)
+                onStatusMessage("Analyze Chords requested for " + clip.getName());
+        };
+
         addAndMakeVisible(*lane);
         lanes.push_back(std::move(lane));
     }

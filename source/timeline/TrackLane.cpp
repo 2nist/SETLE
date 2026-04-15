@@ -283,6 +283,7 @@ void TrackLane::mouseUp(const juce::MouseEvent& e)
         onClipClicked(*painted->clip);
 
     auto* clip = painted->clip;
+    const bool importedFromMidi = static_cast<bool>(clip->state.getProperty("importedFromMidi", false));
     juce::PopupMenu menu;
     menu.addItem(101, "Open in Piano Roll");
     menu.addItem(102, "Rename Clip");
@@ -295,6 +296,11 @@ void TrackLane::mouseUp(const juce::MouseEvent& e)
     menu.addItem(107, "Quantize Start to Bar");
     menu.addItem(108, "Transpose...");
     menu.addItem(109, "Detach from Progression");
+    if (importedFromMidi)
+    {
+        menu.addSeparator();
+        menu.addItem(110, "Analyze Chords...");
+    }
 
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
                        [this, clip](int selected)
@@ -397,12 +403,19 @@ void TrackLane::mouseUp(const juce::MouseEvent& e)
                                return;
                            }
 
-                           if (selected == 109)
-                           {
-                               clip->state.removeProperty(juce::Identifier("progressionId"), nullptr);
-                               refreshClips();
-                           }
-                       });
+                            if (selected == 109)
+                            {
+                                clip->state.removeProperty(juce::Identifier("progressionId"), nullptr);
+                                refreshClips();
+                                return;
+                            }
+
+                            if (selected == 110)
+                            {
+                                if (onAnalyzeImportedClip)
+                                    onAnalyzeImportedClip(*clip);
+                            }
+                        });
 }
 
 void TrackLane::rebuildPaintedClips(const juce::Rectangle<int>& clipArea)

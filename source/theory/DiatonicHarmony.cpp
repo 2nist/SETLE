@@ -4,6 +4,27 @@
 
 namespace setle::theory
 {
+namespace
+{
+juce::String parseChordRoot(const juce::String& chordSymbol)
+{
+    auto symbol = chordSymbol.trim();
+    if (symbol.isEmpty())
+        return {};
+
+    juce::String root;
+    root << symbol[0];
+
+    if (symbol.length() > 1)
+    {
+        const auto accidental = symbol[1];
+        if (accidental == '#' || accidental == 'b')
+            root << accidental;
+    }
+
+    return root;
+}
+} // namespace
 
 int DiatonicHarmony::pitchClassForRoot(const juce::String& root)
 {
@@ -33,6 +54,46 @@ std::vector<int> DiatonicHarmony::modeIntervals(const juce::String& mode)
     if (lower == "aeolian" || lower == "minor") return { 0, 2, 3, 5, 7, 8, 10 };
     if (lower == "locrian") return { 0, 1, 3, 5, 6, 8, 10 };
     return { 0, 2, 4, 5, 7, 9, 11 };
+}
+
+juce::String DiatonicHarmony::functionForChord(const juce::String& chordSymbol,
+                                               const juce::String& keyRoot,
+                                               const juce::String& mode)
+{
+    const auto root = parseChordRoot(chordSymbol);
+    if (root.isEmpty())
+        return "T";
+
+    const auto keyPc = pitchClassForRoot(keyRoot);
+    const auto chordPc = pitchClassForRoot(root);
+    const auto intervals = modeIntervals(mode);
+
+    int degree = -1;
+    for (size_t i = 0; i < intervals.size(); ++i)
+    {
+        if (((keyPc + intervals[i]) % 12) == chordPc)
+        {
+            degree = static_cast<int>(i);
+            break;
+        }
+    }
+
+    if (degree < 0)
+    {
+        // Chromatic fallback: dominant-ish qualities are usually tension-driving.
+        const auto lower = chordSymbol.toLowerCase();
+        if (lower.contains("7") || lower.contains("dim"))
+            return "D";
+        return "T";
+    }
+
+    if (degree == 0 || degree == 2 || degree == 5)
+        return "T";
+
+    if (degree == 1 || degree == 3)
+        return "PD";
+
+    return "D";
 }
 
 std::vector<setle::model::Chord> buildProgressionFromTemplate(

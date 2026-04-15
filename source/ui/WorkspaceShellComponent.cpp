@@ -18,6 +18,9 @@
 #include "../theme/ThemePresets.h"
 #include "../theme/ThemeStyleHelpers.h"
 #include "../theory/BachTheory.h"
+#include "../midi/MidiFileImporter.h"
+#include "../midi/MidiChordAnalyzer.h"
+#include "../midi/MidiToProgressionConverter.h"
 
 namespace te = tracktion::engine;
 
@@ -2324,6 +2327,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
     topStrip.addAndMakeVisible(playButton);
     topStrip.addAndMakeVisible(stopButton);
     topStrip.addAndMakeVisible(recordButton);
+    topStrip.addAndMakeVisible(importMidiButton);
     topStrip.addAndMakeVisible(bpmLabel);
     topStrip.addAndMakeVisible(bpmEditor);
     topStrip.addAndMakeVisible(focusInButton);
@@ -2369,6 +2373,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         if (selectedId >= 1 && selectedId <= 12)
         {
             songState.setSessionKey(items[selectedId - 1]);
+            refreshSessionKeyModeSelectors();
             saveSongState();
             refreshTimelineData();
         }
@@ -2397,6 +2402,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         if (selectedId >= 1 && selectedId <= 7)
         {
             songState.setSessionMode(modes[selectedId - 1]);
+            refreshSessionKeyModeSelectors();
             saveSongState();
             refreshTimelineData();
         }
@@ -2544,6 +2550,71 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         }
     };
 
+    importMidiButton.onClick = [this]
+    {
+        if (edit == nullptr)
+            return;
+
+        auto result = setle::midi::MidiFileImporter::importWithChooser(*edit, engineRef, this);
+        if (!result.has_value() || !result->success)
+        {
+            if (result.has_value() && result->errorMessage.isNotEmpty())
+                interactionStatus.setText(result->errorMessage, juce::dontSendNotification);
+            return;
+        }
+
+        songState.setBpm(result->detectedBpm);
+        bpmEditor.setText(juce::String(result->detectedBpm, 1), juce::dontSendNotification);
+        if (auto* tempo = edit->tempoSequence.getTempo(0))
+            tempo->setBpm(result->detectedBpm);
+
+        if (result->timeSigNumerator != 4 || result->timeSigDenominator != 4)
+        {
+            auto sections = songState.getSections();
+            if (sections.empty())
+            {
+                auto importedSection = model::Section::create("Imported", 1);
+                importedSection.setTimeSigNumerator(result->timeSigNumerator);
+                importedSection.setTimeSigDenominator(result->timeSigDenominator);
+                songState.addSection(importedSection);
+            }
+            else
+            {
+                for (auto& section : sections)
+                {
+                    section.setTimeSigNumerator(result->timeSigNumerator);
+                    section.setTimeSigDenominator(result->timeSigDenominator);
+                }
+            }
+        }
+
+        saveSongState();
+        refreshTimelineData();
+        if (timelineTracks != nullptr)
+            timelineTracks->refreshTracks();
+
+        interactionStatus.setText("Imported: " + result->suggestedName
+                                      + " — " + juce::String(result->numNotes) + " notes, "
+                                      + juce::String(result->detectedBpm, 1) + " BPM",
+                                  juce::dontSendNotification);
+
+        juce::AlertWindow::showOkCancelBox(
+            juce::AlertWindow::InfoIcon,
+            "MIDI Imported",
+            "Imported " + juce::String(result->numNotes)
+                + " notes at " + juce::String(result->detectedBpm, 1)
+                + " BPM.\n\nAnalyze for chords and sections?",
+            "Analyze",
+            "Later",
+            this,
+            juce::ModalCallbackFunction::create(
+                [safeThis = juce::Component::SafePointer<WorkspaceShellComponent>(this)](int choice)
+                {
+                    if (safeThis != nullptr && choice == 1)
+                        safeThis->runMidiAnalysisPipeline();
+                }));
+    };
+
     bpmLabel.setText("BPM", juce::dontSendNotification);
     bpmLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.72f));
     bpmLabel.setFont(juce::FontOptions(13.0f));
@@ -2652,6 +2723,10 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
             }
             switchWorkTab(true);
             interactionStatus.setText("GridRoll: " + clip.getName(), juce::dontSendNotification);
+        };
+        timelineTracks->onAnalyzeImportedClip = [this](te::Clip& clip)
+        {
+            runMidiAnalysisPipelineForClip(clip.itemID.toString());
         };
         addAndMakeVisible(timelineTracks);
         timelineTracks->refreshTracks();
@@ -4599,32 +4674,7 @@ void WorkspaceShellComponent::initialiseSongState()
 
     refreshCaptureSourceSelector(setle::state::AppPreferences::get().getCaptureSource());
 
-    // Restore session key/mode selectors from songState
-    {
-        auto sessionKey = songState.getSessionKey();
-        auto sessionMode = songState.getSessionMode();
-
-        const auto keys = juce::StringArray { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
-        const auto modes = juce::StringArray { "ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian" };
-
-        for (int i = 0; i < keys.size(); ++i)
-        {
-            if (keys[i] == sessionKey)
-            {
-                sessionKeySelector.setSelectedId(i + 1, juce::dontSendNotification);
-                break;
-            }
-        }
-
-        for (int i = 0; i < modes.size(); ++i)
-        {
-            if (modes[i] == sessionMode)
-            {
-                sessionModeSelector.setSelectedId(i + 1, juce::dontSendNotification);
-                break;
-            }
-        }
-    }
+    refreshSessionKeyModeSelectors();
 
     saveSongState();
     refreshTimelineData();
@@ -4716,6 +4766,259 @@ void WorkspaceShellComponent::seedSongStateIfNeeded()
     auto sections = songState.getSections();
     if (songState.getTransitions().empty() && sections.size() >= 2)
         songState.addTransition(model::Transition::create(sections.front().getId(), sections[1].getId(), "pushRight"));
+}
+
+void WorkspaceShellComponent::refreshSessionKeyModeSelectors()
+{
+    const auto sessionKey = songState.getSessionKey();
+    const auto sessionMode = songState.getSessionMode();
+
+    const auto keys = juce::StringArray { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    const auto modes = juce::StringArray { "ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian" };
+
+    int keyId = 1;
+    for (int i = 0; i < keys.size(); ++i)
+    {
+        if (keys[i] == sessionKey)
+        {
+            keyId = i + 1;
+            break;
+        }
+    }
+    sessionKeySelector.setSelectedId(keyId, juce::dontSendNotification);
+
+    int modeId = 1;
+    for (int i = 0; i < modes.size(); ++i)
+    {
+        if (modes[i] == sessionMode)
+        {
+            modeId = i + 1;
+            break;
+        }
+    }
+    sessionModeSelector.setSelectedId(modeId, juce::dontSendNotification);
+
+    if (libraryBrowser != nullptr)
+    {
+        libraryBrowser->updateSessionKey(sessionKey);
+        libraryBrowser->updateSessionMode(sessionMode);
+    }
+
+    if (chordPalette != nullptr)
+    {
+        chordPalette->updateSessionKey(sessionKey);
+        chordPalette->updateSessionMode(sessionMode);
+    }
+}
+
+void WorkspaceShellComponent::runMidiAnalysisPipeline()
+{
+    if (edit == nullptr)
+        return;
+
+    te::AudioTrack* analysisTrack = nullptr;
+    for (auto* track : te::getAudioTracks(*edit))
+    {
+        if (track == nullptr || setle::timeline::TrackManager::isSystemTrack(*track))
+            continue;
+
+        bool hasImportedClip = false;
+        for (auto* clip : track->getClips())
+        {
+            if (clip != nullptr && static_cast<bool>(clip->state.getProperty("importedFromMidi", false)))
+            {
+                hasImportedClip = true;
+                break;
+            }
+        }
+
+        if (static_cast<bool>(track->state.getProperty("importedFromMidi", false)) || hasImportedClip)
+        {
+            analysisTrack = track;
+            break;
+        }
+    }
+
+    if (analysisTrack == nullptr)
+    {
+        interactionStatus.setText("No imported MIDI track found to analyze", juce::dontSendNotification);
+        return;
+    }
+
+    const auto bpm = songState.getBpm();
+    auto analysis = setle::midi::MidiChordAnalyzer::analyzeTrack(*analysisTrack, bpm);
+    if (analysis.chords.empty())
+    {
+        interactionStatus.setText("No chords detected in MIDI data", juce::dontSendNotification);
+        return;
+    }
+
+    if (analysis.keyConfidence > 0.6f)
+    {
+        songState.setSessionKey(analysis.detectedKey);
+        songState.setSessionMode(analysis.detectedMode);
+        refreshSessionKeyModeSelectors();
+    }
+
+    const auto songTitle = songState.getTitle().isNotEmpty() ? songState.getTitle() : "Imported Song";
+    auto convResult = setle::midi::MidiToProgressionConverter::convert(analysis, songTitle);
+
+    if (convResult.progressions.empty())
+    {
+        interactionStatus.setText("No progression candidates found in MIDI data", juce::dontSendNotification);
+        return;
+    }
+
+    const auto existingProgressions = songState.getProgressions();
+    const bool shouldReplaceSeededScaffold = existingProgressions.size() == 1
+                                          && existingProgressions.front().getName() == "Core Loop";
+    if (shouldReplaceSeededScaffold)
+    {
+        auto root = songState.valueTree();
+        for (int i = root.getNumChildren(); --i >= 0;)
+        {
+            const auto child = root.getChild(i);
+            if (child.hasType(model::Schema::progressionsContainerType)
+                || child.hasType(model::Schema::sectionsContainerType)
+                || child.hasType(model::Schema::transitionsContainerType))
+            {
+                root.removeChild(i, nullptr);
+            }
+        }
+    }
+
+    for (auto& progression : convResult.progressions)
+        songState.addProgression(progression);
+
+    if (convResult.sections.empty())
+    {
+        auto fallbackSection = model::Section::create("Imported", 1);
+        fallbackSection.addProgressionRef(model::SectionProgressionRef::create(convResult.progressions.front().getId(), 0, {}));
+        songState.addSection(fallbackSection);
+    }
+    else
+    {
+        for (auto& section : convResult.sections)
+            songState.addSection(section);
+    }
+
+    selectedProgressionId = convResult.progressions.front().getId();
+    loadProgressionToEdit(selectedProgressionId, 0.0, true, nullptr);
+
+    saveSongState();
+    refreshTimelineData();
+    if (timelineTracks != nullptr)
+        timelineTracks->refreshTracks();
+    populateTheoryObjectSelector();
+    populateTheoryFieldsForCurrentSelection();
+
+    if (gridRollComponent != nullptr)
+    {
+        switchWorkTab(1);
+        gridRollComponent->setTargetProgression(selectedProgressionId);
+        gridRollComponent->setMode(setle::gridroll::GridRollComponent::Mode::NoteMode);
+    }
+
+    const auto summary = juce::String("Analysis complete: ")
+                       + juce::String(convResult.numChords) + " chords -> "
+                       + juce::String(convResult.numProgressions) + " progressions, "
+                       + juce::String(convResult.numSections) + " sections. "
+                       + "Key: " + convResult.detectedKey + " "
+                       + convResult.detectedMode + " ("
+                       + juce::String(static_cast<int>(convResult.keyConfidence * 100.0f)) + "% confidence)";
+
+    interactionStatus.setText(summary, juce::dontSendNotification);
+}
+
+void WorkspaceShellComponent::runMidiAnalysisPipelineForClip(const juce::String& clipId)
+{
+    if (edit == nullptr || clipId.isEmpty())
+        return;
+
+    te::MidiClip* targetClip = nullptr;
+    for (auto* track : te::getAudioTracks(*edit))
+    {
+        if (track == nullptr || setle::timeline::TrackManager::isSystemTrack(*track))
+            continue;
+
+        for (auto* clip : track->getClips())
+        {
+            if (clip == nullptr)
+                continue;
+
+            const auto stateId = clip->state.getProperty("id").toString();
+            if (clip->itemID.toString() == clipId || stateId == clipId)
+            {
+                targetClip = dynamic_cast<te::MidiClip*>(clip);
+                break;
+            }
+        }
+
+        if (targetClip != nullptr)
+            break;
+    }
+
+    if (targetClip == nullptr)
+    {
+        interactionStatus.setText("Selected clip is unavailable for analysis", juce::dontSendNotification);
+        return;
+    }
+
+    const auto bpm = songState.getBpm();
+    auto analysis = setle::midi::MidiChordAnalyzer::analyzeClip(*targetClip, bpm);
+    if (analysis.chords.empty())
+    {
+        interactionStatus.setText("No chords detected in selected clip", juce::dontSendNotification);
+        return;
+    }
+
+    if (analysis.keyConfidence > 0.6f)
+    {
+        songState.setSessionKey(analysis.detectedKey);
+        songState.setSessionMode(analysis.detectedMode);
+        refreshSessionKeyModeSelectors();
+    }
+
+    const auto titleBase = songState.getTitle().isNotEmpty() ? songState.getTitle() : "Imported Clip";
+    auto convResult = setle::midi::MidiToProgressionConverter::convert(analysis, titleBase + " — " + targetClip->getName());
+    if (convResult.progressions.empty())
+    {
+        interactionStatus.setText("No progression candidates found in selected clip", juce::dontSendNotification);
+        return;
+    }
+
+    for (auto& progression : convResult.progressions)
+        songState.addProgression(progression);
+
+    for (auto& section : convResult.sections)
+        songState.addSection(section);
+
+    selectedProgressionId = convResult.progressions.front().getId();
+    loadProgressionToEdit(selectedProgressionId, 0.0, true, nullptr);
+
+    saveSongState();
+    refreshTimelineData();
+    if (timelineTracks != nullptr)
+        timelineTracks->refreshTracks();
+    populateTheoryObjectSelector();
+    populateTheoryFieldsForCurrentSelection();
+
+    if (gridRollComponent != nullptr)
+    {
+        switchWorkTab(1);
+        gridRollComponent->setTargetProgression(selectedProgressionId);
+        gridRollComponent->setMode(setle::gridroll::GridRollComponent::Mode::NoteMode);
+    }
+
+    const auto summary = juce::String("Clip analysis complete: ")
+                       + juce::String(convResult.numChords) + " chords -> "
+                       + juce::String(convResult.numProgressions) + " progressions, "
+                       + juce::String(convResult.numSections) + " sections. "
+                       + "Key: " + convResult.detectedKey + " "
+                       + convResult.detectedMode + " ("
+                       + juce::String(static_cast<int>(convResult.keyConfidence * 100.0f)) + "% confidence)";
+
+    interactionStatus.setText(summary, juce::dontSendNotification);
 }
 
 void WorkspaceShellComponent::saveSongState()
@@ -6662,7 +6965,7 @@ void WorkspaceShellComponent::resized()
     auto topBounds = bounds.removeFromTop(topStripHeight);
     topStrip.setBounds(topBounds);
 
-    auto buttonArea = topBounds.removeFromRight(1410);
+    auto buttonArea = topBounds.removeFromRight(1540);
     themeButton.setBounds(buttonArea.removeFromRight(72).reduced(4, 6));
     redoTheoryButton.setBounds(buttonArea.removeFromRight(112).reduced(4, 6));
     undoTheoryButton.setBounds(buttonArea.removeFromRight(122).reduced(4, 6));
@@ -6676,16 +6979,18 @@ void WorkspaceShellComponent::resized()
     sessionKeyLabel.setBounds(buttonArea.removeFromRight(35).reduced(4, 6));
     sessionKeySelector.setBounds(buttonArea.removeFromRight(75).reduced(4, 6));
 
+    importMidiButton.setBounds(buttonArea.removeFromRight(126).reduced(4, 6));
+
+    // Transport controls
+    recordButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
+    stopButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
+    playButton.setBounds(buttonArea.removeFromRight(52).reduced(4, 6));
+
     if (toolPalette != nullptr)
     {
         auto toolArea = buttonArea.removeFromRight(228).reduced(4, 6);
         toolPalette->setBounds(toolArea);
     }
-
-    // Transport controls: BPM + Capture + Play/Stop/Rec
-    recordButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
-    stopButton.setBounds(buttonArea.removeFromRight(46).reduced(4, 6));
-    playButton.setBounds(buttonArea.removeFromRight(52).reduced(4, 6));
 
     auto captureArea = buttonArea.removeFromRight(188).reduced(4, 6);
     captureSourceLabel.setBounds(captureArea.removeFromLeft(48));

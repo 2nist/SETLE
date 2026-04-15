@@ -28,6 +28,9 @@ class DiatonicHarmony
 public:
     static int pitchClassForRoot(const juce::String& root);
     static std::vector<int> modeIntervals(const juce::String& mode);
+    static juce::String functionForChord(const juce::String& chordSymbol,
+                                         const juce::String& keyRoot,
+                                         const juce::String& mode);
 };
 
 // Build a chord progression from a template,
