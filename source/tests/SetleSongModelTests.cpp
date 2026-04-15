@@ -1395,6 +1395,33 @@ bool testT7RomanNumeralKeyPrefix()
     return ok;
 }
 
+// Regression guard for the two FFT crash bugs in SessionDashboardComponent:
+//   Bug 1: juce::dsp::FFT constructor takes order (log2), not size.
+//          Passing 1024 as order → 2^1024 allocation → immediate crash.
+//   Bug 2: performRealOnlyForwardTransform writes 2*size complex floats.
+//          A kFFTSize-only buffer → heap overrun after ~3-8 seconds.
+// Constants here must stay in sync with SessionDashboardComponent.h.
+bool testFFTConstantSanity()
+{
+    static constexpr int kFFTOrder = 11;
+    static constexpr int kFFTSize  = 1 << kFFTOrder;
+
+    bool ok = true;
+    // Order must be a log2 exponent, never a raw FFT size.
+    ok &= expect (kFFTOrder >= 1 && kFFTOrder <= 20,
+                  "FFT: kFFTOrder must be a log2 order in [1,20], not a raw size");
+    // kFFTSize must equal 2^kFFTOrder.
+    ok &= expect (kFFTSize == (1 << kFFTOrder),
+                  "FFT: kFFTSize must equal 2^kFFTOrder");
+    // fftData buffer must hold exactly 2*kFFTSize floats.
+    ok &= expect (static_cast<std::size_t> (kFFTSize) * 2 == 4096u,
+                  "FFT: fftData must hold 4096 floats (2 * 2048) for complex interleaved output");
+    // fftMagnitudes holds kFFTSize/2+1 bins (DC through Nyquist).
+    ok &= expect (static_cast<std::size_t> (kFFTSize) / 2 + 1 == 1025u,
+                  "FFT: fftMagnitudes must have 1025 bins (kFFTSize/2+1)");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -1439,6 +1466,7 @@ int main()
     ok &= testT5RomanNumeralCIonian();                   // T5
     ok &= testT6RomanNumeralGIonian();                   // T6
     ok &= testT7RomanNumeralKeyPrefix();                 // T7
+    ok &= testFFTConstantSanity();                       // FFT regression
     ok &= testMeterContextBeatsPerBar();                  // T-MeterContext-1
     ok &= testMeterContextBeatUnit();                     // T-MeterContext-2
     ok &= testMeterContextStepsPerBarEighths();           // T-MeterContext-3

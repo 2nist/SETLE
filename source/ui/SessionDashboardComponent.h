@@ -104,8 +104,15 @@ private:
     // FFT Analysis state
     static constexpr int kFFTOrder = 11;              // 2^11 = 2048
     static constexpr int kFFTSize  = 1 << kFFTOrder;
+    // Regression guard: juce::dsp::FFT constructor takes the log2 order, not the
+    // raw size. Passing a size (e.g. 1024) as order allocates 2^1024 bytes and
+    // crashes immediately. kFFTOrder must be a small exponent in [1, 20].
+    static_assert (kFFTOrder >= 1 && kFFTOrder <= 20,
+                   "kFFTOrder must be a log2 order in [1,20], not a raw FFT size");
     juce::dsp::FFT fftProcessor { kFFTOrder };
-    std::array<float, kFFTSize * 2> fftData {};   // performRealOnlyForwardTransform needs 2*size floats (complex interleaved)
+    // performRealOnlyForwardTransform writes 2*size interleaved complex floats.
+    // A buffer of only kFFTSize floats causes a heap overrun after a few seconds.
+    std::array<float, kFFTSize * 2> fftData {};   // must be 2*kFFTSize
     std::array<float, kFFTSize / 2 + 1> fftMagnitudes {};
     float dominantFrequency { 0.0f };
     float dominantMagnitude { 0.0f };
