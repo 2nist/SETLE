@@ -368,11 +368,79 @@ juce::String normalizeRepeatIndices(const juce::String& serialized, const juce::
 } // namespace
 
 //==============================================================================
-class WorkspaceShellComponent::InDevicePanel final : public juce::Component,
-                                                     private juce::Timer,
-                                                     private juce::MidiInputCallback
+class WorkspaceShellComponent::PanelTabStrip final : public juce::Component
 {
 public:
+    static constexpr int kHeight = 26;
+    std::function<void(int)> onTabSelected;
+
+    void setTabs(std::initializer_list<juce::String> labels)
+    {
+        buttons.clear();
+        int idx = 0;
+        for (const auto& label : labels)
+        {
+            auto btn = std::make_unique<juce::TextButton>(label);
+            const int i = idx++;
+            btn->onClick = [this, i] { setActiveTabInternal(i, true); };
+            btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.88f));
+            addAndMakeVisible(*btn);
+            buttons.push_back(std::move(btn));
+        }
+        setActiveTabInternal(0, false);
+        resized();
+    }
+
+    void setActiveTab(int index) { setActiveTabInternal(index, false); }
+    int getActiveTab() const noexcept { return activeTab; }
+
+    void resized() override
+    {
+        if (buttons.empty())
+            return;
+        auto area = getLocalBounds();
+        const int w = area.getWidth() / static_cast<int>(buttons.size());
+        for (size_t i = 0; i < buttons.size(); ++i)
+        {
+            const int x = static_cast<int>(i) * w;
+            const int bw = (i + 1 == buttons.size()) ? area.getRight() - x : w;
+            buttons[i]->setBounds(x + 1, 2, bw - 2, area.getHeight() - 4);
+        }
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        g.setColour(juce::Colour(0xff181c24));
+        g.fillAll();
+    }
+
+private:
+    void setActiveTabInternal(int index, bool fireCallback)
+    {
+        activeTab = juce::jlimit(0, juce::jmax(0, static_cast<int>(buttons.size()) - 1), index);
+        const juce::Colour activeCol   { 0xff2c4a67 };
+        const juce::Colour inactiveCol { 0xff2a3040 };
+        for (int i = 0; i < static_cast<int>(buttons.size()); ++i)
+            buttons[static_cast<size_t>(i)]->setColour(juce::TextButton::buttonColourId,
+                                                       i == activeTab ? activeCol : inactiveCol);
+        if (fireCallback && onTabSelected)
+            onTabSelected(activeTab);
+    }
+
+    std::vector<std::unique_ptr<juce::TextButton>> buttons;
+    int activeTab { 0 };
+};
+
+//==============================================================================
+class WorkspaceShellComponent::LeftInstrumentPanel final : public juce::Component,
+                                                           private juce::Timer
+{
+public:
+    using SlotType = setle::instruments::InstrumentSlot::SlotType;
+    using TypeChangedCallback = std::function<void(const juce::String&, SlotType)>;
+    using VstScanCallback = std::function<void()>;
+    using VstLoadCallback = std::function<void(const juce::String&)>;
+    using MidiOutChangedCallback = std::function<void(const juce::String&, const juce::String&)>;
     using QueueProvider = std::function<setle::capture::GrabSamplerQueue*()>;
     using SongProvider = std::function<const model::Song*()>;
 
@@ -645,338 +713,7 @@ private:
         juce::TextButton promoteButton;
     };
 
-public:
-    InDevicePanel(te::Engine& e,
-                  QueueProvider queueProviderIn,
-                  SongProvider songProviderIn,
-                  QueueActions queueActionsIn)
-        : engine(e),
-          queueProvider(std::move(queueProviderIn)),
-          songProvider(std::move(songProviderIn)),
-          queueActions(std::move(queueActionsIn))
-    {
-        openMidiInputs();
-
-        for (int i = 0; i < 4; ++i)
-        {
-            slotCards[static_cast<size_t>(i)] = std::make_unique<GrabSlotCard>(
-                i,
-                [this]() { return queueProvider != nullptr ? queueProvider() : nullptr; },
-                [this]() { return songProvider != nullptr ? songProvider() : nullptr; },
-                queueActions);
-            addAndMakeVisible(*slotCards[static_cast<size_t>(i)]);
-        }
-
-        startTimerHz(20);
-    }
-
-    ~InDevicePanel() override
-    {
-        stopTimer();
-        for (auto& m : midiInputs)
-            m->stop();
-    }
-
-    void paint(juce::Graphics& g) override
-    {
-        const auto bounds = getLocalBounds();
-        g.setColour(juce::Colour(0xff22352a));
-        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 5.0f);
-
-        auto area = bounds.reduced(10, 8);
-
-        // Title
-        g.setFont(juce::FontOptions(16.0f));
-        g.setColour(juce::Colours::white.withAlpha(0.88f));
-        g.drawText("IN", area.removeFromTop(22), juce::Justification::centredLeft, false);
-
-        area.removeFromTop(4);
-
-        // ── Audio Output ──────────────────────────────────────────────────────
-        drawSectionLabel(g, area, "Audio Output");
-        {
-            auto& dm = engine.getDeviceManager().deviceManager;
-            auto* dev = dm.getCurrentAudioDevice();
-            if (dev != nullptr)
-            {
-                const auto sr = static_cast<int>(dev->getCurrentSampleRate());
-                const auto bs = dev->getCurrentBufferSizeSamples();
-                const auto devName = dev->getName();
-                g.setColour(juce::Colours::white.withAlpha(0.80f));
-                g.setFont(juce::FontOptions(12.0f));
-                g.drawText(devName, area.removeFromTop(16), juce::Justification::centredLeft, true);
-                g.setColour(juce::Colours::white.withAlpha(0.50f));
-                g.setFont(juce::FontOptions(11.0f));
-                g.drawText(juce::String(sr) + " Hz  |  " + juce::String(bs) + " samples",
-                           area.removeFromTop(15), juce::Justification::centredLeft, true);
-
-                const double latencyMs = sr > 0 ? (1000.0 * static_cast<double>(bs) / static_cast<double>(sr)) : 0.0;
-                g.setColour(juce::Colours::white.withAlpha(0.58f));
-                g.drawText("Latency: " + juce::String(latencyMs, 1) + " ms",
-                           area.removeFromTop(14), juce::Justification::centredLeft, true);
-
-                auto meterRow = area.removeFromTop(14).withTrimmedLeft(2);
-                auto meterL = meterRow.removeFromLeft(40);
-                meterRow.removeFromLeft(4);
-                auto meterR = meterRow.removeFromLeft(40);
-
-                auto drawMiniMeter = [&g](juce::Rectangle<int> r, float level, juce::Colour colour)
-                {
-                    g.setColour(juce::Colour(0xff101812));
-                    g.fillRect(r);
-                    const int fill = static_cast<int>(juce::jlimit(0.0f, 1.0f, level) * r.getHeight());
-                    g.setColour(colour.withAlpha(0.9f));
-                    g.fillRect(r.withY(r.getBottom() - fill).withHeight(fill));
-                    g.setColour(juce::Colours::white.withAlpha(0.16f));
-                    g.drawRect(r);
-                };
-
-                drawMiniMeter(meterL, outputMeterLeft, juce::Colour(0xff54d36e));
-                drawMiniMeter(meterR, outputMeterRight, juce::Colour(0xff54d36e));
-            }
-            else
-            {
-                g.setColour(juce::Colours::white.withAlpha(0.40f));
-                g.setFont(juce::FontOptions(12.0f));
-                g.drawText("(no audio device open)", area.removeFromTop(16), juce::Justification::centredLeft, true);
-            }
-        }
-        area.removeFromTop(8);
-
-        // ── MIDI Inputs ───────────────────────────────────────────────────────
-        drawSectionLabel(g, area, "MIDI Inputs");
-        {
-            const auto midiDevices = juce::MidiInput::getAvailableDevices();
-            if (midiDevices.isEmpty())
-            {
-                g.setColour(juce::Colours::white.withAlpha(0.40f));
-                g.setFont(juce::FontOptions(12.0f));
-                g.drawText("(no MIDI inputs found)", area.removeFromTop(15), juce::Justification::centredLeft, true);
-            }
-            else
-            {
-                for (const auto& info : midiDevices)
-                {
-                    if (area.getHeight() < 14)
-                        break;
-                    const bool isOpen = isDeviceOpen(info.identifier);
-                    const auto nowSec = juce::Time::getMillisecondCounterHiRes() * 0.001;
-                    const auto it = midiActivitySeconds.find(info.identifier);
-                    const bool active = it != midiActivitySeconds.end() && (nowSec - it->second) < 0.18;
-                    const float pulse = 0.55f + 0.45f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.02));
-
-                    juce::Colour dotColour = juce::Colour(0xff6ac87b).withAlpha(active ? pulse : 0.75f);
-                    juce::Colour textColour = isOpen ? juce::Colours::white.withAlpha(active ? 0.95f : 0.75f)
-                                                     : juce::Colours::white.withAlpha(0.35f);
-                    g.setColour(isOpen ? dotColour : juce::Colours::white.withAlpha(0.25f));
-                    g.setFont(juce::FontOptions(12.0f));
-                    const auto dot = isOpen ? juce::String(juce::CharPointer_UTF8("\xe2\x97\x8f "))
-                                            : juce::String(juce::CharPointer_UTF8("\xe2\x97\x8b "));
-                    auto row = area.removeFromTop(15);
-                    g.drawText(dot, row.removeFromLeft(14), juce::Justification::centredLeft, false);
-                    g.setColour(textColour);
-                    g.drawText(info.name, row, juce::Justification::centredLeft, true);
-                }
-            }
-        }
-        area.removeFromTop(8);
-
-        // ── MIDI Monitor ──────────────────────────────────────────────────────
-        auto queueArea = area.removeFromBottom(200);
-        if (area.getHeight() < 36)
-            return;
-
-        drawSectionLabel(g, area, "MIDI Monitor");
-        {
-            juce::Array<juce::MidiMessage> snapshot;
-            {
-                const juce::ScopedLock sl(logLock);
-                for (const auto& m : midiLog)
-                    snapshot.add(m);
-            }
-
-            g.setFont(juce::FontOptions(11.0f, juce::Font::plain));
-            // Draw newest at top
-            for (int i = snapshot.size() - 1; i >= 0 && area.getHeight() >= 13; --i)
-            {
-                const auto& msg = snapshot.getReference(i);
-                juce::String text;
-                if (msg.isNoteOn())
-                    text = "NoteOn  ch" + juce::String(msg.getChannel()) + "  n" + juce::String(msg.getNoteNumber()) + "  v" + juce::String(msg.getVelocity());
-                else if (msg.isNoteOff())
-                    text = "NoteOff ch" + juce::String(msg.getChannel()) + "  n" + juce::String(msg.getNoteNumber());
-                else if (msg.isController())
-                    text = "CC  ch" + juce::String(msg.getChannel()) + "  #" + juce::String(msg.getControllerNumber()) + "=" + juce::String(msg.getControllerValue());
-                else if (msg.isProgramChange())
-                    text = "PC  ch" + juce::String(msg.getChannel()) + "  p" + juce::String(msg.getProgramChangeNumber());
-                else if (msg.isPitchWheel())
-                    text = "PW  ch" + juce::String(msg.getChannel()) + "  " + juce::String(msg.getPitchWheelValue());
-                else
-                    text = "0x" + juce::String::toHexString(msg.getRawData(), juce::jmin(3, msg.getRawDataSize()));
-
-                const float alpha = 0.35f + 0.65f * (static_cast<float>(i) / static_cast<float>(juce::jmax(1, snapshot.size() - 1)));
-                g.setColour(juce::Colours::white.withAlpha(alpha));
-                g.drawText(text, area.removeFromTop(13), juce::Justification::centredLeft, true);
-            }
-        }
-
-        queueArea.removeFromTop(6);
-        drawSectionLabel(g, queueArea, "Grab Queue");
-
-        g.setColour(juce::Colours::white.withAlpha(0.08f));
-        g.drawRoundedRectangle(queueArea.toFloat(), 4.0f, 1.0f);
-    }
-
-    void resized() override
-    {
-        auto area = getLocalBounds().reduced(10, 8);
-        area.removeFromTop(22); // IN title
-        area.removeFromTop(4);
-
-        auto queueArea = area.removeFromBottom(200);
-        queueArea.removeFromTop(6);
-        queueArea.removeFromTop(14); // section label
-        queueArea.removeFromTop(4);
-
-        const int gap = 4;
-        const int cellHeight = (queueArea.getHeight() - gap * 3) / 4;
-        for (int i = 0; i < 4; ++i)
-        {
-            if (auto* card = slotCards[static_cast<size_t>(i)].get())
-            {
-                card->setBounds(queueArea.removeFromTop(cellHeight));
-                queueArea.removeFromTop(gap);
-            }
-        }
-    }
-
-private:
-    static void drawSectionLabel(juce::Graphics& g, juce::Rectangle<int>& area, const juce::String& label)
-    {
-        g.setColour(juce::Colour(0xff4a8a60).withAlpha(0.85f));
-        g.setFont(juce::FontOptions(10.5f));
-        g.drawText(label.toUpperCase(), area.removeFromTop(14), juce::Justification::centredLeft, false);
-    }
-
-    void openMidiInputs()
-    {
-        for (const auto& info : juce::MidiInput::getAvailableDevices())
-        {
-            if (auto dev = juce::MidiInput::openDevice(info.identifier, this))
-            {
-                dev->start();
-                midiInputs.push_back(std::move(dev));
-            }
-        }
-    }
-
-    bool isDeviceOpen(const juce::String& identifier) const
-    {
-        for (const auto& m : midiInputs)
-            if (m->getIdentifier() == identifier)
-                return true;
-        return false;
-    }
-
-    void timerCallback() override
-    {
-        for (auto& card : slotCards)
-            if (card != nullptr)
-                card->refresh();
-
-        outputMeterLeft *= 0.86f;
-        outputMeterRight *= 0.86f;
-        outputMeterLeft = juce::jlimit(0.0f, 1.0f, outputMeterLeft);
-        outputMeterRight = juce::jlimit(0.0f, 1.0f, outputMeterRight);
-
-        repaint();
-    }
-
-    void handleIncomingMidiMessage(juce::MidiInput* input, const juce::MidiMessage& msg) override
-    {
-        if (msg.isController() && setle::state::AppPreferences::get().getMidiLearnActive())
-        {
-            setle::state::AppPreferences::get().setMidiLearnCC(msg.getControllerNumber());
-            setle::state::AppPreferences::get().setMidiLearnChannel(msg.getChannel());
-            setle::state::AppPreferences::get().setMidiLearnActive(false);
-        }
-
-        if (input != nullptr)
-            midiActivitySeconds[input->getIdentifier()] = juce::Time::getMillisecondCounterHiRes() * 0.001;
-
-        if (msg.isNoteOn())
-        {
-            const float v = juce::jlimit(0.0f, 1.0f, msg.getFloatVelocity());
-            outputMeterLeft = juce::jmax(outputMeterLeft, v);
-            outputMeterRight = juce::jmax(outputMeterRight, v * 0.92f);
-        }
-        else if (msg.isController())
-        {
-            const float v = juce::jlimit(0.0f, 1.0f, static_cast<float>(msg.getControllerValue()) / 127.0f);
-            outputMeterLeft = juce::jmax(outputMeterLeft, v * 0.55f);
-            outputMeterRight = juce::jmax(outputMeterRight, v * 0.50f);
-        }
-
-        const juce::ScopedLock sl(logLock);
-        midiLog.add(msg);
-        if (midiLog.size() > 12)
-            midiLog.remove(0);
-    }
-
-    te::Engine& engine;
-    QueueProvider queueProvider;
-    SongProvider songProvider;
-    QueueActions queueActions;
-    std::array<std::unique_ptr<GrabSlotCard>, 4> slotCards;
-    std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
-    std::map<juce::String, double> midiActivitySeconds;
-    float outputMeterLeft { 0.0f };
-    float outputMeterRight { 0.0f };
-    juce::CriticalSection logLock;
-    juce::Array<juce::MidiMessage> midiLog;
-};
-
-//==============================================================================
-class WorkspaceShellComponent::LabelPanel : public juce::Component
-{
-public:
-    LabelPanel(juce::String panelName, juce::Colour panelColour, juce::String subtitleText)
-        : title(std::move(panelName)),
-          subtitle(std::move(subtitleText)),
-          colour(panelColour)
-    {
-    }
-
-    void paint(juce::Graphics& g) override
-    {
-        auto bounds = getLocalBounds();
-        g.setColour(colour);
-        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 5.0f);
-
-        g.setColour(juce::Colours::white.withAlpha(0.88f));
-        g.setFont(juce::FontOptions(16.0f));
-        g.drawText(title, bounds.removeFromTop(32).reduced(10, 4), juce::Justification::centredLeft, false);
-
-        g.setColour(juce::Colours::white.withAlpha(0.60f));
-        g.setFont(juce::FontOptions(13.0f));
-        g.drawText(subtitle, bounds.reduced(10, 4), juce::Justification::topLeft, true);
-    }
-
-private:
-    juce::String title;
-    juce::String subtitle;
-    juce::Colour colour;
-};
-
-class WorkspaceShellComponent::OutPanelHost final : public juce::Component
-{
-public:
-    using SlotType = setle::instruments::InstrumentSlot::SlotType;
-    using TypeChangedCallback = std::function<void(const juce::String&, SlotType)>;
-    using VstScanCallback = std::function<void()>;
-    using VstLoadCallback = std::function<void(const juce::String&)>;
-    using MidiOutChangedCallback = std::function<void(const juce::String&, const juce::String&)>;
-
+    // ── InstrumentStrip (Instruments tab) ─────────────────────────────────
     class InstrumentStrip final : public juce::Component
     {
     public:
@@ -1035,17 +772,15 @@ public:
             {
                 if (onTypeChanged == nullptr)
                     return;
-
                 switch (typeSelector.getSelectedId())
                 {
-                    case 1: onTypeChanged(trackId, SlotType::PolySynth); break;
+                    case 1: onTypeChanged(trackId, SlotType::PolySynth);   break;
                     case 2: onTypeChanged(trackId, SlotType::DrumMachine); break;
                     case 3: onTypeChanged(trackId, SlotType::ReelSampler); break;
-                    case 4: onTypeChanged(trackId, SlotType::VST3); break;
-                    case 5: onTypeChanged(trackId, SlotType::MidiOut); break;
+                    case 4: onTypeChanged(trackId, SlotType::VST3);        break;
+                    case 5: onTypeChanged(trackId, SlotType::MidiOut);     break;
                     default: break;
                 }
-
                 updateTypeSpecificControls();
             };
 
@@ -1067,7 +802,6 @@ public:
             {
                 if (onMidiOutChanged == nullptr)
                     return;
-
                 const auto idx = midiOutSelector.getSelectedItemIndex();
                 if (idx >= 0 && idx < static_cast<int>(midiOutputIdentifiers.size()))
                     onMidiOutChanged(trackId, midiOutputIdentifiers[static_cast<size_t>(idx)]);
@@ -1084,10 +818,10 @@ public:
                        MidiOutChangedCallback midiOutCallback)
         {
             trackId = id;
-            onTypeChanged = std::move(callback);
+            onTypeChanged      = std::move(callback);
             onVstScanRequested = std::move(scanCallback);
             onVstLoadRequested = std::move(vstCallback);
-            onMidiOutChanged = std::move(midiOutCallback);
+            onMidiOutChanged   = std::move(midiOutCallback);
             trackNameLabel.setText(name, juce::dontSendNotification);
             volumePlugin = audioTrack.getVolumePlugin();
 
@@ -1116,12 +850,12 @@ public:
                 const auto info = slot->getInfo();
                 switch (info.type)
                 {
-                    case SlotType::PolySynth: selected = 1; break;
+                    case SlotType::PolySynth:   selected = 1; break;
                     case SlotType::DrumMachine: selected = 2; break;
                     case SlotType::ReelSampler: selected = 3; break;
-                    case SlotType::VST3: selected = 4; break;
-                    case SlotType::MidiOut: selected = 5; break;
-                    case SlotType::Empty: selected = 1; break;
+                    case SlotType::VST3:        selected = 4; break;
+                    case SlotType::MidiOut:     selected = 5; break;
+                    case SlotType::Empty:       selected = 1; break;
                 }
 
                 if (info.type == SlotType::MidiOut)
@@ -1214,11 +948,39 @@ public:
         juce::Component::SafePointer<juce::Component> editorComponent;
     };
 
-    OutPanelHost()
+public:
+    LeftInstrumentPanel(QueueProvider queueProviderIn,
+                        SongProvider songProviderIn,
+                        QueueActions queueActionsIn)
+        : queueProvider(std::move(queueProviderIn)),
+          songProvider(std::move(songProviderIn)),
+          queueActions(std::move(queueActionsIn))
     {
-        addAndMakeVisible(viewport);
-        viewport.setViewedComponent(&content, false);
-        viewport.setScrollBarsShown(true, false);
+        tabStrip.setTabs({ "Instruments", "Capture" });
+        tabStrip.onTabSelected = [this](int tab) { setActiveTab(tab); };
+        addAndMakeVisible(tabStrip);
+
+        instrumentViewport.setViewedComponent(&instrumentContent, false);
+        instrumentViewport.setScrollBarsShown(true, false);
+        addAndMakeVisible(instrumentViewport);
+
+        for (int i = 0; i < 4; ++i)
+        {
+            slotCards[static_cast<size_t>(i)] = std::make_unique<GrabSlotCard>(
+                i,
+                [this]() { return queueProvider != nullptr ? queueProvider() : nullptr; },
+                [this]() { return songProvider != nullptr ? songProvider() : nullptr; },
+                queueActions);
+            addAndMakeVisible(*slotCards[static_cast<size_t>(i)]);
+        }
+
+        setActiveTab(0);
+        startTimerHz(20);
+    }
+
+    ~LeftInstrumentPanel() override
+    {
+        stopTimer();
     }
 
     void rebuild(const juce::Array<te::Track*>& tracks,
@@ -1228,29 +990,25 @@ public:
                  VstLoadCallback vstCallback,
                  MidiOutChangedCallback midiOutCallback)
     {
-        onTypeChanged = std::move(callback);
+        onTypeChanged      = std::move(callback);
         onVstScanRequested = std::move(scanCallback);
         onVstLoadRequested = std::move(vstCallback);
-        onMidiOutChanged = std::move(midiOutCallback);
+        onMidiOutChanged   = std::move(midiOutCallback);
         strips.clear();
 
         for (auto* track : tracks)
         {
             if (track == nullptr)
                 continue;
-
             if (setle::timeline::TrackManager::isSystemTrack(*track))
                 continue;
-
             auto* audioTrack = dynamic_cast<te::AudioTrack*>(track);
             if (audioTrack == nullptr)
                 continue;
-
             const auto trackId = audioTrack->itemID.toString();
             auto it = slots.find(trackId);
             if (it == slots.end())
                 continue;
-
             auto strip = std::make_unique<InstrumentStrip>();
             strip->configure(*audioTrack,
                              audioTrack->getName(),
@@ -1260,7 +1018,7 @@ public:
                              onVstScanRequested,
                              onVstLoadRequested,
                              onMidiOutChanged);
-            content.addAndMakeVisible(*strip);
+            instrumentContent.addAndMakeVisible(*strip);
             strips.push_back(std::move(strip));
         }
 
@@ -1268,29 +1026,439 @@ public:
         repaint();
     }
 
+    void setActiveTab(int tab)
+    {
+        activeTabIndex = tab;
+        tabStrip.setActiveTab(tab);
+        const bool showInstruments = (tab == 0);
+        instrumentViewport.setVisible(showInstruments);
+        for (auto& card : slotCards)
+            if (card) card->setVisible(!showInstruments);
+        resized();
+    }
+
+    int getActiveTab() const noexcept { return activeTabIndex; }
+
     void resized() override
     {
-        viewport.setBounds(getLocalBounds());
+        auto area = getLocalBounds();
+        tabStrip.setBounds(area.removeFromTop(PanelTabStrip::kHeight));
 
-        auto width = juce::jmax(260, getWidth() - 14);
-        int y = 6;
-        for (auto& strip : strips)
+        if (activeTabIndex == 0)
         {
-            strip->setBounds(6, y, width - 12, 180);
-            y += 188;
+            instrumentViewport.setBounds(area);
+            const int w = juce::jmax(260, area.getWidth() - 14);
+            int y = 6;
+            for (auto& strip : strips)
+            {
+                strip->setBounds(6, y, w - 12, 180);
+                y += 188;
+            }
+            instrumentContent.setSize(w, juce::jmax(y + 6, area.getHeight()));
         }
+        else
+        {
+            auto reduced = area.reduced(10, 8);
+            const int gap = 4;
+            const int cellHeight = (reduced.getHeight() - gap * 3) / 4;
+            for (int i = 0; i < 4; ++i)
+            {
+                if (slotCards[static_cast<size_t>(i)])
+                {
+                    slotCards[static_cast<size_t>(i)]->setBounds(reduced.removeFromTop(cellHeight));
+                    reduced.removeFromTop(gap);
+                }
+            }
+        }
+    }
 
-        content.setSize(width, juce::jmax(y + 6, getHeight()));
+    void paint(juce::Graphics& g) override
+    {
+        g.setColour(juce::Colour(0xff1e2434));
+        g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), 5.0f);
     }
 
 private:
-    juce::Viewport viewport;
-    juce::Component content;
+    void timerCallback() override
+    {
+        for (auto& card : slotCards)
+            if (card != nullptr)
+                card->refresh();
+        repaint();
+    }
+
+    PanelTabStrip tabStrip;
+    juce::Viewport instrumentViewport;
+    juce::Component instrumentContent;
     std::vector<std::unique_ptr<InstrumentStrip>> strips;
+    std::array<std::unique_ptr<GrabSlotCard>, 4> slotCards;
+    int activeTabIndex { 0 };
+
+    QueueProvider queueProvider;
+    SongProvider songProvider;
+    QueueActions queueActions;
     TypeChangedCallback onTypeChanged;
     VstScanCallback onVstScanRequested;
     VstLoadCallback onVstLoadRequested;
     MidiOutChangedCallback onMidiOutChanged;
+};
+
+//==============================================================================
+class WorkspaceShellComponent::LabelPanel : public juce::Component
+{
+public:
+    LabelPanel(juce::String panelName, juce::Colour panelColour, juce::String subtitleText)
+        : title(std::move(panelName)),
+          subtitle(std::move(subtitleText)),
+          colour(panelColour)
+    {
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        auto bounds = getLocalBounds();
+        g.setColour(colour);
+        g.fillRoundedRectangle(bounds.toFloat().reduced(1.0f), 5.0f);
+
+        g.setColour(juce::Colours::white.withAlpha(0.88f));
+        g.setFont(juce::FontOptions(16.0f));
+        g.drawText(title, bounds.removeFromTop(32).reduced(10, 4), juce::Justification::centredLeft, false);
+
+        g.setColour(juce::Colours::white.withAlpha(0.60f));
+        g.setFont(juce::FontOptions(13.0f));
+        g.drawText(subtitle, bounds.reduced(10, 4), juce::Justification::topLeft, true);
+    }
+
+private:
+    juce::String title;
+    juce::String subtitle;
+    juce::Colour colour;
+};
+
+class WorkspaceShellComponent::RightOutputPanel final : public juce::Component,
+                                                        private juce::Timer,
+                                                        private juce::MidiInputCallback
+{
+public:
+    class CompactMixStrip final : public juce::Component
+    {
+    public:
+        CompactMixStrip()
+        {
+            addAndMakeVisible(nameLabel);
+            addAndMakeVisible(volumeSlider);
+            addAndMakeVisible(muteButton);
+            nameLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.88f));
+            nameLabel.setFont(juce::FontOptions(12.5f));
+            nameLabel.setJustificationType(juce::Justification::centredLeft);
+            muteButton.setButtonText("M");
+            muteButton.setClickingTogglesState(true);
+            muteButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3f46));
+            muteButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
+            volumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+            volumeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 16);
+            volumeSlider.setRange(0.0, 1.0, 0.01);
+            muteButton.onClick = [this]
+            {
+                if (volumePlugin != nullptr)
+                    volumePlugin->muteOrUnmute();
+            };
+            volumeSlider.onValueChange = [this]
+            {
+                if (volumePlugin != nullptr)
+                    volumePlugin->setSliderPos(static_cast<float>(volumeSlider.getValue()));
+            };
+        }
+
+        void configure(const juce::String& name, te::VolumeAndPanPlugin* vol)
+        {
+            nameLabel.setText(name, juce::dontSendNotification);
+            volumePlugin = vol;
+            if (vol != nullptr)
+                volumeSlider.setValue(static_cast<double>(vol->getSliderPos()), juce::dontSendNotification);
+        }
+
+        void resized() override
+        {
+            auto b = getLocalBounds().reduced(4, 2);
+            muteButton.setBounds(b.removeFromRight(26).reduced(0, 2));
+            b.removeFromRight(4);
+            nameLabel.setBounds(b.removeFromLeft(100));
+            b.removeFromLeft(4);
+            volumeSlider.setBounds(b);
+        }
+
+        void paint(juce::Graphics& g) override
+        {
+            g.setColour(juce::Colour(0xff1a1e24));
+            g.fillRoundedRectangle(getLocalBounds().toFloat(), 3.0f);
+            g.setColour(juce::Colour(0xff3b4650));
+            g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 3.0f, 1.0f);
+        }
+
+    private:
+        juce::Label nameLabel;
+        juce::Slider volumeSlider;
+        juce::TextButton muteButton;
+        te::VolumeAndPanPlugin* volumePlugin { nullptr };
+    };
+
+    explicit RightOutputPanel(te::Engine& e) : engine(e)
+    {
+        tabStrip.setTabs({ "Mix", "FX", "Routing" });
+        tabStrip.onTabSelected = [this](int tab) { setActiveTab(tab); };
+        addAndMakeVisible(tabStrip);
+
+        mixViewport.setViewedComponent(&mixContent, false);
+        mixViewport.setScrollBarsShown(true, false);
+        addAndMakeVisible(mixViewport);
+
+        openMidiInputs();
+        startTimerHz(20);
+        setActiveTab(0);
+    }
+
+    ~RightOutputPanel() override
+    {
+        stopTimer();
+        for (auto& m : midiInputs)
+            m->stop();
+    }
+
+    void setFxContent(juce::Component* comp)
+    {
+        if (fxContent != nullptr)
+            removeChildComponent(fxContent);
+        fxContent = comp;
+        if (fxContent != nullptr)
+        {
+            addAndMakeVisible(*fxContent);
+            fxContent->setVisible(activeTabIndex == 1);
+        }
+        resized();
+    }
+
+    void rebuildMixStrips(const juce::Array<te::Track*>& tracks,
+                          std::map<juce::String, std::unique_ptr<setle::instruments::InstrumentSlot>>& slots)
+    {
+        mixStrips.clear();
+        for (auto* track : tracks)
+        {
+            if (track == nullptr || setle::timeline::TrackManager::isSystemTrack(*track))
+                continue;
+            auto* audioTrack = dynamic_cast<te::AudioTrack*>(track);
+            if (audioTrack == nullptr)
+                continue;
+            const auto trackId = audioTrack->itemID.toString();
+            if (slots.find(trackId) == slots.end())
+                continue;
+            auto strip = std::make_unique<CompactMixStrip>();
+            strip->configure(audioTrack->getName(), audioTrack->getVolumePlugin());
+            mixContent.addAndMakeVisible(*strip);
+            mixStrips.push_back(std::move(strip));
+        }
+        resized();
+        repaint();
+    }
+
+    void setActiveTab(int tab)
+    {
+        activeTabIndex = tab;
+        tabStrip.setActiveTab(tab);
+        mixViewport.setVisible(tab == 0);
+        if (fxContent != nullptr)
+            fxContent->setVisible(tab == 1);
+        resized();
+        repaint();
+    }
+
+    int getActiveTab() const noexcept { return activeTabIndex; }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        tabStrip.setBounds(area.removeFromTop(PanelTabStrip::kHeight));
+
+        if (activeTabIndex == 0)
+        {
+            mixViewport.setBounds(area);
+            const int w = juce::jmax(200, area.getWidth() - 14);
+            int y = 4;
+            for (auto& strip : mixStrips)
+            {
+                strip->setBounds(4, y, w - 8, 36);
+                y += 40;
+            }
+            mixContent.setSize(w, juce::jmax(y + 4, area.getHeight()));
+        }
+        else if (activeTabIndex == 1)
+        {
+            if (fxContent != nullptr)
+                fxContent->setBounds(area);
+        }
+        // tab 2 (Routing): all painted
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        g.setColour(juce::Colour(0xff22282e));
+        g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), 5.0f);
+        if (activeTabIndex == 2)
+            paintRoutingTab(g);
+    }
+
+private:
+    void paintRoutingTab(juce::Graphics& g)
+    {
+        auto area = getLocalBounds().reduced(10, 8);
+        area.removeFromTop(PanelTabStrip::kHeight);
+
+        auto drawLabel = [&g](juce::Rectangle<int>& r, const juce::String& text)
+        {
+            g.setColour(juce::Colour(0xff4a8a60).withAlpha(0.85f));
+            g.setFont(juce::FontOptions(10.5f));
+            g.drawText(text.toUpperCase(), r.removeFromTop(14), juce::Justification::centredLeft, false);
+        };
+
+        drawLabel(area, "Audio Output");
+        {
+            auto& dm = engine.getDeviceManager().deviceManager;
+            auto* dev = dm.getCurrentAudioDevice();
+            if (dev != nullptr)
+            {
+                const auto sr = static_cast<int>(dev->getCurrentSampleRate());
+                const auto bs = dev->getCurrentBufferSizeSamples();
+                g.setColour(juce::Colours::white.withAlpha(0.80f));
+                g.setFont(juce::FontOptions(12.0f));
+                g.drawText(dev->getName(), area.removeFromTop(16), juce::Justification::centredLeft, true);
+                g.setColour(juce::Colours::white.withAlpha(0.50f));
+                g.setFont(juce::FontOptions(11.0f));
+                g.drawText(juce::String(sr) + " Hz  |  " + juce::String(bs) + " samples",
+                           area.removeFromTop(15), juce::Justification::centredLeft, true);
+                const double latencyMs = sr > 0 ? (1000.0 * static_cast<double>(bs) / static_cast<double>(sr)) : 0.0;
+                g.setColour(juce::Colours::white.withAlpha(0.58f));
+                g.drawText("Latency: " + juce::String(latencyMs, 1) + " ms",
+                           area.removeFromTop(14), juce::Justification::centredLeft, true);
+            }
+            else
+            {
+                g.setColour(juce::Colours::white.withAlpha(0.40f));
+                g.drawText("(no audio device open)", area.removeFromTop(16), juce::Justification::centredLeft, true);
+            }
+        }
+        area.removeFromTop(8);
+
+        drawLabel(area, "MIDI Inputs");
+        {
+            const auto midiDevices = juce::MidiInput::getAvailableDevices();
+            if (midiDevices.isEmpty())
+            {
+                g.setColour(juce::Colours::white.withAlpha(0.40f));
+                g.drawText("(no MIDI inputs found)", area.removeFromTop(15), juce::Justification::centredLeft, true);
+            }
+            else
+            {
+                for (const auto& info : midiDevices)
+                {
+                    if (area.getHeight() < 14)
+                        break;
+                    const bool isOpen = isDeviceOpen(info.identifier);
+                    const auto nowSec = juce::Time::getMillisecondCounterHiRes() * 0.001;
+                    const auto it = midiActivitySeconds.find(info.identifier);
+                    const bool active = it != midiActivitySeconds.end() && (nowSec - it->second) < 0.18;
+                    const float pulse = 0.55f + 0.45f * std::sin(static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.02));
+                    const auto dot = isOpen ? juce::String(juce::CharPointer_UTF8("\xe2\x97\x8f "))
+                                            : juce::String(juce::CharPointer_UTF8("\xe2\x97\x8b "));
+                    g.setColour(isOpen ? juce::Colour(0xff6ac87b).withAlpha(active ? pulse : 0.75f)
+                                       : juce::Colours::white.withAlpha(0.25f));
+                    auto row = area.removeFromTop(15);
+                    g.drawText(dot, row.removeFromLeft(14), juce::Justification::centredLeft, false);
+                    g.setColour(isOpen ? juce::Colours::white.withAlpha(active ? 0.95f : 0.75f)
+                                       : juce::Colours::white.withAlpha(0.35f));
+                    g.drawText(info.name, row, juce::Justification::centredLeft, true);
+                }
+            }
+        }
+        area.removeFromTop(8);
+
+        if (area.getHeight() < 36)
+            return;
+
+        drawLabel(area, "MIDI Monitor");
+        {
+            juce::Array<juce::MidiMessage> snapshot;
+            {
+                const juce::ScopedLock sl(logLock);
+                for (const auto& m : midiLog)
+                    snapshot.add(m);
+            }
+            g.setFont(juce::FontOptions(11.0f));
+            for (int i = snapshot.size() - 1; i >= 0 && area.getHeight() >= 13; --i)
+            {
+                const auto& msg = snapshot.getReference(i);
+                juce::String text;
+                if (msg.isNoteOn())
+                    text = "NoteOn  ch" + juce::String(msg.getChannel()) + "  n" + juce::String(msg.getNoteNumber()) + "  v" + juce::String(msg.getVelocity());
+                else if (msg.isNoteOff())
+                    text = "NoteOff ch" + juce::String(msg.getChannel()) + "  n" + juce::String(msg.getNoteNumber());
+                else if (msg.isController())
+                    text = "CC  ch" + juce::String(msg.getChannel()) + "  #" + juce::String(msg.getControllerNumber()) + "=" + juce::String(msg.getControllerValue());
+                else if (msg.isProgramChange())
+                    text = "PC  ch" + juce::String(msg.getChannel()) + "  p" + juce::String(msg.getProgramChangeNumber());
+                else if (msg.isPitchWheel())
+                    text = "PW  ch" + juce::String(msg.getChannel()) + "  " + juce::String(msg.getPitchWheelValue());
+                else
+                    text = "0x" + juce::String::toHexString(msg.getRawData(), juce::jmin(3, msg.getRawDataSize()));
+                const float alpha = 0.35f + 0.65f * (static_cast<float>(i) / static_cast<float>(juce::jmax(1, snapshot.size() - 1)));
+                g.setColour(juce::Colours::white.withAlpha(alpha));
+                g.drawText(text, area.removeFromTop(13), juce::Justification::centredLeft, true);
+            }
+        }
+    }
+
+    void openMidiInputs()
+    {
+        for (const auto& info : juce::MidiInput::getAvailableDevices())
+        {
+            if (auto dev = juce::MidiInput::openDevice(info.identifier, this))
+            {
+                dev->start();
+                midiInputs.push_back(std::move(dev));
+            }
+        }
+    }
+
+    bool isDeviceOpen(const juce::String& identifier) const
+    {
+        for (const auto& m : midiInputs)
+            if (m->getIdentifier() == identifier)
+                return true;
+        return false;
+    }
+
+    void timerCallback() override { repaint(); }
+
+    void handleIncomingMidiMessage(juce::MidiInput* input, const juce::MidiMessage& msg) override
+    {
+        if (input != nullptr)
+            midiActivitySeconds[input->getIdentifier()] = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        const juce::ScopedLock sl(logLock);
+        midiLog.add(msg);
+        if (midiLog.size() > 12)
+            midiLog.remove(0);
+    }
+
+    PanelTabStrip tabStrip;
+    juce::Viewport mixViewport;
+    juce::Component mixContent;
+    std::vector<std::unique_ptr<CompactMixStrip>> mixStrips;
+    juce::Component* fxContent { nullptr };
+    int activeTabIndex { 0 };
+    te::Engine& engine;
+    std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
+    std::map<juce::String, double> midiActivitySeconds;
+    juce::CriticalSection logLock;
+    juce::Array<juce::MidiMessage> midiLog;
 };
 
 class WorkspaceShellComponent::TimelineShell final : public juce::Component
@@ -2150,8 +2318,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
 
     addAndMakeVisible(topStrip);
 
-    inPanel = new InDevicePanel(
-        engineRef,
+    leftZone = new LeftInstrumentPanel(
         [this]() { return grabSamplerQueue.get(); },
         [this]() -> const model::Song* { return &songState; },
         {
@@ -2185,7 +2352,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
                     });
             }
         });
-    addAndMakeVisible(inPanel);
+    addAndMakeVisible(leftZone);
 
     workPanel = new LabelPanel(
         "WORK",
@@ -2322,8 +2489,8 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
         ensureInstrumentSlots();
         applyPersistedInstrumentSlotAssignments();
 
-        outPanelHost = std::make_unique<OutPanelHost>();
-        addAndMakeVisible(*outPanelHost);
+        rightZone = std::make_unique<RightOutputPanel>(engineRef);
+        addAndMakeVisible(*rightZone);
 
         if (auto midiTracks = trackManager->getMidiTracks(); !midiTracks.isEmpty())
         {
@@ -2336,7 +2503,7 @@ WorkspaceShellComponent::WorkspaceShellComponent(te::Engine& engine)
             }
         }
 
-        rebuildOutPanelStrips();
+        rebuildLeftInstrumentStrips();
 
         timelineTracks = new setle::timeline::TimelineTracksComponent(*edit, *trackManager);
         timelineTracks->setVisibleBeatRange(0.0, 32.0);
@@ -2559,13 +2726,13 @@ void WorkspaceShellComponent::applyFocusMode(FocusMode mode)
 
     if (focusMode == FocusMode::inFocused)
     {
-        leftPanelWidth = static_cast<int>(topWidth * 0.34f);
+        leftPanelWidth = static_cast<int>(topWidth * 0.60f);
         rightPanelWidth = static_cast<int>(topWidth * 0.08f);
     }
     else if (focusMode == FocusMode::outFocused)
     {
         leftPanelWidth = static_cast<int>(topWidth * 0.08f);
-        rightPanelWidth = static_cast<int>(topWidth * 0.34f);
+        rightPanelWidth = static_cast<int>(topWidth * 0.40f);
     }
     else
     {
@@ -2704,22 +2871,20 @@ void WorkspaceShellComponent::configureTheoryEditorPanel()
     };
 
     // ---- Tab strip ----
-    for (auto* btn : { &workTabTheoryButton, &workTabGridRollButton, &workTabFxButton })
+    for (auto* btn : { &workTabTheoryButton, &workTabGridRollButton })
     {
         btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white.withAlpha(0.9f));
         workPanel->addAndMakeVisible(*btn);
     }
     workTabTheoryButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c4a67)); // default active
     workTabGridRollButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
-    workTabFxButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3040));
     workTabTheoryButton.onClick   = [this] { switchWorkTab(0); };
     workTabGridRollButton.onClick  = [this] { switchWorkTab(1); };
-    workTabFxButton.onClick        = [this] { switchWorkTab(2); };
 
     // Create EffBuilderComponent
     effBuilderComponent = std::make_unique<setle::eff::EffBuilderComponent>();
-    workPanel->addAndMakeVisible(*effBuilderComponent);
-    effBuilderComponent->setVisible(false);
+    if (rightZone != nullptr)
+        rightZone->setFxContent(effBuilderComponent.get());
 
     // gridRollComponent is created later in the constructor after edit is initialised
 }
@@ -2738,37 +2903,6 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
         gridRollComponent->setVisible(tabIndex == 1);
     }
 
-    if (effBuilderComponent != nullptr)
-    {
-        effBuilderComponent->setVisible(tabIndex == 2);
-
-        if (tabIndex == 2)
-        {
-            // Wire up the first available active slot's eff processor
-            for (auto& [trackId, slot] : instrumentSlots)
-            {
-                if (slot != nullptr && slot->getInfo().isActive)
-                {
-                    selectedFxTrackId = trackId;
-                    auto* proc = slot->getEffProcessor();
-                    if (proc == nullptr)
-                    {
-                        // Create an empty chain for this track on first visit
-                        setle::eff::EffDefinition emptyDef;
-                        emptyDef.effId    = juce::Uuid().toString();
-                        emptyDef.name     = "Track FX";
-                        emptyDef.schemaVersion = 1;
-                        slot->loadEffChain(emptyDef);
-                        proc = slot->getEffProcessor();
-                    }
-                    const auto effFile = getEffFileForTrack(trackId);
-                    effBuilderComponent->loadDefinition(proc, proc->getDefinition(), effFile);
-                    break;
-                }
-            }
-        }
-    }
-
     // Update tab button visual state
     const auto activeCol   = juce::Colour(0xff2c4a67);
     const auto inactiveCol = juce::Colour(0xff2a3040);
@@ -2776,8 +2910,6 @@ void WorkspaceShellComponent::switchWorkTab(int tabIndex)
                                    tabIndex == 0 ? activeCol : inactiveCol);
     workTabGridRollButton.setColour(juce::TextButton::buttonColourId,
                                     tabIndex == 1 ? activeCol : inactiveCol);
-    workTabFxButton.setColour(juce::TextButton::buttonColourId,
-                               tabIndex == 2 ? activeCol : inactiveCol);
     resized();
 }
 
@@ -3411,7 +3543,7 @@ void WorkspaceShellComponent::refreshTimelineData()
         timelineTracks->refreshTracks();
 
     ensureInstrumentSlots();
-    rebuildOutPanelStrips();
+    rebuildLeftInstrumentStrips();
 
     const auto sections = songState.getSections();
     const auto progressions = songState.getProgressions();
@@ -3680,12 +3812,12 @@ void WorkspaceShellComponent::persistInstrumentSlotAssignments()
     root.appendChild(container, nullptr);
 }
 
-void WorkspaceShellComponent::rebuildOutPanelStrips()
+void WorkspaceShellComponent::rebuildLeftInstrumentStrips()
 {
-    if (outPanelHost == nullptr || trackManager == nullptr)
+    if (leftZone == nullptr || trackManager == nullptr)
         return;
 
-    outPanelHost->rebuild(
+    leftZone->rebuild(
         trackManager->getAllUserTracks(),
         instrumentSlots,
         [this](const juce::String& trackId, setle::instruments::InstrumentSlot::SlotType type)
@@ -3705,7 +3837,7 @@ void WorkspaceShellComponent::rebuildOutPanelStrips()
             }
 
             persistInstrumentSlotAssignments();
-            rebuildOutPanelStrips();
+            rebuildLeftInstrumentStrips();
         },
         [this]()
         {
@@ -3742,7 +3874,7 @@ void WorkspaceShellComponent::rebuildOutPanelStrips()
 
             it->second->loadVST3(vst3Descs[static_cast<size_t>(chosen - 1)]);
             persistInstrumentSlotAssignments();
-            rebuildOutPanelStrips();
+            rebuildLeftInstrumentStrips();
         },
         [this](const juce::String& trackId, const juce::String& deviceIdentifier)
         {
@@ -3752,8 +3884,10 @@ void WorkspaceShellComponent::rebuildOutPanelStrips()
 
             it->second->loadMidiOut(deviceIdentifier);
             persistInstrumentSlotAssignments();
-            rebuildOutPanelStrips();
+            rebuildLeftInstrumentStrips();
         });
+    if (rightZone != nullptr)
+        rightZone->rebuildMixStrips(trackManager->getAllUserTracks(), instrumentSlots);
 }
 
 void WorkspaceShellComponent::applyDrumPatternToSlots(const std::vector<setle::gridroll::GridRollCell>& cells,
@@ -5501,8 +5635,8 @@ void WorkspaceShellComponent::timerCallback()
 
 void WorkspaceShellComponent::updateInPanelQueueView()
 {
-    if (auto* panel = dynamic_cast<InDevicePanel*>(inPanel))
-        panel->repaint();
+    if (leftZone != nullptr)
+        leftZone->repaint();
 }
 
 void WorkspaceShellComponent::playQueueSlot(int slotIndex)
@@ -5831,14 +5965,14 @@ void WorkspaceShellComponent::resized()
     clampLayoutValues(bounds.getWidth(), bounds.getHeight() + timelineHeight);
 
     auto inArea = bounds.removeFromLeft(leftPanelWidth);
-    inPanel->setBounds(inArea);
+    leftZone->setBounds(inArea);
 
     auto leftSplitterArea = bounds.removeFromLeft(splitterThickness);
     leftResizeBar->setBounds(leftSplitterArea);
 
     auto outArea = bounds.removeFromRight(rightPanelWidth);
-    if (outPanelHost != nullptr)
-        outPanelHost->setBounds(outArea);
+    if (rightZone != nullptr)
+        rightZone->setBounds(outArea);
 
     auto rightSplitterArea = bounds.removeFromRight(splitterThickness);
     rightResizeBar->setBounds(rightSplitterArea);
@@ -5851,7 +5985,6 @@ void WorkspaceShellComponent::resized()
         auto tabRow = workLocal.removeFromTop(28);
         workTabTheoryButton.setBounds(tabRow.removeFromLeft(120).reduced(2, 2));
         workTabGridRollButton.setBounds(tabRow.removeFromLeft(100).reduced(2, 2));
-        workTabFxButton.setBounds(tabRow.removeFromLeft(60).reduced(2, 2));
     }
     workLocal.removeFromTop(6); // gap between tabs and content
 
@@ -5860,9 +5993,6 @@ void WorkspaceShellComponent::resized()
 
     if (gridRollComponent != nullptr)
         gridRollComponent->setBounds(editorBounds);
-
-    if (effBuilderComponent != nullptr)
-        effBuilderComponent->setBounds(editorBounds);
 
     auto panelBounds = theoryEditorPanel.getLocalBounds().reduced(10);
 

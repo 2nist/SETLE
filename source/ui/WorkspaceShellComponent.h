@@ -45,10 +45,11 @@ public:
 
 private:
     class LabelPanel;
-    class OutPanelHost;
+    class PanelTabStrip;
+    class LeftInstrumentPanel;
+    class RightOutputPanel;
     class TimelineShell;
     class DragBar;
-    class InDevicePanel;
 
     enum class TheoryMenuTarget
     {
@@ -109,7 +110,7 @@ private:
     void updateUndoRedoButtonState();
     void configureTheoryEditorPanel();
     void openTheoryEditor(TheoryMenuTarget target, int actionId, const juce::String& actionName);
-    void switchWorkTab(int tabIndex); // 0=Theory, 1=GridRoll, 2=FX
+    void switchWorkTab(int tabIndex); // 0=Theory, 1=GridRoll
     void switchWorkTab(bool showGridRoll) { switchWorkTab(showGridRoll ? 1 : 0); }
     void populateTheoryObjectSelector();
     void populateTheoryFieldsForCurrentSelection();
@@ -134,7 +135,7 @@ private:
     void ensureInstrumentSlots();
     void applyPersistedInstrumentSlotAssignments();
     void persistInstrumentSlotAssignments();
-    void rebuildOutPanelStrips();
+    void rebuildLeftInstrumentStrips();
     void applyDrumPatternToSlots(const std::vector<setle::gridroll::GridRollCell>& cells,
                                  const juce::String& progressionId);
     juce::String getTrackIdForTrack(const te::Track& track) const;
@@ -155,9 +156,9 @@ private:
     std::unique_ptr<te::Edit> edit;
 
     juce::Component topStrip;
-    juce::Component* inPanel;
+    LeftInstrumentPanel* leftZone;
     LabelPanel* workPanel;
-    std::unique_ptr<OutPanelHost> outPanelHost;
+    std::unique_ptr<RightOutputPanel> rightZone;
     TimelineShell* timelineShell;
     setle::timeline::TimelineTracksComponent* timelineTracks { nullptr };
     std::unique_ptr<ToolPaletteComponent> toolPalette;
@@ -236,8 +237,7 @@ private:
     juce::TextButton reloadTheoryEditorButton { "Reload" };
     juce::TextButton workTabTheoryButton   { "Theory Editor" };
     juce::TextButton workTabGridRollButton { "GridRoll" };
-    juce::TextButton workTabFxButton       { "FX" };
-    int workPanelTabIndex { 0 };  // 0=Theory, 1=GridRoll, 2=FX
+    int workPanelTabIndex { 0 };  // 0=Theory, 1=GridRoll
     bool workPanelShowGridRoll { false };
     std::unique_ptr<ProgressionLibraryBrowser> libraryBrowser;
     std::unique_ptr<ProgressionChordPalette> chordPalette;
